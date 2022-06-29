@@ -226,3 +226,16 @@ cc_fuzz_test(
         "@llvm-project//llvm:Support",
     ],
 )
+
+cc_binary(
+    name = "tokenized_buffer_benchmark",
+    srcs = ["tokenized_buffer_benchmark.cpp"],
+    deps = [
+        ":tokenized_buffer",
+        "//toolchain/diagnostics:diagnostic_emitter",
+        "//toolchain/diagnostics:null_diagnostics",
+        "//common:check",
+        "@llvm-project//llvm:Support",
+        "@com_github_google_benchmark//:benchmark",
+    ],
+)
