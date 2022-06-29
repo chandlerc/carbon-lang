@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" height="512px" width="512px">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400');
+    </style>
+  </defs>
+  <rect x="46px" y="10px" rx="16px" width="420px" height="490px"
+      fill="#d6d6d6"
+      stroke="#888"
+      stroke-width="16px"
+      />
+  <text x="160px" y="460px"
+      fill="#444"
+      font-family="Roboto Mono" font-size="480px" letter-spacing="24px">
+    C
+  </text>
+  <text x="64px" y="24px" dominant-baseline="hanging"
+      fill="#888"
+      font-family="Roboto Mono" font-size="112px">
+    6
+  </text>
+</svg>

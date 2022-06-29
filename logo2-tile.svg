@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" height="512px" width="512px">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@700');
+    </style>
+  </defs>
+  <circle cx="255px" cy="255px" r="220px"
+      fill="#d6d6d6" stroke="#888" stroke-width="16px"
+      />
+  <circle cx="255px" cy="255px" r="148px"
+      fill="none" stroke="#888" stroke-width="16px"
+      />
+  <circle cx="255px" cy="37px"  r="32px" fill="#888"/>
+  <circle cx="255px" cy="474px" r="32px" fill="#888"/>
+  <circle cx="37px"  cy="255px" r="32px" fill="#888"/>
+  <circle cx="474px" cy="255px" r="32px" fill="#888"/>
+  <circle cx="109px"  cy="255px" r="32px" fill="#888"/>
+  <circle cx="402px" cy="255px" r="32px" fill="#888"/>
+  <text x="255px" y="248px" text-anchor="middle" dominant-baseline="central"
+      fill="#444" font-family="Roboto Mono" font-weight="700" font-size="280px">
+    C
+  </text>
+</svg>
