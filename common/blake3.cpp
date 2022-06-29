@@ -27,11 +27,9 @@ struct ChunkState {
   int64_t block_length;
   int64_t blocks_compressed;
   uint32_t flags;
-
-  
 };
 
-}
+}  // namespace
 
 auto Blake3Hash::Hash(llvm::StringRef /*data*/) -> Blake3Hash {
   return {0, 0, 0, 0, 0, 0, 0, 0};
