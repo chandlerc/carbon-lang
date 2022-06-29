@@ -1,0 +1,37 @@
+# Part of the Carbon Language project, under the Apache License v2.0 with LLVM
+# Exceptions. See /LICENSE for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: discord-issues-unlabeled
+
+on:
+  issues:
+    types: unlabeled
+
+jobs:
+  discord-issues-labeled:
+    runs-on: ubuntu-latest
+    env:
+      # Create the body of our webhook in an environment variable so we can use
+      # it with different hooks for different labels below.
+      DEFAULT_BODY: >
+        { 
+          "content": "${{ github.event.issue.html_url }} removed label: ${{ github.event.label.name }}",
+          "embeds": [
+            {
+              "title": "${{ github.event.issue.title }}",
+              "url": "${{ github.event.issue.html_url }}",
+              "author": {
+                  "name": "@${{ github.event.issue.user.login }}",
+                  "url": "${{ github.event.issue.user.html_url }}"
+              },
+              "description": "${{ github.event.issue.body }}"
+            }
+          ]
+        }
+    steps:
+      - uses: joelwmale/webhook-action@2.1.0
+        if: github.event.label.name == 'bug'
+        with:
+          url: ${{ secrets.DISCORD_DECISIONS_CHANNEL }}
+          body: ${{ env['DEFAULT_BODY'] }}

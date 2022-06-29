@@ -1,0 +1,33 @@
+# Part of the Carbon Language project, under the Apache License v2.0 with LLVM
+# Exceptions. See /LICENSE for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: discord-issues-opened
+
+on:
+  issues:
+    types: opened
+
+jobs:
+  discord-issues-labeled:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: joelwmale/webhook-action@2.1.0
+        if: contains(github.event.issue.labels.*.name, 'bug')
+        with:
+          url: ${{ secrets.DISCORD_ISSUES_CHANNEL }}
+          body: >
+            { 
+              "content": "${{ github.event.issue.html_url }} opened",
+              "embeds": [
+                {
+                  "title": "${{ github.event.issue.title }}",
+                  "url": "${{ github.event.issue.html_url }}",
+                  "author": {
+                      "name": "@${{ github.event.issue.user.login }}",
+                      "url": "${{ github.event.issue.user.html_url }}"
+                  },
+                  "description": "${{ github.event.issue.body }}"
+                }
+              ]
+            }
