@@ -42,6 +42,13 @@ void Statement::PrintDepth(int depth, llvm::raw_ostream& out) const {
       while_stmt.body().PrintDepth(depth - 1, out);
       break;
     }
+    case StatementKind::For: {
+      const auto& for_stmt = cast<For>(*this);
+      out << "for (" << for_stmt.variable_declaration() << " in "
+          << for_stmt.loop_target() << ")\n";
+      for_stmt.body().PrintDepth(depth - 1, out);
+      break;
+    }
     case StatementKind::Break:
       out << "break;";
       break;
@@ -50,7 +57,14 @@ void Statement::PrintDepth(int depth, llvm::raw_ostream& out) const {
       break;
     case StatementKind::VariableDefinition: {
       const auto& var = cast<VariableDefinition>(*this);
-      out << "var " << var.pattern() << " = " << var.init() << ";";
+      if (var.is_returned()) {
+        out << "returned ";
+      }
+      out << "var " << var.pattern();
+      if (var.has_init()) {
+        out << " = " << var.init();
+      }
+      out << ";";
       break;
     }
     case StatementKind::ExpressionStatement:
@@ -71,8 +85,12 @@ void Statement::PrintDepth(int depth, llvm::raw_ostream& out) const {
       }
       break;
     }
-    case StatementKind::Return: {
-      const auto& ret = cast<Return>(*this);
+    case StatementKind::ReturnVar: {
+      out << "return var;";
+      break;
+    }
+    case StatementKind::ReturnExpression: {
+      const auto& ret = cast<ReturnExpression>(*this);
       if (ret.is_omitted_expression()) {
         out << "return;";
       } else {

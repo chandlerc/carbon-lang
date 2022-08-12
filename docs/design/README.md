@@ -6,6 +6,9 @@ Exceptions. See /LICENSE for license information.
 SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 -->
 
+> **STATUS:** Up-to-date on 09-Aug-2022, including proposals up through
+> [#1327](https://github.com/carbon-language/carbon-lang/pull/1327).
+
 <!-- toc -->
 
 ## Table of contents
@@ -24,6 +27,7 @@ SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
         -   [Floating-point literals](#floating-point-literals)
     -   [String types](#string-types)
         -   [String literals](#string-literals)
+-   [Value categories and value phases](#value-categories-and-value-phases)
 -   [Composite types](#composite-types)
     -   [Tuples](#tuples)
     -   [Struct types](#struct-types)
@@ -40,6 +44,7 @@ SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
     -   [Variable `var` declarations](#variable-var-declarations)
     -   [`auto`](#auto)
 -   [Functions](#functions)
+    -   [Parameters](#parameters)
     -   [`auto` return type](#auto-return-type)
     -   [Blocks and statements](#blocks-and-statements)
     -   [Assignment statements](#assignment-statements)
@@ -61,15 +66,22 @@ SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
         -   [Inheritance](#inheritance)
         -   [Access control](#access-control)
         -   [Destructors](#destructors)
+        -   [`const`](#const)
+        -   [Unformed state](#unformed-state)
+        -   [Move](#move)
+        -   [Mixins](#mixins)
     -   [Choice types](#choice-types)
 -   [Names](#names)
-    -   [Packages, libraries, namespaces](#packages-libraries-namespaces)
-    -   [Legal names](#legal-names)
+    -   [Files, libraries, packages](#files-libraries-packages)
+    -   [Package declaration](#package-declaration)
+    -   [Imports](#imports)
+    -   [Name visibility](#name-visibility)
+    -   [Package scope](#package-scope)
+    -   [Namespaces](#namespaces)
     -   [Naming conventions](#naming-conventions)
     -   [Aliases](#aliases)
     -   [Name lookup](#name-lookup)
         -   [Name lookup for common types](#name-lookup-for-common-types)
-    -   [Name visibility](#name-visibility)
 -   [Generics](#generics)
     -   [Checked and template parameters](#checked-and-template-parameters)
     -   [Interfaces and implementations](#interfaces-and-implementations)
@@ -96,13 +108,15 @@ SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
     -   [Enums](#enums)
 -   [Unfinished tales](#unfinished-tales)
     -   [Safety](#safety)
-    -   [Pattern matching as function overload resolution](#pattern-matching-as-function-overload-resolution)
     -   [Lifetime and move semantics](#lifetime-and-move-semantics)
     -   [Metaprogramming](#metaprogramming)
+    -   [Pattern matching as function overload resolution](#pattern-matching-as-function-overload-resolution)
+    -   [Error handling](#error-handling)
     -   [Execution abstractions](#execution-abstractions)
         -   [Abstract machine and execution model](#abstract-machine-and-execution-model)
         -   [Lambdas](#lambdas)
         -   [Co-routines](#co-routines)
+        -   [Concurrency](#concurrency)
 
 <!-- tocstop -->
 
@@ -123,6 +137,7 @@ This document includes much that is provisional or placeholder. This means that
 the syntax used, language rules, standard library, and other aspects of the
 design have things that have not been decided through the Carbon process. This
 preliminary material fills in gaps until aspects of the design can be filled in.
+Features that are provisional have been marked as such on a best-effort basis.
 
 ## Hello, Carbon
 
@@ -145,14 +160,16 @@ fn Fibonacci(limit: i64) {
 ```
 
 Carbon is a language that should feel familiar to C++ and C developers. This
-example has familiar constructs like imports, function definitions, typed
-arguments, and curly braces.
+example has familiar constructs like [imports](#imports),
+[function definitions](#functions), [typed arguments](#binding-patterns), and
+[curly braces](#blocks-and-statements).
 
-A few other features that are unlike C or C++ may stand out. First, declarations
-start with introducer keywords. `fn` introduces a function declaration, and
-`var` introduces a variable declaration. You can also see a _tuple_, a composite
-type written as a comma-separated list inside parentheses. Unlike, say, Python,
-these types are strongly-typed as well.
+A few other features that are unlike C or C++ may stand out. First,
+[declarations](#declarations-definitions-and-scopes) start with introducer
+keywords. `fn` introduces a function declaration, and `var` introduces a
+[variable declaration](#variable-var-declarations). You can also see a
+[_tuple_](#tuples), a composite type written as a comma-separated list inside
+parentheses. Unlike, say, Python, these types are strongly-typed as well.
 
 ## Code and comments
 
@@ -226,8 +243,7 @@ and [`while`](#while), and
 
 The signed-integer type with bit width `N` may be written `Carbon.Int(N)`. For
 convenience and brevity, the common power-of-two sizes may be written with an
-`i` followed by the size: `i8`, `i16`, `i32`, `i64`, `i128`, or `i256`.
-Signed-integer
+`i` followed by the size: `i8`, `i16`, `i32`, `i64`, or `i128`. Signed-integer
 [overflow](expressions/arithmetic.md#overflow-and-other-error-conditions) is a
 programming error:
 
@@ -241,7 +257,7 @@ programming error:
     to a mathematically incorrect result, such as a two's complement result or
     zero.
 
-The unsigned-integer types are: `u8`, `u16`, `u32`, `u64`, `u128`, `u256`, and
+The unsigned-integer types are: `u8`, `u16`, `u32`, `u64`, `u128`, and
 `Carbon.UInt(N)`. Unsigned integer types wrap around on overflow, we strongly
 advise that they are not used except when those semantics are desired. These
 types are intended for bit manipulation or modular arithmetic as often found in
@@ -335,6 +351,9 @@ selected.
 
 ### String types
 
+> **Note:** This is provisional, no design for string types has been through the
+> proposal process yet.
+
 There are two string types:
 
 -   `String` - a byte sequence treated as containing UTF-8 encoded text.
@@ -376,6 +395,54 @@ are available for representing strings with `\`s and `"`s.
 > -   Proposal
 >     [#199: String literals](https://github.com/carbon-language/carbon-lang/pull/199)
 
+## Value categories and value phases
+
+Every value has a
+[value category](<https://en.wikipedia.org/wiki/Value_(computer_science)#lrvalue>),
+similar to [C++](https://en.cppreference.com/w/cpp/language/value_category),
+that is either _l-value_ or _r-value_. Carbon will automatically convert an
+l-value to an r-value, but not in the other direction.
+
+L-values have storage and a stable address. They may be modified, assuming their
+type is not [`const`](#const).
+
+R-values may not have dedicated storage. This means they cannot be modified and
+their address generally cannot be taken. R-values are broken down into three
+kinds, called _value phases_:
+
+-   A _constant_ has a value known at compile time, and that value is available
+    during type checking, for example to use as the size of an array. These
+    include literals ([integer](#integer-literals),
+    [floating-point](#floating-point-literals), [string](#string-literals)),
+    concrete type values (like `f64` or `Optional(i32*)`), expressions in terms
+    of constants, and values of
+    [`template` parameters](#checked-and-template-parameters).
+-   A _symbolic value_ has a value that will be known at the code generation
+    stage of compilation when
+    [monomorphization](https://en.wikipedia.org/wiki/Monomorphization) happens,
+    but is not known during type checking. This includes
+    [checked-generic parameters](#checked-and-template-parameters), and type
+    expressions with checked-generic arguments, like `Optional(T*)`.
+-   A _runtime value_ has a dynamic value only known at runtime.
+
+Carbon will automatically convert a constant to a symbolic value, or any value
+to a runtime value:
+
+```mermaid
+graph TD;
+    A(constant)-->B(symbolic value)-->C(runtime value);
+    D(l-value)-->C;
+```
+
+Constants convert to symbolic values and to runtime values. Symbolic values will
+generally convert into runtime values if an operation that inspects the value is
+performed on them. Runtime values will convert into constants or to symbolic
+values if constant evaluation of the runtime expression succeeds.
+
+> **Note:** Conversion of runtime values to other phases is provisional, as are
+> the semantics of r-values. See pending proposal
+> [#821: Values, variables, pointers, and references](https://github.com/carbon-language/carbon-lang/pull/821).
+
 ## Composite types
 
 ### Tuples
@@ -411,6 +478,10 @@ fn DoubleTuple(x: (i32, i32)) -> (i32, i32) {
 
 Tuple types are
 [structural](https://en.wikipedia.org/wiki/Structural_type_system).
+
+> **Note:** This is provisional, no design for tuples has been through the
+> proposal process yet. Many of these questions were discussed in dropped
+> proposal [#111](https://github.com/carbon-language/carbon-lang/pull/111).
 
 > References: [Tuples](tuples.md)
 
@@ -449,22 +520,22 @@ not support
 the only pointer [operations](#expressions) are:
 
 -   Dereference: given a pointer `p`, `*p` gives the value `p` points to as an
-    [l-value](<https://en.wikipedia.org/wiki/Value_(computer_science)#lrvalue>).
-    `p->m` is syntactic sugar for `(*p).m`.
--   Address-of: given an
-    [l-value](<https://en.wikipedia.org/wiki/Value_(computer_science)#lrvalue>)
-    `x`, `&x` returns a pointer to `x`.
+    [l-value](#value-categories-and-value-phases). `p->m` is syntactic sugar for
+    `(*p).m`.
+-   Address-of: given an [l-value](#value-categories-and-value-phases) `x`, `&x`
+    returns a pointer to `x`.
 
 There are no [null pointers](https://en.wikipedia.org/wiki/Null_pointer) in
 Carbon. To represent a pointer that may not refer to a valid object, use the
 type `Optional(T*)`.
 
-Pointers are the main Carbon mechanism for allowing a function to modify a
-variable of the caller.
-
 **TODO:** Perhaps Carbon will have
 [stricter pointer provenance](https://www.ralfj.de/blog/2022/04/11/provenance-exposed.html)
 or restrictions on casts between pointers and integers.
+
+> **Note:** While the syntax for pointers has been decided, the semantics of
+> pointers are provisional, as is the syntax for optionals. See pending proposal
+> [#821: Values, variables, pointers, and references](https://github.com/carbon-language/carbon-lang/pull/821).
 
 > References:
 >
@@ -496,6 +567,10 @@ Console.Print(a[0]);
 ```
 
 > **TODO:** Slices
+
+> **Note:** This is provisional, no design for arrays has been through the
+> proposal process yet. See pending proposal
+> [#1928: Arrays](https://github.com/carbon-language/carbon-lang/pull/1928).
 
 ## Expressions
 
@@ -529,6 +604,7 @@ Some common expressions in Carbon include:
     -   [Indexing](#arrays-and-slices): `a[3]`
     -   [Function](#functions) call: `f(4)`
     -   [Pointer](#pointer-types): `*p`, `p->m`, `&x`
+    -   [Move](#move): `~x`
 
 -   [Conditionals](expressions/if.md): `if c then t else f`
 -   Parentheses: `(7 + 8) * (3 - 1)`
@@ -561,20 +637,45 @@ are applied to convert the expression to the target type.
 
 _Declarations_ introduce a new [name](#names) and say what that name represents.
 For some kinds of entities, like [functions](#functions), there are two kinds of
-declarations: _forward declarations_ and _definitions_. In this case, there
-should be exactly one definition for the name, but there can be additional
-forward declarations that introduce the name before it is defined. Forward
-declarations allow cyclic references, and can be used to declare a name in an
-[api file](#packages-libraries-namespaces) that is defined in an
-[impl file](#packages-libraries-namespaces). A name that has been declared but
-not defined is called _incomplete_, and in some cases there are limitations on
-what can be done with an incomplete name.
+declarations: _forward declarations_ and _definitions_. For those entities,
+there should be exactly one definition for the name, and at most one additional
+forward declaration that introduces the name before it is defined, plus any
+number of declarations in a
+[`match_first` block](generics/details.md#prioritization-rule). Forward
+declarations can be used to separate interface from implementation, such as to
+declare a name in an [api file](#files-libraries-packages) that is defined in an
+[impl file](#files-libraries-packages). Forward declarations also allow entities
+to be used before they are defined, such as to allow cyclic references. A name
+that has been declared but not defined is called _incomplete_, and in some cases
+there are limitations on what can be done with an incomplete name. Within a
+definition, the defined name is incomplete until the end of the definition is
+reached, but is complete in the bodies of member functions because they are
+[parsed as if they appeared after the definition](#class-functions-and-factory-functions).
 
 A name is valid until the end of the innermost enclosing
-[_scope_](<https://en.wikipedia.org/wiki/Scope_(computer_science)>). Except for
-the outermost scope, scopes are enclosed in curly braces (`{`...`}`).
+[_scope_](<https://en.wikipedia.org/wiki/Scope_(computer_science)>). There are a
+few kinds of scopes:
+
+-   the outermost scope, which includes the whole file,
+-   scopes that are enclosed in curly braces (`{`...`}`), and
+-   scopes that encompass a single declaration.
+
+For example, the names of the parameters of a [function](#functions) or
+[class](#classes) are valid until the end of the declaration. The name of the
+function or class itself is visible until the end of the enclosing scope.
+
+> References:
+>
+> -   [Principle: Information accumulation](/docs/project/principles/information_accumulation.md)
+> -   Proposal
+>     [#875: Principle: information accumulation](https://github.com/carbon-language/carbon-lang/pull/875)
+> -   Question-for-leads issue
+>     [#472: Open question: Calling functions defined later in the same file](https://github.com/carbon-language/carbon-lang/issues/472)
 
 ## Patterns
+
+> **Note:** This is provisional, no design for patterns has been through the
+> proposal process yet.
 
 A _pattern_ says how to receive some data that is being matched against. There
 are two kinds of patterns:
@@ -605,18 +706,30 @@ name. It can only match values that may be
 underscore (`_`) may be used instead of the name to match a value but without
 binding any name to it.
 
-Binding patterns default to _`let` bindings_ except inside a context where the
-`var` keyword is used to make it a _`var` binding_:
+Binding patterns default to _`let` bindings_. The `var` keyword is used to make
+it a _`var` binding_.
 
 -   The result of a `let` binding is the name is bound to an
-    [non-l-value](<https://en.wikipedia.org/wiki/Value_(computer_science)#lrvalue>).
-    This means the value can not be modified, and its address cannot be taken.
+    [r-value](#value-categories-and-value-phases). This means the value cannot
+    be modified, and its address generally cannot be taken.
 -   A `var` binding has dedicated storage, and so the name is an
-    [l-value](<https://en.wikipedia.org/wiki/Value_(computer_science)#lrvalue>)
-    which can be modified and has a stable address.
+    [l-value](#value-categories-and-value-phases) which can be modified and has
+    a stable address.
+
+A `let`-binding may trigger a copy of the original value, or a move if the
+original value is a temporary, or the binding may be a pointer to the original
+value, like a
+[`const` reference in C++](<https://en.wikipedia.org/wiki/Reference_(C%2B%2B)>).
+Which of these options (copy, move, or pointer) is selected must not be
+observable to the programmer. For example, Carbon will not allow modifications
+to the original value when it is through a pointer. This choice may also be
+influenced by the type. For example, types that don't support being copied will
+be passed by pointer instead.
 
 A [generic binding](#checked-and-template-parameters) uses `:!` instead of a
-colon (`:`) and can only match compile-time values.
+colon (`:`) and can only match
+[constant or symbolic values](#value-categories-and-value-phases), not run-time
+values.
 
 The keyword `auto` may be used in place of the type in a binding pattern, as
 long as the type can be deduced from the type of a value in the same
@@ -692,21 +805,23 @@ Here `x: i64` is the pattern, which is followed by an equal sign (`=`) and the
 value to match, `42`. The names from [binding patterns](#binding-patterns) are
 introduced into the enclosing [scope](#declarations-definitions-and-scopes).
 
+> **Note:** `let` declarations are provisional. See pending proposal
+> [#821: Values, variables, pointers, and references](https://github.com/carbon-language/carbon-lang/pull/821).
+
 ### Variable `var` declarations
 
 A `var` declaration is similar, except with `var` bindings, so `x` here is an
-[l-value](<https://en.wikipedia.org/wiki/Value_(computer_science)#lrvalue>) with
-storage and an address, and so may be modified:
+[l-value](#value-categories-and-value-phases) with storage and an address, and
+so may be modified:
 
 ```carbon
 var x: i64 = 42;
 x = 7;
 ```
 
-Variables with a type that has
-[an unformed state](https://github.com/carbon-language/carbon-lang/pull/257) do
-not need to be initialized in the variable declaration, but do need to be
-assigned before they are used.
+Variables with a type that has [an unformed state](#unformed-state) do not need
+to be initialized in the variable declaration, but do need to be assigned before
+they are used.
 
 > References:
 >
@@ -754,8 +869,8 @@ Breaking this apart:
 -   `fn` is the keyword used to introduce a function.
 -   Its name is `Add`. This is the name added to the enclosing
     [scope](#declarations-definitions-and-scopes).
--   The parameter list in parentheses (`(`...`)`) is a comma-separated list of
-    [irrefutable patterns](#patterns).
+-   The [parameter list](#parameters) in parentheses (`(`...`)`) is a
+    comma-separated list of [irrefutable patterns](#patterns).
 -   It returns an `i64` result. Functions that return nothing omit the `->` and
     return type.
 
@@ -771,14 +886,8 @@ fn Add(a: i64, b: i64) -> i64 {
 ```
 
 The names of the parameters are in scope until the end of the definition or
-declaration.
-
-The bindings in the parameter list default to
-[`let` bindings](#binding-patterns), and so the parameter names are treated as
-[r-values](<https://en.wikipedia.org/wiki/Value_(computer_science)#lrvalue>). If
-the `var` keyword is added before the binding, then the arguments will be copied
-to new storage, and so can be mutated in the function body. The copy ensures
-that any mutations will not be visible to the caller.
+declaration. The parameter names in a forward declaration may be omitted using
+`_`, but must match the definition if they are specified.
 
 > References:
 >
@@ -789,6 +898,34 @@ that any mutations will not be visible to the caller.
 >     [#438: Add statement syntax for function declarations](https://github.com/carbon-language/carbon-lang/pull/438)
 > -   Question-for-leads issue
 >     [#476: Optional argument names (unused arguments)](https://github.com/carbon-language/carbon-lang/issues/476)
+> -   Question-for-leads issue
+>     [#1132: How do we match forward declarations with their definitions?](https://github.com/carbon-language/carbon-lang/issues/1132)
+
+### Parameters
+
+The bindings in the parameter list default to
+[`let` bindings](#binding-patterns), and so the parameter names are treated as
+[r-values](#value-categories-and-value-phases). This is appropriate for input
+parameters. This binding will be implemented using a pointer, unless it is legal
+to copy and copying is cheaper.
+
+If the `var` keyword is added before the binding, then the arguments will be
+copied (or moved from a temporary) to new storage, and so can be mutated in the
+function body. The copy ensures that any mutations will not be visible to the
+caller.
+
+Use a [pointer](#pointer-types) parameter type to represent an
+[input/output parameter](<https://en.wikipedia.org/wiki/Parameter_(computer_programming)#Output_parameters>),
+allowing a function to modify a variable of the caller's. This makes the
+possibility of those modifications visible: by taking the address using `&` in
+the caller, and dereferencing using `*` in the callee.
+
+Outputs of a function should prefer to be returned. Multiple values may be
+returned using a [tuple](#tuples) or [struct](#struct-types) type.
+
+> **Note:** The semantics of parameter passing are provisional. See pending
+> proposal
+> [#821: Values, variables, pointers, and references](https://github.com/carbon-language/carbon-lang/pull/821).
 
 ### `auto` return type
 
@@ -820,7 +957,7 @@ semicolon or block. [Expressions](#expressions) and
 [`var`](#variable-var-declarations) and [`let`](#constant-let-declarations) are
 valid statements.
 
-Statements within a block are normally executed in the order the appear in the
+Statements within a block are normally executed in the order they appear in the
 source code, except when modified by control-flow statements.
 
 The body of a function is defined by a block, and some
@@ -847,8 +984,8 @@ fn Foo() {
 ### Assignment statements
 
 Assignment statements mutate the value of the
-[l-value](<https://en.wikipedia.org/wiki/Value_(computer_science)#lrvalue>)
-described on the left-hand side of the assignment.
+[l-value](#value-categories-and-value-phases) described on the left-hand side of
+the assignment.
 
 -   Assignment: `x = y;`. `x` is assigned the value of `y`.
 -   Increment and decrement: `++i;`, `--j;`. `i` is set to `i + 1`, `j` is set
@@ -859,6 +996,9 @@ described on the left-hand side of the assignment.
 
 Unlike C++, these assignments are statements, not expressions, and don't return
 a value.
+
+> **Note:** The semantics of assignment are provisional. See pending proposal
+> [#821: Values, variables, pointers, and references](https://github.com/carbon-language/carbon-lang/pull/821).
 
 ### Control flow
 
@@ -955,15 +1095,13 @@ Console.Print("Done!");
 ##### `for`
 
 `for` statements support range-based looping, typically over containers. For
-example, this prints all names in `names`:
+example, this prints each `String` value in `names`:
 
 ```carbon
 for (var name: String in names) {
   Console.Print(name);
 }
 ```
-
-This prints each `String` value in `names`.
 
 > References:
 >
@@ -988,7 +1126,13 @@ for (var step: Step in steps) {
 }
 ```
 
-> References: [`break`](control_flow/loops.md#break)
+> References:
+>
+> -   [`break`](control_flow/loops.md#break)
+> -   Proposal
+>     [#340: Add C++-like `while` loops](https://github.com/carbon-language/carbon-lang/pull/340)
+> -   Proposal
+>     [#353: Add C++-like `for` loops](https://github.com/carbon-language/carbon-lang/pull/353)
 
 ##### `continue`
 
@@ -1008,7 +1152,13 @@ while (!f.EOF()) {
 }
 ```
 
-> References: [`continue`](control_flow/loops.md#continue)
+> References:
+>
+> -   [`continue`](control_flow/loops.md#continue)
+> -   Proposal
+>     [#340: Add C++-like `while` loops](https://github.com/carbon-language/carbon-lang/pull/340)
+> -   Proposal
+>     [#353: Add C++-like `for` loops](https://github.com/carbon-language/carbon-lang/pull/353)
 
 #### `return`
 
@@ -1118,6 +1268,9 @@ fn Foo() -> f32 {
 }
 ```
 
+> **Note:** This is provisional, no design for `match` statements has been
+> through the proposal process yet.
+
 > References:
 >
 > -   [Pattern matching](pattern_matching.md)
@@ -1126,14 +1279,12 @@ fn Foo() -> f32 {
 
 ## User-defined types
 
-> **TODO:** Maybe rename to "nominal types"?
-
 ### Classes
 
 _Nominal classes_, or just
 [_classes_](<https://en.wikipedia.org/wiki/Class_(computer_programming)>), are a
 way for users to define their own
-[data strutures](https://en.wikipedia.org/wiki/Data_structure) or
+[data structures](https://en.wikipedia.org/wiki/Data_structure) or
 [record types](<https://en.wikipedia.org/wiki/Record_(computer_science)>).
 
 This is an example of a class
@@ -1211,7 +1362,9 @@ sprocket = {.x = 2, .y = 1, .payload = "Bounce"};
 
 > References:
 >
-> -   [Classes: Construction](classes.md#construction)
+> -   [Classes: Assignment](classes.md#assignment)
+> -   Proposal
+>     [#722: Nominal classes and methods](https://github.com/carbon-language/carbon-lang/pull/722)
 > -   Proposal
 >     [#981: Implicit conversions for aggregates](https://github.com/carbon-language/carbon-lang/pull/981)
 
@@ -1241,7 +1394,7 @@ class Point {
 Note that if the definition of a function is provided inside the class scope,
 the body is treated as if it was defined immediately after the outermost class
 definition. This means that members such as the fields will be considered
-defined even if their definitions are later in the source than the class
+declared even if their declarations are later in the source than the class
 function.
 
 The [`returned var` feature](#returned-var) can be used if the address of the
@@ -1249,7 +1402,7 @@ instance being created is needed in a factory function, as in:
 
 ```carbon
 class Registered {
-  fn Create() -> Self {
+  fn Make() -> Self {
     returned var result: Self = {...};
     StoreMyPointerSomewhere(&result);
     return var;
@@ -1258,6 +1411,12 @@ class Registered {
 ```
 
 This approach can also be used for types that can't be copied or moved.
+
+> References:
+>
+> -   [Classes: Construction](classes.md#construction)
+> -   Proposal
+>     [#722: Nominal classes and methods](https://github.com/carbon-language/carbon-lang/pull/722)
 
 #### Methods
 
@@ -1269,16 +1428,16 @@ class Point {
   fn Distance[me: Self](x2: i32, y2: i32) -> f32 {
     var dx: i32 = x2 - me.x;
     var dy: i32 = y2 - me.y;
-    return Math.Sqrt(dx * dx - dy * dy);
+    return Math.Sqrt(dx * dx + dy * dy);
   }
-  // Mutating method
+  // Mutating method declaration
   fn Offset[addr me: Self*](dx: i32, dy: i32);
 
   var x: i32;
   var y: i32;
 }
 
-// Out-of-line definition of method declared inline.
+// Out-of-line definition of method declared inline
 fn Point.Offset[addr me: Self*](dx: i32, dy: i32) {
   me->x += dx;
   me->y += dy;
@@ -1296,13 +1455,15 @@ two methods `Distance` and `Offset`:
 -   Methods are defined as class functions with a `me` parameter inside square
     brackets `[`...`]` before the regular explicit parameter list in parens
     `(`...`)`.
--   Methods are called using using the member syntax, `origin.Distance(`...`)`
-    and `origin.Offset(`...`)`.
+-   Methods are called using the member syntax, `origin.Distance(`...`)` and
+    `origin.Offset(`...`)`.
 -   `Distance` computes and returns the distance to another point, without
     modifying the `Point`. This is signified using `[me: Self]` in the method
     declaration.
 -   `origin.Offset(`...`)` does modify the value of `origin`. This is signified
-    using `[addr me: Self*]` in the method declaration.
+    using `[addr me: Self*]` in the method declaration. Since calling this
+    method requires taking the address of `origin`, it may only be called on
+    [non-`const`](#const) [l-values](#value-categories-and-value-phases).
 -   Methods may be declared lexically inline like `Distance`, or lexically out
     of line like `Offset`.
 
@@ -1313,6 +1474,13 @@ two methods `Distance` and `Offset`:
 >     [#722: Nominal classes and methods](https://github.com/carbon-language/carbon-lang/pull/722)
 
 #### Inheritance
+
+The philosophy of inheritance support in Carbon is to focus on use cases where
+inheritance is a good match, and use other features for other cases. For
+example, [mixins](#mixins) for implementation reuse and [generics](#generics)
+for separating interface from implementation. This allows Carbon to move away
+from [multiple inheritance](https://en.wikipedia.org/wiki/Multiple_inheritance),
+which doesn't have as efficient of an implementation strategy.
 
 Classes by default are
 [_final_](<https://en.wikipedia.org/wiki/Inheritance_(object-oriented_programming)#Non-subclassable_classes>),
@@ -1325,8 +1493,8 @@ instantiated.
 base class MyBaseClass { ... }
 ```
 
-Either kind of base class maybe _extended_ to get a _derived class_. Derived
-classes are final unless they are themselved declared `base` or `abstract`.
+Either kind of base class may be _extended_ to get a _derived class_. Derived
+classes are final unless they are themselves declared `base` or `abstract`.
 Classes may only extend a single class. Carbon only supports single inheritance,
 and will use mixins instead of multiple inheritance.
 
@@ -1339,13 +1507,13 @@ class FinalDerived extends MiddleDerived { ... }
 A base class may define
 [virtual methods](https://en.wikipedia.org/wiki/Virtual_function). These are
 methods whose implementation may be overridden in a derived class. By default
-methods are _non-virtual_, the declaration of a virtual methods must be prefixed
+methods are _non-virtual_, the declaration of a virtual method must be prefixed
 by one of these three keywords:
 
 -   A method marked `virtual` has a definition in this class but not in any
     base.
--   A method marked `abstract` does not have have a definition in this class,
-    but must have a definition in any non-`abstract` derived class.
+-   A method marked `abstract` does not have a definition in this class, but
+    must have a definition in any non-`abstract` derived class.
 -   A method marked `impl` has a definition in this class, overriding any
     definition in a base class.
 
@@ -1369,8 +1537,8 @@ called `base` with the type of its immediate base class.
 
 ```carbon
 class MyDerivedType extends MyBaseType {
-  fn Create() -> MyDerivedType {
-    return {.base = MyBaseType.Create(), .derived_field = 7};
+  fn Make() -> MyDerivedType {
+    return {.base = MyBaseType.Make(), .derived_field = 7};
   }
   var derived_field: i32;
 }
@@ -1382,7 +1550,7 @@ functions returning `partial Self`. Those functions should be marked
 
 ```carbon
 abstract class AbstractClass {
-  protected fn Create() -> partial Self {
+  protected fn Make() -> partial Self {
     return {.field_1 = 3, .field_2 = 9};
   }
   // ...
@@ -1393,12 +1561,12 @@ abstract class AbstractClass {
 var abc: AbstractClass = ...;
 
 class DerivedFromAbstract extends AbstractClass {
-  fn Create() -> Self {
-    // AbstractClass.Create() returns a
+  fn Make() -> Self {
+    // AbstractClass.Make() returns a
     // `partial AbstractClass` that can be used as
     // the `.base` member when constructing a value
     // of a derived class.
-    return {.base = AbstractClass.Create(),
+    return {.base = AbstractClass.Make(),
             .derived_field = 42 };
   }
 
@@ -1408,7 +1576,7 @@ class DerivedFromAbstract extends AbstractClass {
 
 > References:
 >
-> -   [Inheritance](classes.md#inheritance)
+> -   [Classes: Inheritance](classes.md#inheritance)
 > -   Proposal
 >     [#777: Inheritance](https://github.com/carbon-language/carbon-lang/pull/777)
 > -   Proposal
@@ -1432,6 +1600,8 @@ names resolvable by the compiler, and don't act like forward declarations.
 > -   [Access control for class members](classes.md#access-control)
 > -   Question-for-leads issue
 >     [#665: `private` vs `public` _syntax_ strategy, as well as other visibility tools like `external`/`api`/etc.](https://github.com/carbon-language/carbon-lang/issues/665)
+> -   Proposal
+>     [#777: Inheritance](https://github.com/carbon-language/carbon-lang/pull/777)
 > -   Question-for-leads issue
 >     [#971: Private interfaces in public API files](https://github.com/carbon-language/carbon-lang/issues/971)
 
@@ -1461,7 +1631,7 @@ The destructor for a class is run before the destructors of its data members.
 The data members are destroyed in reverse order of declaration. Derived classes
 are destroyed before their base classes.
 
-A destructor in a abstract or base class may be declared `virtual` like with
+A destructor in an abstract or base class may be declared `virtual` like with
 [methods](#inheritance). Destructors in classes derived from one with a virtual
 destructor must be declared with the `impl` keyword prefix. It is illegal to
 delete an instance of a derived class through a pointer to a base class unless
@@ -1471,9 +1641,111 @@ type, use `UnsafeDelete`.
 
 > References:
 >
-> -   [Destructors](classes.md#destructors)
+> -   [Classes: Destructors](classes.md#destructors)
 > -   Proposal
 >     [#1154: Destructors](https://github.com/carbon-language/carbon-lang/pull/1154)
+
+#### `const`
+
+> **Note:** This is provisional, no design for `const` has been through the
+> proposal process yet.
+
+For every type `MyClass`, there is the type `const MyClass` such that:
+
+-   The data representation is the same, so a `MyClass*` value may be implicitly
+    converted to a `(const MyClass)*`.
+-   A `const MyClass` [l-value](#value-categories-and-value-phases) may
+    automatically convert to a `MyClass` r-value, the same way that a `MyClass`
+    l-value can.
+-   If member `x` of `MyClass` has type `T`, then member `x` of `const MyClass`
+    has type `const T`.
+-   The API of a `const MyClass` is a subset of `MyClass`, excluding all methods
+    taking `[addr me: Self*]`.
+
+Note that `const` binds more tightly than postfix-`*` for forming a pointer
+type, so `const MyClass*` is equal to `(const MyClass)*`.
+
+This example uses the definition of `Point` from the
+["methods" section](#methods):
+
+```carbon
+var origin: Point = {.x = 0, .y = 0};
+
+// ✅ Allowed conversion from `Point*` to
+// `const Point*`:
+let p: const Point* = &origin;
+
+// ✅ Allowed conversion of `const Point` l-value
+// to `Point` r-value.
+let five: f32 = p->Distance(3, 4);
+
+// ❌ Error: mutating method `Offset` excluded
+// from `const Point` API.
+p->Offset(3, 4);
+
+// ❌ Error: mutating method `AssignAdd.Op`
+// excluded from `const i32` API.
+p->x += 2;
+```
+
+#### Unformed state
+
+Types indicate that they support unformed states by
+[implementing a particular interface](#interfaces-and-implementations),
+otherwise variables of that type must be explicitly initialized when they are
+declared.
+
+An unformed state for an object is one that satisfies the following properties:
+
+-   Assignment from a fully formed value is correct using the normal assignment
+    implementation for the type.
+-   Destruction must be correct using the type's normal destruction
+    implementation.
+-   Destruction must be optional. The behavior of the program must be equivalent
+    whether the destructor is run or not for an unformed object, including not
+    leaking resources.
+
+A type might have more than one in-memory representation for the unformed state,
+and those representations may be the same as valid fully formed values for that
+type. For example, all values are legal representations of the unformed state
+for any type with a trivial destructor like `i32`. Types may define additional
+initialization for the [hardened build mode](#build-modes). For example, this
+causes integers to be set to `0` when in unformed state in this mode.
+
+Any operation on an unformed object _other_ than destruction or assignment from
+a fully formed value is an error, even if its in-memory representation is that
+of a valid value for that type.
+
+> References:
+>
+> -   Proposal
+>     [#257: Initialization of memory and variables](https://github.com/carbon-language/carbon-lang/pull/257)
+
+#### Move
+
+Carbon will allow types to define if and how they are moved. This can happen
+when returning a value from a function or by using the _move operator_ `~x`.
+This leaves `x` in an [unformed state](#unformed-state) and returns its old
+value.
+
+> **Note:** This is provisional. The move operator was discussed but not
+> proposed in accepted proposal
+> [#257: Initialization of memory and variables](https://github.com/carbon-language/carbon-lang/pull/257).
+> See pending proposal
+> [#821: Values, variables, pointers, and references](https://github.com/carbon-language/carbon-lang/pull/821).
+
+#### Mixins
+
+Mixins allow reuse with different trade-offs compared to
+[inheritance](#inheritance). Mixins focus on implementation reuse, such as might
+be done using
+[CRTP](https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern) or
+[multiple inheritance](https://en.wikipedia.org/wiki/Multiple_inheritance) in
+C++.
+
+> **TODO:** The design for mixins is still under development. The details here
+> are provisional. The mixin use case was included in accepted proposal
+> [#561: Basic classes: use cases, struct literals, struct types, and future work](https://github.com/carbon-language/carbon-lang/pull/561).
 
 ### Choice types
 
@@ -1541,34 +1813,218 @@ choice LikeABoolean { False, True }
 
 ## Names
 
-### Packages, libraries, namespaces
+Names are introduced by [declarations](#declarations-definitions-and-scopes) and
+are valid until the end of the scope in which they appear. Code may not refer to
+names earlier in the source than they are declared. In executable scopes such as
+function bodies, names declared later are not found. In declarative scopes such
+as packages, classes, and interfaces, it is an error to refer to names declared
+later, except that inline class member function bodies are
+[parsed as if they appeared after the class](#class-functions-and-factory-functions).
+
+A name in Carbon is formed from a sequence of letters, numbers, and underscores,
+and starts with a letter. We intend to follow
+[Unicode's Annex 31](https://unicode.org/reports/tr31/) in selecting valid
+identifier characters, but a concrete set of valid characters has not been
+selected yet.
+
+> References:
+>
+> -   [Lexical conventions](lexical_conventions)
+> -   [Principle: Information accumulation](/docs/project/principles/information_accumulation.md)
+> -   Proposal
+>     [#142: Unicode source files](https://github.com/carbon-language/carbon-lang/pull/142)
+> -   Question-for-leads issue
+>     [#472: Open question: Calling functions defined later in the same file](https://github.com/carbon-language/carbon-lang/issues/472)
+> -   Proposal
+>     [#875: Principle: information accumulation](https://github.com/carbon-language/carbon-lang/pull/875)
+
+### Files, libraries, packages
 
 -   **Files** are grouped into libraries, which are in turn grouped into
     packages.
 -   **Libraries** are the granularity of code reuse through imports.
 -   **Packages** are the unit of distribution.
 
-Name paths in Carbon always start with the package name. Additional namespaces
-may be specified as desired.
+Each library must have exactly one `api` file. This file includes declarations
+for all public names of the library. Definitions for those declarations must be
+in some file in the library, either the `api` file or an `impl` file.
 
-For example, this code declares a class `Geometry.Shapes.Flat.Circle` in a
-library `Geometry/OneSide`:
+Every package has its own namespace. This means libraries within a package need
+to coordinate to avoid name conflicts, but not across packages.
+
+> References:
+>
+> -   [Code and name organization](code_and_name_organization)
+> -   Proposal
+>     [#107: Code and name organization](https://github.com/carbon-language/carbon-lang/pull/107)
+
+### Package declaration
+
+Files start with an optional package declaration, consisting of:
+
+-   the `package` keyword introducer,
+-   an optional identifier specifying the package name,
+-   optional `library` followed by a string with the library name,
+-   either `api` or `impl`, and
+-   a terminating semicolon (`;`).
+
+For example:
 
 ```carbon
-package Geometry library("OneSide") namespace Shapes;
-
-namespace Flat;
-class Flat.Circle { ... }
+// Package name is `Geometry`.
+// Library name is "Shapes".
+// This file is an `api` file, not an `impl` file.
+package Geometry library "Shapes" api;
 ```
 
-This type can be used from another package:
+Parts of this declaration may be omitted:
+
+-   If the package name is omitted, as in `package library "Main" api;`, the
+    file contributes to the default package. No other package may import from
+    the default package.
+-   If the library keyword is not specified, as in `package Geometry api;`, this
+    file contributes to the default library.
+-   If a file has no package declaration at all, it is the `api` file belonging
+    to the default package and default library. This is particularly for tests
+    and smaller examples. No other library can import this library even from
+    within the default package. It can be split across multiple `impl` files
+    using a `package impl;` package declaration.
+
+A program need not use the default package, but if it does, it should contain
+the entry-point function. By default, the entry-point function is `Run` from the
+default package.
+
+> References:
+>
+> -   [Code and name organization](code_and_name_organization)
+> -   Proposal
+>     [#107: Code and name organization](https://github.com/carbon-language/carbon-lang/pull/107)
+
+### Imports
+
+After the package declaration, files may include `import` declarations. These
+include the package name and optionally `library` followed by the library name.
+If the library is omitted, the default library for that package is imported.
 
 ```carbon
-package ExampleUser;
+// Import the "Vector" library from the
+// `LinearAlgebra` package.
+import LinearAlgebra library "Vector";
+// Import the default library from the
+// `ArbitraryPrecision` package.
+import ArbitraryPrecision;
+```
 
-import Geometry library "OneSide";
+The syntax `import PackageName ...` introduces the name `PackageName` as a
+[`private`](#name-visibility) name naming the given package. It cannot be used
+to import libraries of the current package. Importing additional libraries from
+that package makes additional members of `PackageName` visible.
 
-fn Foo(Geometry.Shapes.Flat.Circle circle) { ... }
+Libraries from the current package are imported by omitting the package name.
+
+```carbon
+// Import the "Vertex" library from the same package.
+import library "Vertex";
+// Import the default library from the same package.
+import library default;
+```
+
+The `import library ...` syntax adds all the public top-level names within the
+given library to the top-level scope of the current file as
+[`private`](#name-visibility) names, and similarly for names in
+[namespaces](#namespaces).
+
+Every `impl` file automatically imports the `api` file for its library.
+
+All `import` declarations must appear before all other non-`package`
+declarations in the file.
+
+> References:
+>
+> -   [Code and name organization](code_and_name_organization)
+> -   Proposal
+>     [#107: Code and name organization](https://github.com/carbon-language/carbon-lang/pull/107)
+
+### Name visibility
+
+The names visible from an imported library are determined by these rules:
+
+-   Declarations in an `api` file are by default _public_, which means visible
+    to any file that imports that library. This matches class members, which are
+    also [default public](#access-control).
+-   A `private` prefix on a declaration in an `api` file makes the name _library
+    private_. This means the name is visible in the file and all `impl` files
+    for the same library.
+-   The visibility of a name is determined by its first declaration, considering
+    `api` files before `impl` files. The `private` prefix is only allowed on the
+    first declaration.
+-   A name declared in an `impl` file and not the corresponding `api` file is
+    _file private_, meaning visible in just that file. Its first declaration
+    must be marked with a `private` prefix. **TODO:** This needs to be finalized
+    in a proposal to resolve inconsistency between
+    [#665](https://github.com/carbon-language/carbon-lang/issues/665#issuecomment-914661914)
+    and [#1136](https://github.com/carbon-language/carbon-lang/issues/1136).
+-   Private names don't conflict with names outside the region they're private
+    to: two different libraries can have different private names `foo` without
+    conflict, but a private name conflicts with a public name in the same scope.
+
+At most one `api` file in a package transitively used in a program may declare a
+given name public.
+
+> References:
+>
+> -   [Exporting entities from an API file](code_and_name_organization/README.md#exporting-entities-from-an-api-file)
+> -   Question-for-leads issue
+>     [#665: `private` vs `public` _syntax_ strategy, as well as other visibility tools like `external`/`api`/etc.](https://github.com/carbon-language/carbon-lang/issues/665)
+> -   Proposal
+>     [#752: api file default public](https://github.com/carbon-language/carbon-lang/pull/752)
+> -   Proposal
+>     [#931: Generic impls access (details 4)](https://github.com/carbon-language/carbon-lang/pull/931)
+> -   Question-for-leads issue
+>     [#1136: what is the top-level scope in a source file, and what names are found there?](https://github.com/carbon-language/carbon-lang/issues/1136)
+
+### Package scope
+
+The top-level scope in a file is the scope of the package. This means:
+
+-   Within this scope (and its sub-namespaces), all visible names from the same
+    package appear. This includes names from the same file, names from the `api`
+    file of a library when inside an `impl` file, and names from imported
+    libraries of the same package.
+-   In scopes where package members might have a name conflict with something
+    else, the syntax `package.Foo` can be used to name the `Foo` member of the
+    current package.
+
+In this example, the names `F` and `P` are used in a scope where they could mean
+two different things, and
+[qualifications are needed to disambiguate](#name-lookup):
+
+```carbon
+import P;
+fn F();
+class C {
+  fn F();
+  class P {
+    fn H();
+  }
+  fn G() {
+    // ❌ Error: ambiguous whether `F` means
+    // `package.F` or `package.C.F`.
+    F();
+   // ✅ Allowed: fully qualified
+    package.F();
+    package.C.F();
+    // ✅ Allowed: unambiguous
+    C.F();
+    // ❌ Error: ambiguous whether `P` means
+    // `package.P` or `package.P.F`.
+    P.H();
+    // ✅ Allowed
+    package.P.H();
+    package.C.P.H();
+    C.P.H();
+  }
+}
 ```
 
 > References:
@@ -1581,18 +2037,75 @@ fn Foo(Geometry.Shapes.Flat.Circle circle) { ... }
 > -   Question-for-leads issue
 >     [#1136: what is the top-level scope in a source file, and what names are found there?](https://github.com/carbon-language/carbon-lang/issues/1136)
 
-### Legal names
+### Namespaces
 
-Various constructs introduce a named entity in Carbon. These can be functions,
-types, variables, or other kinds of entities. A name in Carbon is formed from a
-word, which is a sequence of letters, numbers, and underscores, and which starts
-with a letter. We intend to follow Unicode's Annex 31 in selecting valid
-identifier characters, but a concrete set of valid characters has not been
-selected yet.
+A `namespace` declaration defines a name that may be used as a prefix of names
+declared afterward. When defining a member of a namespace, other members of that
+namespace are considered in scope and may be found by
+[name lookup](#name-lookup) without the namespace prefix. In this example,
+package `P` defines some of its members inside a namespace `N`:
 
-> References: [Lexical conventions](lexical_conventions)
+```carbon
+package P api;
+
+// Defines namespace `N` within the current package.
+namespace N;
+
+// Defines namespaces `M` and `M.L`.
+namespace M.L;
+
+fn F();
+// ✅ Allowed: Declares function `G` in namespace `N`.
+private fn N.G();
+// ❌ Error: `Bad` hasn't been declared.
+fn Bad.H();
+
+fn J() {
+  // ❌ Error: No `package.G`
+  G();
+}
+
+fn N.K() {
+  // ✅ Allowed: Looks in both `package` and `package.N`.
+  // Finds `package.F` and `package.N.G`.
+  F();
+  G();
+}
+
+// ✅ Allowed: Declares function `R` in namespace `M.L`.
+fn M.L.R();
+// ✅ Allowed: Declares function `Q` in namespace `M`.
+fn M.Q();
+```
+
+Another package importing `P` can refer to the public members of that namespace
+by prefixing with the package name `P` followed by the namespace:
+
+```carbon
+import P;
+
+// ✅ Allowed: `F` is public member of `P`.
+P.F();
+// ❌ Error: `N.G` is a private member of `P`.
+P.N.G();
+// ✅ Allowed: `N.K` is public member of `P`.
+P.N.K();
+// ✅ Allowed: `M.L.R` is public member of `P`.
+P.M.L.R();
+// ✅ Allowed: `M.Q` is public member of `P`.
+P.M.Q();
+```
+
+> References:
 >
-> **TODO:** References need to be evolved.
+> -   ["Namespaces" in "Code and name organization"](code_and_name_organization/README.md#namespaces)
+> -   ["Package and namespace members" in "Qualified names and member access"](expressions/member_access.md#package-and-namespace-members)
+> -   Proposal
+>     [#107: Code and name organization](https://github.com/carbon-language/carbon-lang/pull/107)
+> -   Proposal
+>     [#989: Member access expressions](https://github.com/carbon-language/carbon-lang/pull/989)
+> -   Question-for-leads issue
+>     [#1136: what is the top-level scope in a source file, and what names are found there?](https://github.com/carbon-language/carbon-lang/issues/1136)
 
 ### Naming conventions
 
@@ -1601,7 +2114,9 @@ Our naming conventions are:
 -   For idiomatic Carbon code:
     -   `UpperCamelCase` will be used when the named entity cannot have a
         dynamically varying value. For example, functions, namespaces, or
-        compile-time constant values.
+        compile-time constant values. Note that
+        [`virtual` methods](#inheritance) are named the same way to be
+        consistent with other functions and methods.
     -   `lower_snake_case` will be used when the named entity's value won't be
         known until runtime, such as for variables.
 -   For Carbon-provided features:
@@ -1616,77 +2131,147 @@ Our naming conventions are:
 
 ### Aliases
 
-Carbon provides a facility to declare a new name as an alias for a value. This
-is a fully general facility because everything is a value in Carbon, including
-types.
-
-For example:
+`alias` declares a name as equivalent to another name, for example:
 
 ```carbon
-alias MyInt = i32;
+alias NewName = SomePackage.OldName;
 ```
 
-This creates an alias called `MyInt` for whatever `i32` resolves to. Code
-textually after this can refer to `MyInt`, and it will transparently refer to
-`i32`.
+Note that the right-hand side of the equal sign (`=`) is a name not a value, so
+`alias four = 4;` is not allowed. This allows `alias` to work with entities like
+namespaces, which aren't values in Carbon.
+
+This can be used during an incremental migration when changing a name. For
+example, `alias` would allow you to have two names for a data field in a class
+while clients were migrated between the old name and the new name.
+
+```carbon
+class MyClass {
+  var new_name: String;
+  alias old_name = new_name;
+}
+
+var x: MyClass = {.new_name = "hello"};
+Carbon.Assert(x.old_name == "hello");
+```
+
+Another use is to include a name in a public API. For example, `alias` may be
+used to include a name from an interface implementation as a member of a class
+or [named constraint](generics/details.md#named-constraints), possibly renamed:
+
+```carbon
+class ContactInfo {
+  external impl as Printable;
+  external impl as ToPrinterDevice;
+  alias PrintToScreen = Printable.Print;
+  alias PrintToPrinter = ToPrinterDevice.Print;
+  ...
+}
+```
 
 > References:
 >
 > -   [Aliases](aliases.md)
+> -   ["Aliasing" in "Code and name organization"](code_and_name_organization/README.md#aliasing)
+> -   [`alias` a name from an external impl](generics/details.md#external-impl)
+> -   [`alias` a name in a named constraint](generics/details.md#named-constraints)
+> -   Proposal
+>     [#107: Code and name organization](https://github.com/carbon-language/carbon-lang/pull/107)
+> -   Proposal
+>     [#553: Generics details part 1](https://github.com/carbon-language/carbon-lang/pull/553)
 > -   Question-for-leads issue
 >     [#749: Alias syntax](https://github.com/carbon-language/carbon-lang/issues/749)
-
-> **TODO:** References need to be evolved.
+> -   Proposal
+>     [#989: Member access expressions](https://github.com/carbon-language/carbon-lang/pull/989)
 
 ### Name lookup
 
-Unqualified name lookup will always find a file-local result, including aliases,
-or names that are defined as part of the prelude. There is no prioritization of
-scopes. This means that all relevant scopes are searched, and if the name is
-found multiple times referring to different entities, then it is an error. The
-error may be resolved by adding qualification to disambiguate the lookup.
+The general principle of Carbon name lookup is that we look up names in all
+relevant scopes, and report an error if the name is found to refer to more than
+one different entity. So Carbon requires disambiguation by adding qualifiers
+instead of doing any
+[shadowing](https://en.wikipedia.org/wiki/Variable_shadowing) of names. For an
+example, see [the "package scope" section](#package-scope).
 
-When defining a member of a class, like a [method](#methods), then the other
-members of the class' scope are searched as part of name lookup, even when that
-member is being defined out-of-line.
+Unqualified name lookup walks the semantically-enclosing scopes, not only the
+lexically-enclosing ones. So when a lookup is performed within
+`fn MyNamespace.MyClass.MyNestedClass.MyFunction()`, we will look in
+`MyNestedClass`, `MyClass`, `MyNamespace`, and the package scope, even when the
+lexically-enclosing scope is the package scope. This means that the definition
+of a method will look for names in the class' scope even if it is written
+lexically out of line:
+
+```
+class C {
+  fn F();
+  fn G();
+}
+fn C.G() {
+  // ✅ Allowed: resolves to `package.C.F`.
+  F();
+}
+```
+
+[Member name lookup](expressions/member_access.md) follows a similar philosophy.
+If a [checked-generic type parameter](#checked-and-template-parameters) is known
+to implement multiple interfaces due to a constraint using
+[`&`](#combining-constraints) or
+[`where` clauses](generics/details.md#where-constraints), member name lookup
+into that type will look in all of the interfaces. If it is found in multiple,
+the name must be disambiguated by qualifying using compound member access
+([1](expressions/member_access.md),
+[2](generics/details.md#qualified-member-names-and-compound-member-access)). A
+[template-generic type parameter](#checked-and-template-parameters) performs
+look up into the caller's type in addition to the constraint.
+
+Carbon also rejects cases that would be invalid if all declarations in the file,
+including ones appearing later, were visible everywhere, not only after their
+point of appearance:
+
+```carbon
+class C {
+  fn F();
+  fn G();
+}
+fn C.G() {
+  F();
+}
+// Error: use of `F` in `C.G` would be ambiguous
+// if this declaration was earlier.
+fn F();
+```
 
 > References:
 >
 > -   [Name lookup](name_lookup.md)
+> -   ["Qualified names and member access" section of "Expressions"](expressions/README.md#qualified-names-and-member-access)
+> -   [Qualified names and member access](expressions/member_access.md)
+> -   [Principle: Information accumulation](/docs/project/principles/information_accumulation.md)
+> -   Proposal
+>     [#875: Principle: information accumulation](https://github.com/carbon-language/carbon-lang/pull/875)
 > -   Proposal
 >     [#989: Member access expressions](https://github.com/carbon-language/carbon-lang/pull/989)
->
-> **TODO:** References need to be evolved.
+> -   Question-for-leads issue
+>     [#1136: what is the top-level scope in a source file, and what names are found there?](https://github.com/carbon-language/carbon-lang/issues/1136)
 
 #### Name lookup for common types
 
 Common types that we expect to be used universally will be provided for every
-file, including `i32` and `bool`. These will likely be defined in a special
-"prelude" package.
+file are made available as if there was a special "prelude" package that was
+imported automatically into every `api` file. Dedicated type literal syntaxes
+like `i32` and `bool` refer to types defined within this package, based on the
+["all APIs are library APIs" principle](/docs/project/principles/library_apis_only.md).
 
 > References:
 >
 > -   [Name lookup](name_lookup.md)
+> -   [Principle: All APIs are library APIs](/docs/project/principles/library_apis_only.md)
 > -   Question-for-leads issue
 >     [#750: Naming conventions for Carbon-provided features](https://github.com/carbon-language/carbon-lang/issues/750)
 > -   Question-for-leads issue
 >     [#1058: How should interfaces for core functionality be named?](https://github.com/carbon-language/carbon-lang/issues/1058)
->
-> **TODO:** References need to be evolved.
-
-### Name visibility
-
-> **TODO:**
-
-> References:
->
-> -   [Exporting entities from an API file](code_and_name_organization/README.md#exporting-entities-from-an-api-file)
-> -   Question-for-leads issue
->     [#665: `private` vs `public` _syntax_ strategy, as well as other visibility tools like `external`/`api`/etc.](https://github.com/carbon-language/carbon-lang/issues/665)
 > -   Proposal
->     [#752: api file default public](https://github.com/carbon-language/carbon-lang/pull/752)
-> -   Proposal
->     [#931: Generic impls access (details 4)](https://github.com/carbon-language/carbon-lang/pull/931)
+>     [#1280: Principle: All APIs are library APIs](https://github.com/carbon-language/carbon-lang/pull/1280)
 
 ## Generics
 
@@ -1757,6 +2342,19 @@ Carbon templates follow the same fundamental paradigm as
 instantiated when called, resulting in late type checking, duck typing, and lazy
 binding.
 
+One difference from C++ templates, Carbon template instantiation is not
+controlled by the SFINAE rule of C++
+([1](https://en.wikipedia.org/wiki/Substitution_failure_is_not_an_error),
+[2](https://en.cppreference.com/w/cpp/language/sfinae)) but by explicit `if`
+clauses evaluated at compile-time. The `if` clause is at the end of the
+declaration, and the condition can only use constant values known at
+type-checking time, including `template` parameters.
+
+```carbon
+class Array(template T:! Type, template N:! i64)
+    if N >= 0 and N < MaxArraySize / sizeof(T);
+```
+
 Member lookup into a template type parameter is done in the actual type value
 provided by the caller, _in addition_ to any constraints. This means member name
 lookup and type checking for anything
@@ -1766,6 +2364,9 @@ type. When the constraint is just `Type`, this gives semantics similar to C++
 templates. Constraints can then be added incrementally, with the compiler
 verifying that the semantics stay the same. Once all constraints have been
 added, removing the word `template` to switch to a checked parameter is safe.
+
+The [value phase](#value-categories-and-value-phases) of a checked parameter is
+a symbolic value whereas the value phase of a template parameter is constant.
 
 Although checked generics are generally preferred, templates enable translation
 of code between C++ and Carbon, and address some cases where the type checking
@@ -1824,9 +2425,10 @@ class Circle {
 In this case, `Print` is a member of `Circle`. Interfaces may also be
 implemented [externally](generics/details.md#external-impl), which means the
 members of the interface are not direct members of the type. Those methods may
-still be called using
-[compound member access syntax](generics/details.md#qualified-member-names-and-compound-member-access)
-to qualify the name of the member, as in `x.(Printable.Print)()`. External
+still be called using compound member access syntax
+([1](expressions/member_access.md),
+[2](generics/details.md#qualified-member-names-and-compound-member-access)) to
+qualify the name of the member, as in `x.(Printable.Print)()`. External
 implementations don't have to be in the same library as the type definition,
 subject to the orphan rule ([1](generics/details.md#impl-lookup),
 [2](generics/details.md#orphan-rule)) for
@@ -1850,6 +2452,8 @@ by replacing the definition scope in curly braces (`{`...`}`) with a semicolon.
 >     [#990: Generics details 8: interface default and final members](https://github.com/carbon-language/carbon-lang/pull/990)
 > -   Proposal
 >     [#1084: Generics details 9: forward declarations](https://github.com/carbon-language/carbon-lang/pull/1084)
+> -   Question-for-leads issue
+>     [#1132: How do we match forward declarations with their definitions?](https://github.com/carbon-language/carbon-lang/issues/1132)
 
 ### Combining constraints
 
@@ -1869,9 +2473,10 @@ fn PrintMin[T:! Ordered & Printable](x: T, y: T) {
 ```
 
 The body of the function may call functions that are in either interface, except
-for names that are members of both. In that case, use the
-[compound member access syntax](generics/details.md#qualified-member-names-and-compound-member-access)
-to qualify the name of the member, as in:
+for names that are members of both. In that case, use the compound member access
+syntax ([1](expressions/member_access.md),
+[2](generics/details.md#qualified-member-names-and-compound-member-access)) to
+qualify the name of the member, as in:
 
 ```carbon
 fn DrawTies[T:! Renderable & GameResult](x: T) {
@@ -2062,6 +2667,10 @@ indicate that they may not be specialized, subject to
 >     [#920: Generic parameterized impls (details 5)](https://github.com/carbon-language/carbon-lang/pull/920)
 > -   Proposal
 >     [#983: Generics details 7: final impls](https://github.com/carbon-language/carbon-lang/pull/983)
+> -   Question-for-leads issue
+>     [1192: Parameterized impl syntax](https://github.com/carbon-language/carbon-lang/issues/1192)
+> -   Proposal
+>     [#1327: Generics: `impl forall`](https://github.com/carbon-language/carbon-lang/pull/1327)
 
 ### Other features
 
@@ -2089,9 +2698,9 @@ Carbon generics have a number of other features, including:
     value with a type implementing an interface, and allows the functions in
     that interface to be called using
     [dynamic dispatch](https://en.wikipedia.org/wiki/Dynamic_dispatch), for some
-    interfaces marked "`dyn`-safe".
+    interfaces marked "`dyn`-safe". **Note:** Provisional.
 -   [Variadics](generics/details.md#variadic-arguments) supports variable-length
-    parameter lists.
+    parameter lists. **Note:** Provisional.
 
 > References:
 >
@@ -2195,11 +2804,24 @@ The interfaces that correspond to each operator are given by:
 -   **TODO:** [Assignment](#assignment-statements): `x = y`, `++x`, `x += y`,
     and so on
 -   **TODO:** Dereference: `*p`
+-   **TODO:** [Move](#move): `~x`
 -   **TODO:** Indexing: `a[3]`
 -   **TODO:** Function call: `f(4)`
 
 The
 [logical operators can not be overloaded](expressions/logical_operators.md#overloading).
+
+Operators that result in [l-values](#value-categories-and-value-phases), such as
+dereferencing `*p` and indexing `a[3]`, have interfaces that return the address
+of the value. Carbon automatically dereferences the pointer to get the l-value.
+
+Operators that can take multiple arguments, such as function calling operator
+`f(4)`, have a [variadic](generics/details.md#variadic-arguments) parameter
+list.
+
+Whether and how a value supports other operations, such as being copied,
+swapped, or set into an [unformed state](#unformed-state), is also determined by
+implementing corresponding interfaces for the value's type.
 
 > References:
 >
@@ -2266,7 +2888,7 @@ Carbon code and the other way around. This ability achieves two goals:
 -   Allows sharing a code and library ecosystem with C and C++.
 -   Allows incremental migration to Carbon from C and C++.
 
-Carbon's approach to interopp is most similar to
+Carbon's approach to interop is most similar to
 [Java/Kotlin interop](interoperability/philosophy_and_goals.md#other-interoperability-layers),
 where the two languages are different, but share enough of runtime model that
 data from one side can be used from the other. For example, C++ and Carbon will
@@ -2339,12 +2961,15 @@ include:
 
 ### Importing and `#include`
 
-A C++ library header file may be [imported](#packages-libraries-namespaces) into
-Carbon using an `import` declaration of the special `Cpp` package.
+> **Note:** This is provisional, no design for importing C++ has been through
+> the proposal process yet.
+
+A C++ library header file may be [imported](#imports) into Carbon using an
+`import` declaration of the special `Cpp` package.
 
 ```carbon
 // like `#include "circle.h"` in C++
-import Cpp library "circle.h"
+import Cpp library "circle.h";
 ```
 
 This adds the names from `circle.h` into the `Cpp` namespace. If `circle.h`
@@ -2375,6 +3000,9 @@ marker.
 
 ### ABI and dynamic linking
 
+> **Note:** This reflects goals and plans. No specific design for the
+> implementation has been through the proposal process yet.
+
 Carbon itself will not have a stable ABI for the language as a whole, and most
 language features will be designed around not having any ABI stability. Instead,
 we expect to add dedicated language features that are specifically designed to
@@ -2399,7 +3027,15 @@ available across this interop boundary will of course be restricted to what is
 expressible in the C ABI, and types may need explicit markers to have guaranteed
 ABI compatibility.
 
+> References:
+>
+> -   [Goals: Stable language and library ABI non-goal](https://github.com/carbon-language/carbon-lang/blob/trunk/docs/project/goals.md#stable-language-and-library-abi)
+> -   [#175: C++ interoperability goals: Support mixing Carbon and C++ toolchains](/proposals/p0175.md#support-mixing-carbon-and-c-toolchains)
+
 ### Operator overloading
+
+> **Note:** This is provisional, no design for this has been through the
+> proposal process yet.
 
 [Operator overloading](#operator-overloading) is supported in Carbon, but is
 done by [implementing an interface](#interfaces-and-implementations) instead of
@@ -2429,7 +3065,7 @@ operators or the comma operator. In the unlikely situation where those operators
 need to be overridden for a Carbon type, that can be done with a nonmember C++
 function.
 
-Carbon intefaces with no C++ equivalent, such as
+Carbon interfaces with no C++ equivalent, such as
 [`CommonTypeWith(U)`](#common-type), may be implemented for C++ types externally
 in Carbon code. To satisfy the orphan rule
 ([1](generics/details.md#impl-lookup), [2](generics/details.md#orphan-rule)),
@@ -2439,6 +3075,9 @@ Perhaps it will automatically be imported, so a wrapper may be added without
 requiring changes to importers?
 
 ### Templates
+
+> **Note:** This is provisional, no design for this has been through the
+> proposal process yet.
 
 Carbon supports both
 [checked and template generics](#checked-and-template-parameters). This provides
@@ -2467,6 +3106,9 @@ we will include the ability where possible to use a Carbon generic from C++ as
 if it were a C++ template.
 
 ### Standard types
+
+> **Note:** This is provisional, no design for this has been through the
+> proposal process yet.
 
 The Carbon integer types, like `i32` and `u64`, are considered equal to the
 corresponding fixed-width integer types in C++, like `int32_t` and `uint64_t`,
@@ -2532,11 +3174,20 @@ The reverse operation is also possible using a proxy object implementing a C++
 abstract base class and holding a pointer to a type implementing the
 corresponding interface.
 
+> References:
+>
+> -   Proposal
+>     [#561: Basic classes: use cases, struct literals, struct types, and future work](https://github.com/carbon-language/carbon-lang/pull/561)
+> -   Proposal
+>     [#777: Inheritance](https://github.com/carbon-language/carbon-lang/pull/777)
+
 ### Enums
 
 > **TODO**
 
 ## Unfinished tales
+
+> **Note:** Everything in this section is provisional and forward looking.
 
 ### Safety
 
@@ -2605,13 +3256,6 @@ This leads to Carbon's incremental path to safety:
 
 > References: [Safety strategy](/docs/project/principles/safety_strategy.md)
 
-### Pattern matching as function overload resolution
-
-> **TODO:** References need to be evolved. Needs a detailed design and a high
-> level summary provided inline.
-
-> References: [Pattern matching](pattern_matching.md)
-
 ### Lifetime and move semantics
 
 > **TODO:**
@@ -2627,6 +3271,25 @@ preprocessing of source text such as C and C++ do.
 
 > References: [Metaprogramming](metaprogramming.md)
 
+### Pattern matching as function overload resolution
+
+> **TODO:** References need to be evolved. Needs a detailed design and a high
+> level summary provided inline.
+
+> References: [Pattern matching](pattern_matching.md)
+
+### Error handling
+
+For now, Carbon does not have language features dedicated to error handling, but
+we would consider adding some in the future. At this point, errors are
+represented using [choice types](#choice-types) like `Result` and `Optional`.
+
+This is similar to the story for Rust, which started using `Result`, then added
+[`?` operator](https://doc.rust-lang.org/reference/expressions/operator-expr.html#the-question-mark-operator)
+for convenience, and is now considering ([1](https://yaah.dev/try-blocks),
+[2](https://doc.rust-lang.org/beta/unstable-book/language-features/try-blocks.html))
+adding more.
+
 ### Execution abstractions
 
 Carbon provides some higher-order abstractions of program execution, as well as
@@ -2641,5 +3304,9 @@ the critical underpinnings of such abstractions.
 > **TODO:**
 
 #### Co-routines
+
+> **TODO:**
+
+#### Concurrency
 
 > **TODO:**

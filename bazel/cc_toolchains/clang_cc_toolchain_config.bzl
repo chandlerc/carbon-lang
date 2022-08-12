@@ -19,21 +19,17 @@ load(
 load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
 load(
     ":clang_detected_variables.bzl",
+    "clang_bindir",
     "clang_include_dirs_list",
     "clang_resource_dir",
     "llvm_bindir",
     "sysroot_dir",
 )
 
-all_compile_actions = [
+all_c_compile_actions = [
     ACTION_NAMES.c_compile,
-    ACTION_NAMES.cpp_compile,
-    ACTION_NAMES.linkstamp_compile,
     ACTION_NAMES.assemble,
     ACTION_NAMES.preprocess_assemble,
-    ACTION_NAMES.cpp_header_parsing,
-    ACTION_NAMES.cpp_module_compile,
-    ACTION_NAMES.cpp_module_codegen,
 ]
 
 all_cpp_compile_actions = [
@@ -43,6 +39,8 @@ all_cpp_compile_actions = [
     ACTION_NAMES.cpp_module_compile,
     ACTION_NAMES.cpp_module_codegen,
 ]
+
+all_compile_actions = all_c_compile_actions + all_cpp_compile_actions
 
 preprocessor_compile_actions = [
     ACTION_NAMES.c_compile,
@@ -71,9 +69,9 @@ all_link_actions = [
 def _impl(ctx):
     tool_paths = [
         tool_path(name = "ar", path = llvm_bindir + "/llvm-ar"),
-        tool_path(name = "ld", path = llvm_bindir + "/ld.lld"),
-        tool_path(name = "cpp", path = llvm_bindir + "/clang-cpp"),
-        tool_path(name = "gcc", path = llvm_bindir + "/clang++"),
+        tool_path(name = "ld", path = clang_bindir + "/ld.lld"),
+        tool_path(name = "cpp", path = clang_bindir + "/clang-cpp"),
+        tool_path(name = "gcc", path = clang_bindir + "/clang++"),
         tool_path(name = "dwp", path = llvm_bindir + "/llvm-dwp"),
         tool_path(name = "gcov", path = llvm_bindir + "/llvm-cov"),
         tool_path(name = "nm", path = llvm_bindir + "/llvm-nm"),
@@ -83,13 +81,13 @@ def _impl(ctx):
     ]
 
     action_configs = [
-        action_config(action_name = name, enabled = True, tools = [tool(path = llvm_bindir + "/clang")])
-        for name in [ACTION_NAMES.c_compile]
+        action_config(action_name = name, enabled = True, tools = [tool(path = clang_bindir + "/clang")])
+        for name in all_c_compile_actions
     ] + [
-        action_config(action_name = name, enabled = True, tools = [tool(path = llvm_bindir + "/clang++")])
+        action_config(action_name = name, enabled = True, tools = [tool(path = clang_bindir + "/clang++")])
         for name in all_cpp_compile_actions
     ] + [
-        action_config(action_name = name, enabled = True, tools = [tool(path = llvm_bindir + "/clang++")])
+        action_config(action_name = name, enabled = True, tools = [tool(path = clang_bindir + "/clang++")])
         for name in all_link_actions
     ] + [
         action_config(action_name = name, enabled = True, tools = [tool(path = llvm_bindir + "/llvm-ar")])
@@ -126,6 +124,7 @@ def _impl(ctx):
                             "-Wself-assign",
                             "-Wimplicit-fallthrough",
                             "-Wctad-maybe-unsupported",
+                            "-Wnon-virtual-dtor",
                             # Unfortunately, LLVM isn't clean for this warning.
                             "-Wno-unused-parameter",
                             # Compile actions shouldn't link anything.
@@ -463,7 +462,7 @@ def _impl(ctx):
                 "-fsanitize=address,undefined,nullability",
                 "-fsanitize-address-use-after-scope",
                 # We don't need the recovery behavior of UBSan as we expect
-                # builds to be clean. Not recoverying is a bit cheaper.
+                # builds to be clean. Not recovering is a bit cheaper.
                 "-fno-sanitize-recover=undefined",
                 # Don't embed the full path name for files. This limits the size
                 # and combined with line numbers is unlikely to result in many
@@ -490,7 +489,7 @@ def _impl(ctx):
         flag_sets = [flag_set(
             actions = all_compile_actions + all_link_actions,
             flag_groups = [flag_group(flags = [
-                "-fsanitize=fuzzer",
+                "-fsanitize=fuzzer-no-link",
             ])],
         )],
     )
@@ -499,11 +498,7 @@ def _impl(ctx):
         name = "proto-fuzzer",
         enabled = False,
         requires = [feature_set(["nonhost"])],
-
-        # TODO: this should really be `fuzzer`, but `-fsanitize=fuzzer` triggers
-        # a clang crash when running `bazel test --config=fuzzer ...`. See
-        # https://github.com/carbon-language/carbon-lang/issues/1173
-        implies = ["asan"],
+        implies = ["fuzzer"],
     )
 
     linux_flags_feature = feature(
@@ -552,12 +547,7 @@ def _impl(ctx):
                     "-D_LIBCPP_DEBUG=1",
                 ])],
                 with_features = [
-                    # _LIBCPP_DEBUG=1 causes protobuf code to crash when linked
-                    # with `-fsanitize=fuzzer`, possibly because of ODR
-                    # violations caused by Carbon source and pre-compiled llvm
-                    # Fuzzer driver library built with different _LIBCPP_DEBUG
-                    # values.
-                    with_feature_set(not_features = ["opt", "proto-fuzzer"]),
+                    with_feature_set(not_features = ["opt"]),
                 ],
             ),
         ],
