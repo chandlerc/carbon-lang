@@ -2,8 +2,8 @@
 // Exceptions. See /LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef COMMON_BLAKE3_H_
-#define COMMON_BLAKE3_H_
+#ifndef CARBON_COMMON_BLAKE3_H_
+#define CARBON_COMMON_BLAKE3_H_
 
 #include <array>
 
@@ -27,4 +27,4 @@ class Blake3Hash {
 
 }  // namespace Carbon
 
-#endif  // COMMON_BLAKE3_H_
+#endif  // CARBON_COMMON_BLAKE3_H_
