@@ -155,6 +155,7 @@ cc_test(
     srcs = ["blake3_test.cpp"],
     deps = [
         ":blake3",
+        "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
     ],
