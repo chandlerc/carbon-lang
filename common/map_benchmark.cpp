@@ -5,6 +5,7 @@
 #include <benchmark/benchmark.h>
 
 #include <array>
+#include <cstddef>
 #include <random>
 
 #include "absl/container/flat_hash_map.h"
@@ -26,16 +27,16 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
 
   MapT M;
 
-  bool BenchLookup(KeyT K) {
-    auto* V = M[K];
-    benchmark::DoNotOptimize(V);
-    return V != nullptr;
+  auto BenchLookup(KeyT k) -> bool {
+    auto* v = M[k];
+    benchmark::DoNotOptimize(v);
+    return v != nullptr;
   }
 
-  bool BenchInsert(KeyT K, ValueT V) {
-    auto Result = M.insert(K, V);
-    benchmark::DoNotOptimize(Result.isInserted());
-    return Result.isInserted();
+  auto BenchInsert(KeyT k, ValueT v) -> bool {
+    auto result = M.insert(k, v);
+    benchmark::DoNotOptimize(result.isInserted());
+    return result.isInserted();
   }
 };
 
@@ -47,16 +48,16 @@ struct MapWrapper<absl::flat_hash_map<KT, VT, HasherT>> {
 
   MapT M;
 
-  bool BenchLookup(KeyT K) {
-    auto It = M.find(K);
-    benchmark::DoNotOptimize(It);
-    return It != M.end();
+  auto BenchLookup(KeyT k) -> bool {
+    auto it = M.find(k);
+    benchmark::DoNotOptimize(it);
+    return it != M.end();
   }
 
-  bool BenchInsert(KeyT K, ValueT V) {
-    auto Result = M.insert({K, V});
-    benchmark::DoNotOptimize(Result.second);
-    return Result.second;
+  auto BenchInsert(KeyT k, ValueT v) -> bool {
+    auto result = M.insert({k, v});
+    benchmark::DoNotOptimize(result.second);
+    return result.second;
   }
 };
 
@@ -68,16 +69,16 @@ struct MapWrapper<llvm::DenseMap<KT, VT, HasherT>> {
 
   MapT M;
 
-  bool BenchLookup(KeyT K) {
-    auto It = M.find(K);
-    benchmark::DoNotOptimize(It);
-    return It != M.end();
+  auto BenchLookup(KeyT k) -> bool {
+    auto it = M.find(k);
+    benchmark::DoNotOptimize(it);
+    return it != M.end();
   }
 
-  bool BenchInsert(KeyT K, ValueT V) {
-    auto Result = M.insert({K, V});
-    benchmark::DoNotOptimize(Result.second);
-    return Result.second;
+  auto BenchInsert(KeyT k, ValueT v) -> bool {
+    auto result = M.insert({k, v});
+    benchmark::DoNotOptimize(result.second);
+    return result.second;
   }
 };
 
@@ -89,24 +90,24 @@ struct MapWrapper<llvm::SmallDenseMap<KT, VT, SmallSize, HasherT>> {
 
   MapT M;
 
-  bool BenchLookup(KeyT K) {
-    auto It = M.find(K);
-    benchmark::DoNotOptimize(It);
-    return It != M.end();
+  auto BenchLookup(KeyT k) -> bool {
+    auto it = M.find(k);
+    benchmark::DoNotOptimize(it);
+    return it != M.end();
   }
 
-  bool BenchInsert(KeyT K, ValueT V) {
-    auto Result = M.insert({K, V});
-    benchmark::DoNotOptimize(Result.second);
-    return Result.second;
+  auto BenchInsert(KeyT k, ValueT v) -> bool {
+    auto result = M.insert({k, v});
+    benchmark::DoNotOptimize(result.second);
+    return result.second;
   }
 };
 
 struct LLVMHash {
   template <typename T>
-  size_t operator()(const T& Arg) const {
+  auto operator()(const T& arg) const -> size_t {
     using llvm::hash_value;
-    return hash_value(Arg);
+    return hash_value(arg);
   }
 };
 
@@ -117,74 +118,81 @@ struct LLVMHashingDenseMapInfo {
   //               "Log2MaxAlign bits of alignment");
   static constexpr uintptr_t Log2MaxAlign = 12;
 
-  static inline int* getEmptyKey() {
-    uintptr_t Val = static_cast<uintptr_t>(-1);
-    Val <<= Log2MaxAlign;
-    return reinterpret_cast<int*>(Val);
+  static inline auto getEmptyKey() -> int* {
+    auto val = static_cast<uintptr_t>(-1);
+    val <<= Log2MaxAlign;
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): This is required by the API.
+    return reinterpret_cast<int*>(val);
   }
 
-  static inline int* getTombstoneKey() {
-    uintptr_t Val = static_cast<uintptr_t>(-2);
-    Val <<= Log2MaxAlign;
-    return reinterpret_cast<int*>(Val);
+  static inline auto getTombstoneKey() -> int* {
+    auto val = static_cast<uintptr_t>(-2);
+    val <<= Log2MaxAlign;
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): This is required by the API.
+    return reinterpret_cast<int*>(val);
   }
 
-  static unsigned getHashValue(const int* PtrVal) {
+  static auto getHashValue(const int* ptr_val) -> unsigned {
     using llvm::hash_value;
-    return hash_value(PtrVal);
+    return hash_value(ptr_val);
   }
 
-  static bool isEqual(const int* LHS, const int* RHS) { return LHS == RHS; }
+  static auto isEqual(const int* lhs, const int* rhs) -> bool {
+    return lhs == rhs;
+  }
 };
 
 using KeyVectorT = llvm::SmallVector<std::unique_ptr<int>, 32>;
 
-KeyVectorT BuildKeys(
-    ssize_t Size, llvm::function_ref<void(int*)> Callback = [](int*) {}) {
-  KeyVectorT Keys;
-  for (ssize_t i : llvm::seq<ssize_t>(0, Size))
-    Keys.emplace_back(new int(i));
-
-  for (ssize_t i : llvm::seq<ssize_t>(0, Size))
-    Callback(Keys[i].get());
-
-  return Keys;
-}
-
-constexpr ssize_t NumShuffledKeys = 1024 * 64;
-
-llvm::SmallVector<int*, 32> BuildShuffledKeys(const KeyVectorT& Keys) {
-  std::random_device RDev;
-  std::seed_seq Seed(
-      {RDev(), RDev(), RDev(), RDev(), RDev(), RDev(), RDev(), RDev()});
-  std::mt19937_64 RNG(Seed);
-  std::uniform_int_distribution<int> D(0, Keys.size() - 1);
-
-  llvm::SmallVector<int*, 32> ShuffledKeys;
-  for (ssize_t i : llvm::seq<ssize_t>(0, NumShuffledKeys)) {
-    (void)i;
-    ssize_t RandomIdx = D(RNG);
-    assert(RandomIdx < (ssize_t)Keys.size() && "Too large value!");
-    ShuffledKeys.push_back(Keys[RandomIdx].get());
+auto BuildKeys(
+    ssize_t size, llvm::function_ref<void(int*)> callback = [](int*) {})
+    -> KeyVectorT {
+  KeyVectorT keys;
+  for (ssize_t i : llvm::seq<ssize_t>(0, size)) {
+    keys.emplace_back(new int(i));
   }
 
-  return ShuffledKeys;
+  for (ssize_t i : llvm::seq<ssize_t>(0, size)) {
+    callback(keys[i].get());
+  }
+
+  return keys;
+}
+
+constexpr ssize_t NumShuffledKeys = 1024LL * 64;
+
+auto BuildShuffledKeys(const KeyVectorT& keys) -> llvm::SmallVector<int*, 32> {
+  std::random_device r_dev;
+  std::seed_seq seed(
+      {r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev()});
+  std::mt19937_64 rng(seed);
+  std::uniform_int_distribution<int> d(0, keys.size() - 1);
+
+  llvm::SmallVector<int*, 32> shuffled_keys;
+  for (ssize_t i : llvm::seq<ssize_t>(0, NumShuffledKeys)) {
+    (void)i;
+    ssize_t random_idx = d(rng);
+    assert(random_idx < (ssize_t)keys.size() && "Too large value!");
+    shuffled_keys.push_back(keys[random_idx].get());
+  }
+
+  return shuffled_keys;
 }
 
 template <typename MapT>
-static void BM_MapLookupHitPtr(benchmark::State& S) {
+static void BM_MapLookupHitPtr(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
   using T = typename MapWrapperT::ValueT;
-  MapWrapperT M;
-  KeyVectorT Keys =
-      BuildKeys(S.range(0), [&M](int* Key) { M.BenchInsert(Key, T()); });
-  llvm::SmallVector<int*, 32> ShuffledKeys = BuildShuffledKeys(Keys);
+  MapWrapperT m;
+  KeyVectorT keys =
+      BuildKeys(s.range(0), [&m](int* key) { m.BenchInsert(key, T()); });
+  llvm::SmallVector<int*, 32> shuffled_keys = BuildShuffledKeys(keys);
 
   ssize_t i = 0;
-  for (auto _ : S) {
-    bool Result = M.BenchLookup(ShuffledKeys[i]);
-    assert(Result && "Lookup must succeed!");
-    (void)Result;
+  for (auto _ : s) {
+    bool result = m.BenchLookup(shuffled_keys[i]);
+    assert(result && "Lookup must succeed!");
+    (void)result;
     i = (i + 1) & (NumShuffledKeys - 1);
   }
 }
@@ -300,20 +308,20 @@ BENCHMARK_TEMPLATE(
     ->Range(1 << 6, 1 << 20);
 
 template <typename MapT>
-static void BM_MapLookupMissPtr(benchmark::State& S) {
+static void BM_MapLookupMissPtr(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
   using T = typename MapWrapperT::ValueT;
-  MapWrapperT M;
-  KeyVectorT Keys =
-      BuildKeys(S.range(0), [&M](int* Key) { M.BenchInsert(Key, T()); });
-  constexpr ssize_t NumOtherKeys = 1024 * 64;
-  KeyVectorT OtherKeys = BuildKeys(NumOtherKeys);
+  MapWrapperT m;
+  KeyVectorT keys =
+      BuildKeys(s.range(0), [&m](int* key) { m.BenchInsert(key, T()); });
+  constexpr ssize_t NumOtherKeys = 1024LL * 64;
+  KeyVectorT other_keys = BuildKeys(NumOtherKeys);
 
   ssize_t i = 0;
-  for (auto _ : S) {
-    bool Result = M.BenchLookup(OtherKeys[i].get());
-    assert(!Result && "Lookup must fail!");
-    (void)Result;
+  for (auto _ : s) {
+    bool result = m.BenchLookup(other_keys[i].get());
+    assert(!result && "Lookup must fail!");
+    (void)result;
     i = (i + 1) & (NumOtherKeys - 1);
   }
 }
@@ -429,26 +437,26 @@ BENCHMARK_TEMPLATE(
     ->Range(1 << 6, 1 << 20);
 
 template <typename MapT>
-static void BM_MapInsertPtrSeq(benchmark::State& S) {
+static void BM_MapInsertPtrSeq(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
   using T = typename MapWrapperT::ValueT;
-  KeyVectorT Keys = BuildKeys(S.range(0));
-  llvm::SmallVector<int*, 32> ShuffledKeys = BuildShuffledKeys(Keys);
+  KeyVectorT keys = BuildKeys(s.range(0));
+  llvm::SmallVector<int*, 32> shuffled_keys = BuildShuffledKeys(keys);
 
   ssize_t i = 0;
-  for (auto _ : S) {
+  for (auto _ : s) {
     // First insert all the keys.
-    MapWrapperT M;
-    for (const auto& K : Keys) {
-      bool Inserted = M.BenchInsert(K.get(), T());
-      assert(Inserted && "Must be a successful insert!");
-      (void)Inserted;
+    MapWrapperT m;
+    for (const auto& k : keys) {
+      bool inserted = m.BenchInsert(k.get(), T());
+      assert(inserted && "Must be a successful insert!");
+      (void)inserted;
     }
 
     // Now insert a final random repeated key.
-    bool Inserted = M.BenchInsert(ShuffledKeys[i], T());
-    assert(!Inserted && "Must already be in the map!");
-    (void)Inserted;
+    bool inserted = m.BenchInsert(shuffled_keys[i], T());
+    assert(!inserted && "Must already be in the map!");
+    (void)inserted;
 
     // Rotate through the shuffled keys.
     i = (i + 1) & (NumShuffledKeys - 1);
