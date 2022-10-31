@@ -86,6 +86,34 @@ cc_test(
 )
 
 cc_library(
+    name = "map",
+    hdrs = ["map.h"],
+    deps = [
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_test(
+    name = "map_test",
+    srcs = ["map_test.cpp"],
+    deps = [
+        ":map",
+        "//common:gtest_main",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_binary(
+    name = "map_benchmark",
+    testonly = 1,
+    srcs = ["map_benchmark.cpp"],
+    deps = [
+        ":map",
+        "@com_github_google_benchmark//:benchmark_main",
+    ],
+)
+
+cc_library(
     name = "metaprogramming",
     hdrs = ["metaprogramming.h"],
 )
