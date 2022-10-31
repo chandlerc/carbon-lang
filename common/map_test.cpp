@@ -19,13 +19,12 @@ using ::testing::Pair;
 using ::testing::UnorderedElementsAreArray;
 
 template <typename MapT, typename MatcherRangeT>
-void expectUnorderedElementsAre(
-    MapT &&M, MatcherRangeT ElementMatchers) {
+void expectUnorderedElementsAre(MapT&& M, MatcherRangeT ElementMatchers) {
   // Now collect the elements into a container.
   using KeyT = typename std::remove_reference<MapT>::type::KeyT;
   using ValueT = typename std::remove_reference<MapT>::type::ValueT;
   std::vector<std::pair<KeyT, ValueT>> MapEntries;
-  M.forEach([&MapEntries](KeyT &K, ValueT &V) {
+  M.forEach([&MapEntries](KeyT& K, ValueT& V) {
     MapEntries.push_back({K, V});
   });
 
@@ -37,7 +36,7 @@ void expectUnorderedElementsAre(
 // Allow directly using an initializer list.
 template <typename MapT, typename MatcherT>
 void expectUnorderedElementsAre(
-    MapT &&M, std::initializer_list<MatcherT> ElementMatchers) {
+    MapT&& M, std::initializer_list<MatcherT> ElementMatchers) {
   std::vector<MatcherT> ElementMatchersStorage = ElementMatchers;
   expectUnorderedElementsAre(M, ElementMatchersStorage);
 }

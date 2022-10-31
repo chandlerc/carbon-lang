@@ -15,7 +15,8 @@
 namespace Carbon::Testing {
 namespace {
 
-template <typename MapT> struct MapWrapper;
+template <typename MapT>
+struct MapWrapper;
 
 template <typename KT, typename VT, int MinSmallSize>
 struct MapWrapper<Map<KT, VT, MinSmallSize>> {
@@ -26,7 +27,7 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
   MapT M;
 
   bool BenchLookup(KeyT K) {
-    auto *V = M[K];
+    auto* V = M[K];
     benchmark::DoNotOptimize(V);
     return V != nullptr;
   }
@@ -103,7 +104,7 @@ struct MapWrapper<llvm::SmallDenseMap<KT, VT, SmallSize, HasherT>> {
 
 struct LLVMHash {
   template <typename T>
-  size_t operator()(const T &Arg) const {
+  size_t operator()(const T& Arg) const {
     using llvm::hash_value;
     return hash_value(Arg);
   }
@@ -128,18 +129,18 @@ struct LLVMHashingDenseMapInfo {
     return reinterpret_cast<int*>(Val);
   }
 
-  static unsigned getHashValue(const int *PtrVal) {
+  static unsigned getHashValue(const int* PtrVal) {
     using llvm::hash_value;
     return hash_value(PtrVal);
   }
 
-  static bool isEqual(const int *LHS, const int *RHS) { return LHS == RHS; }
+  static bool isEqual(const int* LHS, const int* RHS) { return LHS == RHS; }
 };
-
 
 using KeyVectorT = llvm::SmallVector<std::unique_ptr<int>, 32>;
 
-KeyVectorT BuildKeys(ssize_t Size, llvm::function_ref<void(int *)> Callback = [](int *) {}) {
+KeyVectorT BuildKeys(
+    ssize_t Size, llvm::function_ref<void(int*)> Callback = [](int*) {}) {
   KeyVectorT Keys;
   for (ssize_t i : llvm::seq<ssize_t>(0, Size))
     Keys.emplace_back(new int(i));
@@ -152,14 +153,14 @@ KeyVectorT BuildKeys(ssize_t Size, llvm::function_ref<void(int *)> Callback = []
 
 constexpr ssize_t NumShuffledKeys = 1024 * 64;
 
-llvm::SmallVector<int *, 32> BuildShuffledKeys(const KeyVectorT &Keys) {
+llvm::SmallVector<int*, 32> BuildShuffledKeys(const KeyVectorT& Keys) {
   std::random_device RDev;
   std::seed_seq Seed(
       {RDev(), RDev(), RDev(), RDev(), RDev(), RDev(), RDev(), RDev()});
   std::mt19937_64 RNG(Seed);
   std::uniform_int_distribution<int> D(0, Keys.size() - 1);
 
-  llvm::SmallVector<int *, 32> ShuffledKeys;
+  llvm::SmallVector<int*, 32> ShuffledKeys;
   for (ssize_t i : llvm::seq<ssize_t>(0, NumShuffledKeys)) {
     (void)i;
     ssize_t RandomIdx = D(RNG);
@@ -175,8 +176,9 @@ static void BM_MapLookupHitPtr(benchmark::State& S) {
   using MapWrapperT = MapWrapper<MapT>;
   using T = typename MapWrapperT::ValueT;
   MapWrapperT M;
-  KeyVectorT Keys = BuildKeys(S.range(0), [&M](int *Key) { M.BenchInsert(Key, T()); });
-  llvm::SmallVector<int *, 32> ShuffledKeys = BuildShuffledKeys(Keys);
+  KeyVectorT Keys =
+      BuildKeys(S.range(0), [&M](int* Key) { M.BenchInsert(Key, T()); });
+  llvm::SmallVector<int*, 32> ShuffledKeys = BuildShuffledKeys(Keys);
 
   ssize_t i = 0;
   for (auto _ : S) {
@@ -186,52 +188,124 @@ static void BM_MapLookupHitPtr(benchmark::State& S) {
     i = (i + 1) & (NumShuffledKeys - 1);
   }
 }
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, Map<int *, std::array<int, 1>>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, Map<int*, std::array<int, 1>>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
     ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, Map<int *, std::array<int, 2>>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, Map<int*, std::array<int, 2>>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
     ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, Map<int *, std::array<int, 4>>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, Map<int*, std::array<int, 4>>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
     ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, Map<int *, std::array<int, 64>>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, absl::flat_hash_map<int *, std::array<int, 1>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, absl::flat_hash_map<int *, std::array<int, 2>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, absl::flat_hash_map<int *, std::array<int, 4>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, absl::flat_hash_map<int *, std::array<int, 64>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, llvm::DenseMap<int *, std::array<int, 1>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, llvm::DenseMap<int *, std::array<int, 2>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, llvm::DenseMap<int *, std::array<int, 4>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, llvm::DenseMap<int *, std::array<int, 64>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+BENCHMARK_TEMPLATE(BM_MapLookupHitPtr, Map<int*, std::array<int, 64>>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
     ->Range(1 << 6, 1 << 20);
 
+BENCHMARK_TEMPLATE(BM_MapLookupHitPtr,
+                   absl::flat_hash_map<int*, std::array<int, 1>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(BM_MapLookupHitPtr,
+                   absl::flat_hash_map<int*, std::array<int, 2>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(BM_MapLookupHitPtr,
+                   absl::flat_hash_map<int*, std::array<int, 4>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(BM_MapLookupHitPtr,
+                   absl::flat_hash_map<int*, std::array<int, 64>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+
+BENCHMARK_TEMPLATE(
+    BM_MapLookupHitPtr,
+    llvm::DenseMap<int*, std::array<int, 1>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(
+    BM_MapLookupHitPtr,
+    llvm::DenseMap<int*, std::array<int, 2>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(
+    BM_MapLookupHitPtr,
+    llvm::DenseMap<int*, std::array<int, 4>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(
+    BM_MapLookupHitPtr,
+    llvm::DenseMap<int*, std::array<int, 64>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
 
 template <typename MapT>
 static void BM_MapLookupMissPtr(benchmark::State& S) {
   using MapWrapperT = MapWrapper<MapT>;
   using T = typename MapWrapperT::ValueT;
   MapWrapperT M;
-  KeyVectorT Keys = BuildKeys(S.range(0), [&M](int *Key) { M.BenchInsert(Key, T()); });
+  KeyVectorT Keys =
+      BuildKeys(S.range(0), [&M](int* Key) { M.BenchInsert(Key, T()); });
   constexpr ssize_t NumOtherKeys = 1024 * 64;
   KeyVectorT OtherKeys = BuildKeys(NumOtherKeys);
 
@@ -243,58 +317,129 @@ static void BM_MapLookupMissPtr(benchmark::State& S) {
     i = (i + 1) & (NumOtherKeys - 1);
   }
 }
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, Map<int *, std::array<int, 1>>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, Map<int*, std::array<int, 1>>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
     ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, Map<int *, std::array<int, 2>>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, Map<int*, std::array<int, 2>>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
     ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, Map<int *, std::array<int, 4>>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, Map<int*, std::array<int, 4>>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
     ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, Map<int *, std::array<int, 64>>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, absl::flat_hash_map<int *, std::array<int, 1>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, absl::flat_hash_map<int *, std::array<int, 2>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, absl::flat_hash_map<int *, std::array<int, 4>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, absl::flat_hash_map<int *, std::array<int, 64>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, llvm::DenseMap<int *, std::array<int, 1>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, llvm::DenseMap<int *, std::array<int, 2>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, llvm::DenseMap<int *, std::array<int, 4>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
-    ->Range(1 << 6, 1 << 20);
-BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, llvm::DenseMap<int *, std::array<int, 64>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+BENCHMARK_TEMPLATE(BM_MapLookupMissPtr, Map<int*, std::array<int, 64>>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
     ->Range(1 << 6, 1 << 20);
 
+BENCHMARK_TEMPLATE(BM_MapLookupMissPtr,
+                   absl::flat_hash_map<int*, std::array<int, 1>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(BM_MapLookupMissPtr,
+                   absl::flat_hash_map<int*, std::array<int, 2>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(BM_MapLookupMissPtr,
+                   absl::flat_hash_map<int*, std::array<int, 4>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(BM_MapLookupMissPtr,
+                   absl::flat_hash_map<int*, std::array<int, 64>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+
+BENCHMARK_TEMPLATE(
+    BM_MapLookupMissPtr,
+    llvm::DenseMap<int*, std::array<int, 1>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(
+    BM_MapLookupMissPtr,
+    llvm::DenseMap<int*, std::array<int, 2>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(
+    BM_MapLookupMissPtr,
+    llvm::DenseMap<int*, std::array<int, 4>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
+BENCHMARK_TEMPLATE(
+    BM_MapLookupMissPtr,
+    llvm::DenseMap<int*, std::array<int, 64>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Range(1 << 6, 1 << 20);
 
 template <typename MapT>
 static void BM_MapInsertPtrSeq(benchmark::State& S) {
   using MapWrapperT = MapWrapper<MapT>;
   using T = typename MapWrapperT::ValueT;
   KeyVectorT Keys = BuildKeys(S.range(0));
-  llvm::SmallVector<int *, 32> ShuffledKeys = BuildShuffledKeys(Keys);
+  llvm::SmallVector<int*, 32> ShuffledKeys = BuildShuffledKeys(Keys);
 
   ssize_t i = 0;
   for (auto _ : S) {
     // First insert all the keys.
     MapWrapperT M;
-    for (const auto &K : Keys) {
+    for (const auto& K : Keys) {
       bool Inserted = M.BenchInsert(K.get(), T());
       assert(Inserted && "Must be a successful insert!");
       (void)Inserted;
@@ -309,108 +454,464 @@ static void BM_MapInsertPtrSeq(benchmark::State& S) {
     i = (i + 1) & (NumShuffledKeys - 1);
   }
 }
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 1>, 4>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 1>, 4>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 2>, 4>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 2>, 4>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 4>, 4>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 4>, 4>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 64>, 4>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 1>, 8>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 2>, 8>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 4>, 8>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 64>, 8>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 1>, 32>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 2>, 32>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 4>, 32>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int *, std::array<int, 64>, 32>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, absl::flat_hash_map<int *, std::array<int, 1>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, absl::flat_hash_map<int *, std::array<int, 2>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, absl::flat_hash_map<int *, std::array<int, 4>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, absl::flat_hash_map<int *, std::array<int, 64>, LLVMHash>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::DenseMap<int *, std::array<int, 1>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::DenseMap<int *, std::array<int, 2>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::DenseMap<int *, std::array<int, 4>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
-    ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::DenseMap<int *, std::array<int, 64>, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 64>, 4>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
 
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 1>, 4, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 1>, 8>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 2>, 4, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 2>, 8>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 4>, 4, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 4>, 8>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 64>, 4, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 64>, 8>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
 
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 1>, 8, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 1>, 32>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 2>, 8, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 2>, 32>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 4>, 8, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 4>, 32>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 64>, 8, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, Map<int*, std::array<int, 64>, 32>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
 
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 1>, 32, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq,
+                   absl::flat_hash_map<int*, std::array<int, 1>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 2>, 32, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq,
+                   absl::flat_hash_map<int*, std::array<int, 2>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 4>, 32, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq,
+                   absl::flat_hash_map<int*, std::array<int, 4>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
-BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq, llvm::SmallDenseMap<int *, std::array<int, 64>, 32, LLVMHashingDenseMapInfo>)
-    ->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(5)->Arg(8)->Arg(9)->Arg(16)->Arg(17)->Arg(32)->Arg(33)
+BENCHMARK_TEMPLATE(BM_MapInsertPtrSeq,
+                   absl::flat_hash_map<int*, std::array<int, 64>, LLVMHash>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::DenseMap<int*, std::array<int, 1>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::DenseMap<int*, std::array<int, 2>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::DenseMap<int*, std::array<int, 4>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::DenseMap<int*, std::array<int, 64>, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 1>, 4, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 2>, 4, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 4>, 4, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 64>, 4, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 1>, 8, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 2>, 8, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 4>, 8, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 64>, 8, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 1>, 32, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 2>, 32, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 4>, 32, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
+    ->Range(1 << 6, 1 << 15);
+BENCHMARK_TEMPLATE(
+    BM_MapInsertPtrSeq,
+    llvm::SmallDenseMap<int*, std::array<int, 64>, 32, LLVMHashingDenseMapInfo>)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(3)
+    ->Arg(4)
+    ->Arg(5)
+    ->Arg(8)
+    ->Arg(9)
+    ->Arg(16)
+    ->Arg(17)
+    ->Arg(32)
+    ->Arg(33)
     ->Range(1 << 6, 1 << 15);
 
 }  // namespace
