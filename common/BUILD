@@ -109,6 +109,7 @@ cc_binary(
     srcs = ["map_benchmark.cpp"],
     deps = [
         ":map",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_github_google_benchmark//:benchmark_main",
     ],
 )
