@@ -45,9 +45,9 @@ namespace MapInternal {
 
 // Detect whether we can use SIMD accelerated implementations of the control
 // groups.
-#if defined(__SSSE3__)
+#if 1 || defined(__SSSE3__)
 #define CARBON_USE_SSE_CONTROL_GROUP 1
-#if defined(__SSE4_1__)
+#if 1 || defined(__SSE4_1__)
 #define CARBON_OPTIMIZE_SSE4_1 1
 #endif
 #endif
@@ -108,28 +108,28 @@ class GroupMatchedByteIterator
   friend class GroupMatchedByteRange<KeyT, ValueT, /*IsCmpVec=*/true>;
   friend class GroupMatchedByteRange<KeyT, ValueT, /*IsCmpVec=*/false>;
 
-  ssize_t ByteIndex;
+  ssize_t byte_index;
 
-  unsigned Mask = 0;
+  unsigned mask = 0;
 
-  explicit GroupMatchedByteIterator(unsigned mask) : Mask(mask) {}
+  explicit GroupMatchedByteIterator(unsigned mask) : mask(mask) {}
 
  public:
   GroupMatchedByteIterator() = default;
 
   auto operator==(const GroupMatchedByteIterator& rhs) const -> bool {
-    return Mask == rhs.Mask;
+    return mask == rhs.mask;
   }
 
   auto operator*() -> ssize_t& {
-    assert(Mask != 0 && "Cannot get an index from a zero mask!");
-    ByteIndex = llvm::countTrailingZeros(Mask, llvm::ZB_Undefined);
-    return ByteIndex;
+    assert(mask != 0 && "Cannot get an index from a zero mask!");
+    byte_index = llvm::countTrailingZeros(mask, llvm::ZB_Undefined);
+    return byte_index;
   }
 
   auto operator++() -> GroupMatchedByteIterator& {
-    assert(Mask != 0 && "Must not be called with a zero mask!");
-    Mask &= (Mask - 1);
+    assert(mask != 0 && "Must not be called with a zero mask!");
+    mask &= (mask - 1);
     return *this;
   }
 };
@@ -140,9 +140,9 @@ class GroupMatchedByteRange {
   using MatchedByteIterator = GroupMatchedByteIterator<KeyT, ValueT>;
 
 #if CARBON_OPTIMIZE_SSE4_1
-  __m128i MaskVec;
+  __m128i mask_vec;
 
-  GroupMatchedByteRange(__m128i MaskVec) : MaskVec(MaskVec) {}
+  explicit GroupMatchedByteRange(__m128i mask_vec) : mask_vec(mask_vec) {}
 #else
   unsigned Mask;
 
@@ -167,8 +167,8 @@ class GroupMatchedByteRange {
   auto empty() const -> bool {
 #if CARBON_OPTIMIZE_SSE4_1
     return _mm_test_all_zeros(
-        MaskVec,
-        IsCmpVec ? MaskVec : _mm_set1_epi8(static_cast<char>(0b10000000u)));
+        mask_vec,
+        IsCmpVec ? mask_vec : _mm_set1_epi8(static_cast<char>(0b10000000U)));
 #else
     return Mask == 0;
 #endif
@@ -176,8 +176,8 @@ class GroupMatchedByteRange {
 
   auto begin() const -> MatchedByteIterator {
 #if CARBON_OPTIMIZE_SSE4_1
-    unsigned Mask = _mm_movemask_epi8(MaskVec);
-    return MatchedByteIterator(Mask);
+    unsigned mask = _mm_movemask_epi8(mask_vec);
+    return MatchedByteIterator(mask);
 #else
     return MatchedByteIterator(Mask);
 #endif
@@ -201,7 +201,7 @@ struct Group {
   using MatchedByteRange = GroupMatchedByteRange<KeyT, ValueT, IsCmpVec>;
 
 #if CARBON_USE_SSE_CONTROL_GROUP
-  __m128i ByteVec = {};
+  __m128i byte_vec = {};
 #else
   alignas(GroupSize) std::array<uint8_t, GroupSize> Bytes = {};
 #endif
@@ -219,12 +219,12 @@ struct Group {
 
   auto match(uint8_t match_byte) const -> MatchedByteRange<> {
 #if CARBON_USE_SSE_CONTROL_GROUP
-    auto MatchByteVec = _mm_set1_epi8(MatchByte);
-    auto MatchByteCmpVec = _mm_cmpeq_epi8(ByteVec, MatchByteVec);
+    auto match_byte_vec = _mm_set1_epi8(match_byte);
+    auto match_byte_cmp_vec = _mm_cmpeq_epi8(byte_vec, match_byte_vec);
 #if CARBON_OPTIMIZE_SSE4_1
-    return {MatchByteCmpVec};
+    return MatchedByteRange<>(match_byte_cmp_vec);
 #else
-    return {(unsigned)_mm_movemask_epi8(MatchByteCmpVec)};
+    return MatchedByteRange<>((unsigned)_mm_movemask_epi8(MatchByteCmpVec));
 #endif
 #else
     unsigned mask = 0;
@@ -242,11 +242,11 @@ struct Group {
   auto matchPresent() const -> MatchedByteRange</*IsCmpVec=*/false> {
 #if CARBON_USE_SSE_CONTROL_GROUP
 #if CARBON_OPTIMIZE_SSE4_1
-    return {ByteVec};
+    return MatchedByteRange</*IsCmpVec=*/false>(byte_vec);
 #else
     // We arrange the byte vector for present bytes so that we can directly
     // extract it as a mask.
-    return {(unsigned)_mm_movemask_epi8(ByteVec)};
+    return MatchedByteRange</*IsCmpVec=*/false>((unsigned)_mm_movemask_epi8(ByteVec));
 #endif
 #else
     // Generic code to compute a bitmask.
@@ -262,7 +262,7 @@ struct Group {
 #if CARBON_USE_SSE_CONTROL_GROUP
     // We directly manipulate the storage of the vector as there isn't a nice
     // intrinsic for this.
-    ((unsigned char*)&ByteVec)[ByteIndex] = ControlByte;
+    reinterpret_cast<unsigned char*>(&byte_vec)[byte_index] = control_byte;
 #else
     Bytes[byte_index] = control_byte;
 #endif
@@ -270,7 +270,7 @@ struct Group {
 
   void clear() {
 #if CARBON_USE_SSE_CONTROL_GROUP
-    ByteVec = _mm_set1_epi8(Empty);
+    byte_vec = _mm_set1_epi8(Empty);
 #else
     for (int byte_index : llvm::seq(0, GroupSize)) {
       Bytes[byte_index] = Empty;
