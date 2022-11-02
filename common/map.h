@@ -95,18 +95,16 @@ class InsertKVResult {
 // bytes to understand the contents efficiently.
 constexpr int GroupSize = 16;
 
-template <typename KeyT, typename ValueT>
 struct Group;
-template <typename KeyT, typename ValueT, bool IsCmpVec = true>
+template <bool IsCmpVec = true>
 class GroupMatchedByteRange;
 
-template <typename KeyT, typename ValueT>
 class GroupMatchedByteIterator
-    : public llvm::iterator_facade_base<GroupMatchedByteIterator<KeyT, ValueT>,
+    : public llvm::iterator_facade_base<GroupMatchedByteIterator,
                                         std::forward_iterator_tag, int, int> {
-  friend struct Group<KeyT, ValueT>;
-  friend class GroupMatchedByteRange<KeyT, ValueT, /*IsCmpVec=*/true>;
-  friend class GroupMatchedByteRange<KeyT, ValueT, /*IsCmpVec=*/false>;
+  friend struct Group;
+  friend class GroupMatchedByteRange</*IsCmpVec=*/true>;
+  friend class GroupMatchedByteRange</*IsCmpVec=*/false>;
 
   ssize_t byte_index;
 
@@ -134,10 +132,10 @@ class GroupMatchedByteIterator
   }
 };
 
-template <typename KeyT, typename ValueT, bool IsCmpVec>
+template <bool IsCmpVec>
 class GroupMatchedByteRange {
-  friend struct Group<KeyT, ValueT>;
-  using MatchedByteIterator = GroupMatchedByteIterator<KeyT, ValueT>;
+  friend struct Group;
+  using MatchedByteIterator = GroupMatchedByteIterator;
 
 #if CARBON_OPTIMIZE_SSE4_1
   __m128i mask_vec;
@@ -186,7 +184,6 @@ class GroupMatchedByteRange {
   auto end() const -> MatchedByteIterator { return MatchedByteIterator(); }
 };
 
-template <typename KeyT, typename ValueT>
 struct Group {
   // Each control byte can have special values. All special values have the
   // most significant bit set to distinguish them from the seven hash bits
@@ -198,24 +195,13 @@ struct Group {
   static constexpr uint8_t Deleted = 1;
 
   template <bool IsCmpVec = true>
-  using MatchedByteRange = GroupMatchedByteRange<KeyT, ValueT, IsCmpVec>;
+  using MatchedByteRange = GroupMatchedByteRange<IsCmpVec>;
 
 #if CARBON_USE_SSE_CONTROL_GROUP
   __m128i byte_vec = {};
 #else
   alignas(GroupSize) std::array<uint8_t, GroupSize> Bytes = {};
 #endif
-
-  // Now we need storage for the keys in this group and the values in this
-  // group. We put the keys first to pack as many keys onto the same cacheline
-  // as the control bytes, and then onto linear subsequent cache lines to
-  // facilitate linear prefetching pulling those cache lines in advance.
-  union {
-    KeyT Keys[GroupSize];
-  };
-  union {
-    ValueT Values[GroupSize];
-  };
 
   auto match(uint8_t match_byte) const -> MatchedByteRange<> {
 #if CARBON_USE_SSE_CONTROL_GROUP
@@ -278,6 +264,75 @@ struct Group {
 #endif
   }
 };
+
+// Type alias used for readability when trafficking in raw pointers to the allocated storage for a map.
+using Storage = unsigned char;
+
+template <typename KeyT, typename ValueT>
+constexpr ssize_t StorageAlignment = std::max(GroupSize, alignof(KeyT), alignof(ValueT));
+
+auto getGroupStoragePtr(Storage* storage) -> Group* {
+  return reinterpret_cast<Group*>(storage);
+}
+auto getGroupStoragePtr(const Storage* storage) -> const Group* {
+  return getGroupStoragePtr(const_cast<Storage*>(storage));
+}
+
+template <typename KeyT>
+auto getKeyStorageOffset(ssize_t size) -> ssize_t {
+  // Skip the group bytes.
+  ssize_t offset = llvm::alignTo(size, GroupSize);
+
+  // And any alignment needed for the key type.
+  return llvm::alignTo(offset, alignof(KeyT));
+}
+template <typename KeyT>
+auto getKeyStoragePtr(Storage* storage, ssize_t size) -> KeyT* {
+  return reinterpret_cast<KeyT*>(storage + getKeyStorageOffset<KeyT>(size));
+}
+template <typename KeyT>
+auto getKeyStoragePtr(const Storage* storage, ssize_t size) -> const KeyT* {
+  return getKeyStoragePtr<KeyT>(const_cast<Storage*>(storage), size);
+}
+
+template <typename KeyT, typename ValueT>
+auto getValueStorageOffset(ssize_t size) -> ssize_t {
+  ssize_t offset = getKeyStorageOffset<KeyT>(size);
+
+  // Skip the keys themselves.
+  offset += sizeof(KeyT) * size;
+
+  // And skip the alignment for the value type.
+  return llvm::alignTo(offset, alignof(ValueT));
+}
+template <typename KeyT, typename ValueT>
+auto getValueStoragePtr(Storage* storage, ssize_t size) -> ValueT* {
+  return reinterpret_cast<ValueT*>(storage +
+                                   getValueStorageOffset<KeyT, ValueT>(size));
+}
+template <typename KeyT, typename ValueT>
+auto getValueStoragePtr(const Storage* storage, ssize_t size) -> const ValueT* {
+  return getValueStoragePtr<KeyT, ValueT>(const_cast<Storage*>(storage), size);
+}
+
+template <typename KeyT, typename ValueT>
+auto computeStorageSize(ssize_t size) -> ssize_t {
+  return getValueStorageOffset<KeyT, ValueT>(size) + sizeof(ValueT) * size;
+}
+
+template <typename KeyT, typename ValueT>
+auto allocateStorage(ssize_t size) -> Storage* {
+  ssize_t allocated_size = computeStorageSize<KeyT, ValueT>(size);
+  return __builtin_operator_new(allocated_size, StorageAlignment<KeyT, ValueT>,
+                                std::nothrow_t());
+}
+
+template <typename KeyT, typename ValueT>
+void deallocateStorage(Storage* storage, ssize_t size) {
+  ssize_t allocated_size = computeStorageSize<KeyT, ValueT>(size);
+  return __builtin_operator_delete(storage, allocated_size,
+                                   StorageAlignment<KeyT, ValueT>);
+}
 
 constexpr int EntropyMask = INT_MAX & ~(GroupSize - 1);
 
