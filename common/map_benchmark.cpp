@@ -27,13 +27,17 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
 
   MapT M;
 
-  auto BenchLookup(KeyT k) -> bool {
-    auto* v = M[k];
+  MapView<KT, VT> MV = M;
+
+  void CreateView() { MV = M; }
+
+  [[clang::noinline]] auto BenchLookup(KeyT k) -> ValueT* {
+    ValueT* v = MV[k];
     benchmark::DoNotOptimize(v);
-    return v != nullptr;
+    return v;
   }
 
-  auto BenchInsert(KeyT k, ValueT v) -> bool {
+  [[clang::noinline]] auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert(k, v);
     benchmark::DoNotOptimize(result.isInserted());
     return result.isInserted();
@@ -47,14 +51,17 @@ struct MapWrapper<absl::flat_hash_map<KT, VT, HasherT>> {
   using ValueT = VT;
 
   MapT M;
+  
+  void CreateView() {}
 
-  auto BenchLookup(KeyT k) -> bool {
+  [[clang::noinline]] auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
-    benchmark::DoNotOptimize(it);
-    return it != M.end();
+    ValueT* v = &it->second;
+    benchmark::DoNotOptimize(v);
+    return v;
   }
 
-  auto BenchInsert(KeyT k, ValueT v) -> bool {
+  [[clang::noinline]] auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert({k, v});
     benchmark::DoNotOptimize(result.second);
     return result.second;
@@ -69,13 +76,16 @@ struct MapWrapper<llvm::DenseMap<KT, VT, HasherT>> {
 
   MapT M;
 
-  auto BenchLookup(KeyT k) -> bool {
+  void CreateView() {}
+
+  [[clang::noinline]] auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
-    benchmark::DoNotOptimize(it);
-    return it != M.end();
+    ValueT* v = &it->second;
+    benchmark::DoNotOptimize(v);
+    return v;
   }
 
-  auto BenchInsert(KeyT k, ValueT v) -> bool {
+  [[clang::noinline]] auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert({k, v});
     benchmark::DoNotOptimize(result.second);
     return result.second;
@@ -92,8 +102,9 @@ struct MapWrapper<llvm::SmallDenseMap<KT, VT, SmallSize, HasherT>> {
 
   auto BenchLookup(KeyT k) -> bool {
     auto it = M.find(k);
-    benchmark::DoNotOptimize(it);
-    return it != M.end();
+    ValueT* v = &it->second;
+    benchmark::DoNotOptimize(v);
+    return v;
   }
 
   auto BenchInsert(KeyT k, ValueT v) -> bool {
@@ -144,6 +155,7 @@ struct LLVMHashingDenseMapInfo {
 
 using KeyVectorT = llvm::SmallVector<std::unique_ptr<int>, 32>;
 
+[[clang::noinline]]
 auto BuildKeys(
     ssize_t size, llvm::function_ref<void(int*)> callback = [](int*) {})
     -> KeyVectorT {
@@ -161,6 +173,7 @@ auto BuildKeys(
 
 constexpr ssize_t NumShuffledKeys = 1024LL * 64;
 
+[[clang::noinline]]
 auto BuildShuffledKeys(const KeyVectorT& keys) -> llvm::SmallVector<int*, 32> {
   std::random_device r_dev;
   std::seed_seq seed(
@@ -214,11 +227,13 @@ static void BM_MapLookupHitPtr(benchmark::State& s) {
       BuildKeys(s.range(0), [&m](int* key) { m.BenchInsert(key, T()); });
   llvm::SmallVector<int*, 32> shuffled_keys = BuildShuffledKeys(keys);
 
+  m.CreateView();
+
   ssize_t i = 0;
   for (auto _ : s) {
-    bool result = m.BenchLookup(shuffled_keys[i]);
-    assert(result && "Lookup must succeed!");
-    (void)result;
+    T* value = m.BenchLookup(shuffled_keys[i]);
+    assert(value && "Lookup must succeed!");
+    (void)value;
     i = (i + 1) & (NumShuffledKeys - 1);
   }
 }
@@ -236,9 +251,9 @@ static void BM_MapLookupMissPtr(benchmark::State& s) {
 
   ssize_t i = 0;
   for (auto _ : s) {
-    bool result = m.BenchLookup(other_keys[i].get());
-    assert(!result && "Lookup must fail!");
-    (void)result;
+    T* value = m.BenchLookup(other_keys[i].get());
+    assert(!value && "Lookup must fail!");
+    (void)value;
     i = (i + 1) & (NumOtherKeys - 1);
   }
 }

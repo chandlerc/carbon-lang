@@ -47,15 +47,15 @@ namespace MapInternal {
 // groups.
 #if 1 || defined(__SSSE3__)
 #define CARBON_USE_SSE_CONTROL_GROUP 1
-#if 1 || defined(__SSE4_1__)
+#if 0 && defined(__SSE4_1__)
 #define CARBON_OPTIMIZE_SSE4_1 1
 #endif
 #endif
 
 struct MapInfo {
   ssize_t size;
-  int growth_budget;
   int entropy;
+  int growth_budget;
 };
 
 template <typename KeyT, typename ValueT>
@@ -97,6 +97,7 @@ constexpr ssize_t GroupSize = 16;
 static_assert(llvm::isPowerOf2_64(GroupSize),
               "The group size must be a constant power of two so dividing by "
               "it is a simple shift.");
+constexpr ssize_t GroupMask = GroupSize - 1;
 
 struct Group;
 template <bool IsCmpVec = true>
@@ -145,9 +146,9 @@ class GroupMatchedByteRange {
 
   explicit GroupMatchedByteRange(__m128i mask_vec) : mask_vec(mask_vec) {}
 #else
-  unsigned Mask;
+  unsigned mask_;
 
-  explicit GroupMatchedByteRange(unsigned mask) : Mask(mask) {}
+  explicit GroupMatchedByteRange(unsigned mask) : mask_(mask) {}
 #endif
 
  public:
@@ -171,7 +172,7 @@ class GroupMatchedByteRange {
         mask_vec,
         IsCmpVec ? mask_vec : _mm_set1_epi8(static_cast<char>(0b10000000U)));
 #else
-    return Mask == 0;
+    return mask_ == 0;
 #endif
   }
 
@@ -180,7 +181,7 @@ class GroupMatchedByteRange {
     unsigned mask = _mm_movemask_epi8(mask_vec);
     return MatchedByteIterator(mask);
 #else
-    return MatchedByteIterator(Mask);
+    return MatchedByteIterator(mask_);
 #endif
   }
 
@@ -206,6 +207,30 @@ struct Group {
   alignas(GroupSize) std::array<uint8_t, GroupSize> Bytes = {};
 #endif
 
+  static auto load(uint8_t* groups, ssize_t index)
+      -> Group {
+    Group g;
+#if CARBON_USE_SSE_CONTROL_GROUP
+    g.byte_vec =
+        _mm_load_si128(reinterpret_cast<__m128i*>(groups + index));
+#else
+    std::memcpy(&g.Bytes, groups + index, GroupSize);
+#endif
+    return g;
+  }
+
+  static auto load(llvm::MutableArrayRef<uint8_t> groups, ssize_t index)
+      -> Group {
+    Group g;
+#if CARBON_USE_SSE_CONTROL_GROUP
+    g.byte_vec =
+        _mm_load_si128(reinterpret_cast<__m128i*>(groups.data() + index));
+#else
+    std::memcpy(&g.Bytes, groups.data() + index, GroupSize);
+#endif
+    return g;
+  }
+
   auto match(uint8_t match_byte) const -> MatchedByteRange<> {
 #if CARBON_USE_SSE_CONTROL_GROUP
     auto match_byte_vec = _mm_set1_epi8(match_byte);
@@ -213,7 +238,7 @@ struct Group {
 #if CARBON_OPTIMIZE_SSE4_1
     return MatchedByteRange<>(match_byte_cmp_vec);
 #else
-    return MatchedByteRange<>((unsigned)_mm_movemask_epi8(MatchByteCmpVec));
+    return MatchedByteRange<>((unsigned)_mm_movemask_epi8(match_byte_cmp_vec));
 #endif
 #else
     unsigned mask = 0;
@@ -235,7 +260,7 @@ struct Group {
 #else
     // We arrange the byte vector for present bytes so that we can directly
     // extract it as a mask.
-    return MatchedByteRange</*IsCmpVec=*/false>((unsigned)_mm_movemask_epi8(ByteVec));
+    return MatchedByteRange</*IsCmpVec=*/false>((unsigned)_mm_movemask_epi8(byte_vec));
 #endif
 #else
     // Generic code to compute a bitmask.
@@ -247,6 +272,7 @@ struct Group {
 #endif
   }
 
+#if 0
   void setByte(ssize_t byte_index, uint8_t control_byte) {
 #if CARBON_USE_SSE_CONTROL_GROUP
     // We directly manipulate the storage of the vector as there isn't a nice
@@ -256,7 +282,9 @@ struct Group {
     Bytes[byte_index] = control_byte;
 #endif
   }
+#endif
 
+#if 0
   void clear() {
 #if CARBON_USE_SSE_CONTROL_GROUP
     byte_vec = _mm_set1_epi8(Empty);
@@ -266,6 +294,7 @@ struct Group {
     }
 #endif
   }
+#endif
 };
 
 // We use pointers to this empty class to model the pointer to a dynamically
@@ -280,11 +309,8 @@ constexpr ssize_t StorageAlignment =
 
 template <typename KeyT>
 constexpr auto ComputeKeyStorageOffset(ssize_t size) -> ssize_t {
-  // Skip the group bytes.
-  ssize_t offset = llvm::alignTo<GroupSize>(size);
-
-  // And any alignment needed for the key type.
-  return llvm::alignTo<alignof(KeyT)>(offset);
+  // There are `size` control bytes plus any alignment needed for the key type.
+  return llvm::alignTo<alignof(KeyT)>(size);
 }
 
 template <typename KeyT, typename ValueT>
@@ -304,24 +330,97 @@ constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
 
 constexpr int EntropyMask = INT_MAX & ~(GroupSize - 1);
 
+constexpr ssize_t CachelineSize = 64;
+
 template <typename KeyT>
 constexpr auto getKeysInCacheline() -> ssize_t {
-  constexpr ssize_t CachelineSize = 64;
-
   return CachelineSize / sizeof(KeyT);
 }
 
+template <typename KeyT, typename ValueT>
+constexpr auto DefaultMinSmallSize() -> ssize_t {
+  return (CachelineSize - sizeof(MapInfo)) / (sizeof(KeyT) + sizeof(ValueT));
+}
+
 template <typename KeyT>
-constexpr auto shouldUseLinearLookup(ssize_t small_size) -> bool {
+constexpr auto ShouldUseLinearLookup(ssize_t small_size) -> bool {
+  //return false;
   return small_size <= getKeysInCacheline<KeyT>();
+}
+
+template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
+constexpr auto ComputeSmallSize() -> ssize_t {
+  constexpr ssize_t LinearSizeInPointer =
+      sizeof(void*) / (sizeof(KeyT) + sizeof(ValueT));
+  constexpr ssize_t SmallSizeFloor =
+      MinSmallSize < LinearSizeInPointer ? LinearSizeInPointer : MinSmallSize;
+  constexpr bool UseLinearLookup =
+      MapInternal::ShouldUseLinearLookup<KeyT>(SmallSizeFloor);
+
+  return UseLinearLookup
+             ? SmallSizeFloor
+             : llvm::alignTo<MapInternal::GroupSize>(SmallSizeFloor);
+}
+
+// Compute an artificial alignment for the map data structure to try to keep its
+// small-size buffer on the same cacheline as the structure itself.
+// Frustratingly we have to do this based on just the raw template parameters
+// which makes it duplicate some logic from the data structure itself.
+template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
+constexpr auto ComputeMapAlignment() -> ssize_t {
+  constexpr ssize_t SmallSize =
+      MapInternal::ComputeSmallSize<KeyT, ValueT, MinSmallSize>();
+  constexpr bool UseLinearLookup =
+      MapInternal::ShouldUseLinearLookup<KeyT>(SmallSize);
+  
+  struct Baseline {
+    MapInfo info;
+    Storage* storage;
+  };
+  struct LinearLayout {
+    MapInfo info;
+    KeyT keys[SmallSize];
+    ValueT values[SmallSize];
+  };
+  if (SmallSize == 0) {
+    return alignof(Baseline);
+  }
+  if (UseLinearLookup) {
+    if (sizeof(LinearLayout) <= CachelineSize) {
+      // Inflate the alignment to the size when it will fit in a cacheline so we
+      // don't straddle cachelines when searching in the small linear case.
+      return llvm::NextPowerOf2(sizeof(LinearLayout));
+    }
+    return alignof(LinearLayout);
+  }
+  return StorageAlignment<KeyT, ValueT>;
 }
 
 template <typename KeyT, typename ValueT, bool UseLinearLookup, ssize_t SmallSize>
 struct SmallSizeStorage;
 
+template <typename KeyT, typename ValueT>
+struct SmallSizeStorage<KeyT, ValueT, true, 0> : Storage {
+  union {
+    KeyT keys[0];
+  };
+  union {
+    ValueT values[0];
+  };
+};
+
+template <typename KeyT, typename ValueT>
+struct SmallSizeStorage<KeyT, ValueT, false, 0> : Storage {
+  union {
+    KeyT keys[0];
+  };
+  union {
+    ValueT values[0];
+  };
+};
+
 template <typename KeyT, typename ValueT, ssize_t SmallSize>
-struct alignas(StorageAlignment<KeyT, ValueT>)
-    SmallSizeStorage<KeyT, ValueT, true, SmallSize> : Storage {
+struct SmallSizeStorage<KeyT, ValueT, true, SmallSize> : Storage {
   union {
     KeyT keys[SmallSize];
   };
@@ -353,13 +452,6 @@ struct alignas(StorageAlignment<KeyT, ValueT>)
   union {
     ValueT values[SmallSize];
   };
-};
-
-template <typename KeyT, typename ValueT, bool UseLinearLookup, ssize_t SmallSize>
-union StorageImpl {
-  MapInternal::Storage* allocated_storage_;
-  mutable MapInternal::SmallSizeStorage<KeyT, ValueT, UseLinearLookup, SmallSize>
-      small_storage_;
 };
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
@@ -427,12 +519,14 @@ class MapView {
   }
 
   template <typename LookupKeyT>
+  [[clang::always_inline]]
   auto lookup(const LookupKeyT& lookup_key) const -> LookupKVResultT {
     return MapInternal::lookup<KeyT, ValueT>(lookup_key, size_, entropy_,
                                              small_size(), storage_);
   }
 
   template <typename LookupKeyT>
+  [[clang::always_inline]]
   auto operator[](const LookupKeyT& lookup_key) const -> ValueT* {
     auto result = lookup(lookup_key);
     return result ? &result.getValue() : nullptr;
@@ -648,8 +742,11 @@ class MapRef {
   auto is_small() const -> bool { return entropy() < 0; }
 };
 
-template <typename InputKeyT, typename InputValueT, ssize_t MinSmallSize = 0>
-class Map {
+template <typename InputKeyT, typename InputValueT,
+          ssize_t MinSmallSize =
+              MapInternal::DefaultMinSmallSize<InputKeyT, InputValueT>()>
+class alignas(MapInternal::ComputeMapAlignment<InputKeyT, InputValueT,
+                                               MinSmallSize>()) Map {
  public:
   using KeyT = InputKeyT;
   using ValueT = InputValueT;
@@ -814,35 +911,34 @@ class Map {
   }
 
  private:
-  static constexpr ssize_t LinearSizeInPointer =
-      sizeof(void*) / (sizeof(KeyT) + sizeof(ValueT));
   static constexpr ssize_t SmallSize =
-      MinSmallSize < LinearSizeInPointer ? LinearSizeInPointer : MinSmallSize;
+      MapInternal::ComputeSmallSize<KeyT, ValueT, MinSmallSize>();
   static constexpr bool UseLinearLookup =
-      MapInternal::shouldUseLinearLookup<KeyT>(SmallSize);
+      MapInternal::ShouldUseLinearLookup<KeyT>(SmallSize);
 
   static_assert(SmallSize >= 0, "Cannot have a negative small size!");
 
-  using SmallSizeBufferT = MapInternal::SmallSizeStorage<KeyT, ValueT, UseLinearLookup, SmallSize>;
+  using SmallSizeStorageT = MapInternal::SmallSizeStorage<KeyT, ValueT, UseLinearLookup, SmallSize>;
 
   // Validate a collection of invariants between the small size storage layout
   // and the dynamically computed storage layout. We need to do this after both
   // are complete but in the context of a specific key type, value type, and
   // small size, so here is the best place.
-  static_assert(SmallSize == 0 || (alignof(SmallSizeBufferT) ==
-                                   MapInternal::StorageAlignment<KeyT, ValueT>),
+  static_assert(SmallSize == 0 || UseLinearLookup ||
+                    (alignof(SmallSizeStorageT) ==
+                     MapInternal::StorageAlignment<KeyT, ValueT>),
                 "Small size buffer must have the same alignment as a heap "
                 "allocated buffer.");
   static_assert(
       SmallSize == 0 ||
-          (offsetof(SmallSizeBufferT, keys) ==
+          (offsetof(SmallSizeStorageT, keys) ==
            (UseLinearLookup
                 ? 0
                 : MapInternal::ComputeKeyStorageOffset<KeyT>(SmallSize))),
       "Offset to keys in small size storage doesn't match computed offset!");
   static_assert(
       SmallSize == 0 ||
-          (offsetof(SmallSizeBufferT, values) ==
+          (offsetof(SmallSizeStorageT, values) ==
            (UseLinearLookup
                 ? 0
                 : MapInternal::ComputeKeyStorageOffset<KeyT>(SmallSize)) +
@@ -850,7 +946,7 @@ class Map {
       "Offset from keys to values in small size storage doesn't match computed "
       "offset!");
   static_assert(SmallSize == 0 || UseLinearLookup ||
-                    (sizeof(SmallSizeBufferT) ==
+                    (sizeof(SmallSizeStorageT) ==
                      MapInternal::ComputeStorageSize<KeyT, ValueT>(SmallSize)),
                 "The small size storage needs to match the dynamically "
                 "computed storage size.");
@@ -877,7 +973,6 @@ class Map {
   auto storage() const -> MapInternal::Storage* {
     return !is_small() ? allocated_storage_ : small_storage();
   }
-
 };
 
 // Implementation of the routines in `map_internal` that are used above.
@@ -907,27 +1002,34 @@ auto getLinearValues(Storage* storage, ssize_t small_size) -> ValueT* {
       storage + ComputeValueStorageOffset<KeyT, ValueT>(small_size));
 }
 
+template <typename KeyT, typename ValueT>
+inline auto getValueFromKey(KeyT* key, ssize_t size) -> ValueT* {
+  return reinterpret_cast<ValueT*>(
+      reinterpret_cast<unsigned char*>(key) +
+      ComputeValueStorageOffset<KeyT, ValueT>(size));
+}
+
 template <typename KeyT, typename ValueT, typename LookupKeyT>
 auto lookupSmallLinear(const LookupKeyT& lookup_key, ssize_t size, ssize_t small_size,
                        Storage* storage) -> LookupKVResult<KeyT, ValueT> {
   KeyT* keys = getLinearKeys<KeyT>(storage);
-  ValueT* values = getLinearValues<KeyT, ValueT>(storage, small_size);
-  for (ssize_t i : llvm::seq<ssize_t>(0, size)) {
-    if (keys[i] == lookup_key) {
-      return {&keys[i], &values[i]};
+  for (ssize_t i = 0; i < size; ++i) {
+    KeyT *key = &keys[i];
+    if (*key == lookup_key) {
+      return {key, getValueFromKey<KeyT, ValueT>(key, small_size)};
     }
   }
 
   return {nullptr, nullptr};
 }
 
-inline auto computeProbeMaskFromSize(ssize_t groups_size) -> size_t {
-  assert(llvm::isPowerOf2_64(groups_size) &&
+inline auto computeProbeMaskFromSize(ssize_t size) -> size_t {
+  assert(llvm::isPowerOf2_64(size) &&
          "Size must be a power of two for a hashed buffer!");
   // The probe mask needs to mask down to keep the index within
   // `groups_size`. Since `groups_size` is a power of two, this is equivalent to
   // `groups_size - 1`.
-  return groups_size - 1;
+  return (size - 1) & ~GroupMask;
 }
 
 /// This class handles building a sequence of probe indices from a given
@@ -940,10 +1042,15 @@ inline auto computeProbeMaskFromSize(ssize_t groups_size) -> size_t {
 /// it mathematically and will check that the incremental result matches our
 /// mathematical expectation. We use the quadratic probing formula of:
 ///
-///   p(x,s) = (x + (s + s^2)/2) mod Size
+///   p(x,s) = (x + (s + s^2)/2) mod (Size / GroupSize)
 ///
 /// This particular quadratic sequence will visit every value modulo the
-/// provided size.
+/// provided size divided by the group size.
+///
+/// However, we compute it scaled to the group size constant G and have it visit
+/// each G multiple modulo the size using the scaled formula:
+/// 
+///   p(x,s) = (x + (s + (s * s * G)/(G * G))/2) mod Size
 class ProbeSequence {
   ssize_t Step = 0;
   size_t Mask;
@@ -958,15 +1065,18 @@ class ProbeSequence {
     Mask = computeProbeMaskFromSize(size);
     i = start & Mask;
 #ifndef NDEBUG
-    this->Start = start;
+    this->Start = start & Mask;
     this->Size = size;
 #endif
   }
 
   void step() {
-    ++Step;
+    Step += GroupSize;
     i = (i + Step) & Mask;
-    assert(i == (((ssize_t)(Start & Mask) + (Step + Step * Step) / 2) % Size) &&
+    assert(i == ((Start + ((Step + (Step * Step * GroupSize) /
+                                       (GroupSize * GroupSize)) /
+                           2)) %
+                 Size) &&
            "Index in probe sequence does not match the expected formula.");
     assert(Step < Size &&
            "We necessarily visit all groups, so we can't have "
@@ -987,8 +1097,8 @@ inline auto computeHashIndex(size_t hash, int entropy) -> ssize_t {
 }
 
 template <typename LookupKeyT, typename KeyT>
-auto lookupIndexHashed(const LookupKeyT& lookup_key, int entropy,
-                       llvm::MutableArrayRef<Group> groups, KeyT* keys)
+inline auto lookupIndexHashed(LookupKeyT lookup_key, ssize_t size,
+                              int entropy, uint8_t* groups, KeyT* keys)
     -> ssize_t {
   //__asm volatile ("# LLVM-MCA-BEGIN hit");
   //__asm volatile ("# LLVM-MCA-BEGIN miss");
@@ -996,17 +1106,18 @@ auto lookupIndexHashed(const LookupKeyT& lookup_key, int entropy,
   uint8_t control_byte = computeControlByte(hash);
   ssize_t hash_index = computeHashIndex(hash, entropy);
 
-  ProbeSequence s(hash_index, groups.size());
+  ProbeSequence s(hash_index, size);
   do {
     ssize_t group_index = s.getIndex();
-    Group& g = groups[group_index];
+    Group g = Group::load(groups, group_index);
     auto control_byte_matched_range = g.match(control_byte);
     if (LLVM_LIKELY(control_byte_matched_range)) {
       auto byte_it = control_byte_matched_range.begin();
       auto byte_end = control_byte_matched_range.end();
       do {
-        ssize_t index = group_index * GroupSize + *byte_it;
+        ssize_t index = group_index + *byte_it;
         if (LLVM_LIKELY(keys[index] == lookup_key)) {
+          __builtin_assume(index > 0);
           return index;
         }
         ++byte_it;
@@ -1033,52 +1144,66 @@ inline auto getRawStorage(Storage* storage) -> unsigned char * {
   return reinterpret_cast<unsigned char*>(storage);
 }
 
-inline auto getGroups(Storage* storage, ssize_t size) -> llvm::MutableArrayRef<Group> {
-  return llvm::makeMutableArrayRef(reinterpret_cast<Group*>(storage),
-                                   getGroupsSize(size));
+inline auto getGroupsPtr(Storage* storage) -> uint8_t* {
+  return reinterpret_cast<uint8_t*>(storage);
+}
+
+inline auto getGroups(Storage* storage, ssize_t size) -> llvm::MutableArrayRef<uint8_t> {
+  assert((size % GroupSize) == 0 &&
+         "Size must be an exact multiple of the group size.");
+  return llvm::makeMutableArrayRef(getGroupsPtr(storage), size);
 }
 
 template <typename KeyT>
 inline auto getKeys(Storage* storage, ssize_t size) -> KeyT* {
-  return reinterpret_cast<KeyT*>(getRawStorage(storage) + ComputeKeyStorageOffset<KeyT>(size));
+  assert(llvm::isPowerOf2_64(size) &&
+         "Size must be a power of two for a hashed buffer!");
+  assert(size == ComputeKeyStorageOffset<KeyT>(size) &&
+         "Cannot be more aligned than a power of two.");
+  return reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(storage) + size);
 }
 
 template <typename KeyT, typename ValueT>
 inline auto getValues(Storage* storage, ssize_t size) -> ValueT* {
-  return reinterpret_cast<ValueT*>(getRawStorage(storage) + ComputeKeyStorageOffset<KeyT>(size) +
+  return reinterpret_cast<ValueT*>(reinterpret_cast<unsigned char*>(storage) + ComputeKeyStorageOffset<KeyT>(size) +
                                    ComputeValueStorageOffset<KeyT, ValueT>(size));
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
 auto containsHashed(const LookupKeyT& lookup_key, ssize_t size, int entropy,
                     Storage* storage) -> bool {
-  llvm::MutableArrayRef<Group> groups = getGroups(storage, size);
+  //llvm::MutableArrayRef<uint8_t> groups = getGroups(storage, size);
+  uint8_t* groups = getGroupsPtr(storage);
   KeyT* keys = getKeys<KeyT>(storage, size);
-  return lookupIndexHashed(lookup_key, entropy, groups, keys) >= 0;
+  return lookupIndexHashed(lookup_key, size, entropy, groups, keys) >= 0;
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto lookupHashed(const LookupKeyT& lookup_key, ssize_t size, int entropy,
-                  Storage* storage) -> LookupKVResult<KeyT, ValueT> {
-  llvm::MutableArrayRef<Group> groups = getGroups(storage, size);
+[[clang::always_inline]]
+auto lookupHashed(LookupKeyT lookup_key, ssize_t size,
+                                      int entropy, Storage* storage)
+    -> LookupKVResult<KeyT, ValueT> {
+  //llvm::MutableArrayRef<uint8_t> groups = getGroups(storage, size);
+  uint8_t* groups = getGroupsPtr(storage);
   KeyT* keys = getKeys<KeyT>(storage, size);
-  ValueT* values = getValues<KeyT, ValueT>(storage, size);
 
-  ssize_t index = lookupIndexHashed(lookup_key, entropy, groups, keys);
+  ssize_t index = lookupIndexHashed(lookup_key, size, entropy, groups, keys);
   if (index < 0) {
     return {nullptr, nullptr};
   }
 
+  ValueT* values = getValueFromKey<KeyT, ValueT>(keys, size);
   return {&keys[index], &values[index]};
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
 auto contains(const LookupKeyT& lookup_key, ssize_t size, int entropy,
               ssize_t small_size, Storage* storage) -> bool {
+  _mm_prefetch(storage, _MM_HINT_T2);
   // The entropy will be negative when using the small buffer, and we can
   // recompute from the small buffer size whether that implies linear lookups
   // due to fitting on a cacheline.
-  if (shouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
     return containsSmallLinear<KeyT>(lookup_key, size, storage);
   }
 
@@ -1088,18 +1213,57 @@ auto contains(const LookupKeyT& lookup_key, ssize_t size, int entropy,
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
+[[clang::always_inline]]
 auto lookup(const LookupKeyT& lookup_key, ssize_t size, int entropy, ssize_t small_size,
             Storage* storage) -> LookupKVResult<KeyT, ValueT> {
+  _mm_prefetch(storage, _MM_HINT_T2);
   // The entropy will be negative when using the small buffer, and we can
   // recompute from the small buffer size whether that implies linear lookups
   // due to fitting on a cacheline.
-  if (shouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
     return lookupSmallLinear<KeyT, ValueT>(lookup_key, size, small_size, storage);
   }
 
+#if 1
   // Otherwise we dispatch to the hashed routine which is the same for small
   // and large.
   return lookupHashed<KeyT, ValueT>(lookup_key, size, entropy, storage);
+#else
+  size_t hash = llvm::hash_value(lookup_key);
+  ssize_t hash_index = computeHashIndex(hash, entropy);
+  ProbeSequence s(hash_index, size);
+
+  uint8_t control_byte = computeControlByte(hash);
+  uint8_t* groups = getGroupsPtr(storage);
+  do {
+    ssize_t group_index = s.getIndex();
+    Group g = Group::load(groups, group_index);
+    auto control_byte_matched_range = g.match(control_byte);
+    if (LLVM_LIKELY(control_byte_matched_range)) {
+      auto byte_it = control_byte_matched_range.begin();
+      auto byte_end = control_byte_matched_range.end();
+      do {
+        ssize_t index = group_index + *byte_it;
+        KeyT* keys = getKeys<KeyT>(storage, size);
+        if (LLVM_LIKELY(keys[index] == lookup_key)) {
+          __builtin_assume(index > 0);
+          ValueT* values = getValueFromKey<KeyT, ValueT>(keys, size);
+          return {&keys[index], &values[index]};
+        }
+        ++byte_it;
+      } while (LLVM_UNLIKELY(byte_it != byte_end));
+    }
+
+    // We failed to find a matching entry in this bucket, so check if there are
+    // empty slots and we're done probing.
+    auto empty_byte_matched_range = g.matchEmpty();
+    if (LLVM_LIKELY(empty_byte_matched_range)) {
+      return {nullptr, nullptr};
+    }
+
+    s.step();
+  } while (LLVM_UNLIKELY(true));
+#endif
 }
 
 template <typename KeyT, typename ValueT, typename CallbackT>
@@ -1116,35 +1280,36 @@ template <typename KeyT, typename ValueT, typename KVCallbackT,
           typename GroupCallbackT>
 void forEachHashed(ssize_t size, Storage* storage, KVCallbackT kv_callback,
                    GroupCallbackT group_callback) {
-  llvm::MutableArrayRef<Group> groups = getGroups(storage, size);
+  llvm::MutableArrayRef<uint8_t> groups = getGroups(storage, size);
   KeyT* keys = getKeys<KeyT>(storage, size);
   ValueT* values = getValues<KeyT, ValueT>(storage, size);
 
-  for (ssize_t group_index : llvm::seq<ssize_t>(0, groups.size())) {
-    Group& g = groups[group_index];
+  for (ssize_t group_index = 0; group_index < size; group_index += GroupSize) {
+    Group g = Group::load(groups, group_index);
     auto present_matched_range = g.matchPresent();
     if (!present_matched_range) {
       continue;
     }
     for (ssize_t byte_index : present_matched_range) {
-      ssize_t index = group_index * GroupSize + byte_index;
+      ssize_t index = group_index + byte_index;
       kv_callback(keys[index], values[index]);
     }
 
-    group_callback(g);
+    group_callback(groups, group_index);
   }
 }
 
 template <typename KeyT, typename ValueT, typename CallbackT>
 void forEach(ssize_t size, int entropy, ssize_t small_size, Storage* storage,
              CallbackT callback) {
-  if (shouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
+  _mm_prefetch(storage, _MM_HINT_T2);
+  if (ShouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
     forEachLinear<KeyT, ValueT>(size, small_size, storage, callback);
     return;
   }
 
   // Otherwise walk the non-empty slots in each control group.
-  forEachHashed<KeyT, ValueT>(size, storage, callback, [](Group& /*group*/) {});
+  forEachHashed<KeyT, ValueT>(size, storage, callback, [](auto...) {});
 }
 
 // Tries to insert the given lookup key into the map. Returns three pieces of
@@ -1155,7 +1320,7 @@ void forEach(ssize_t size, int entropy, ssize_t small_size, Storage* storage,
 // isn't possible without growing.
 template <typename LookupKeyT, typename KeyT>
 auto insertIndexHashed(const LookupKeyT& lookup_key, int growth_budget,
-                       int entropy, llvm::MutableArrayRef<Group> groups, KeyT* keys)
+                       int entropy, llvm::MutableArrayRef<uint8_t> groups, KeyT* keys)
     -> std::pair<bool, ssize_t> {
   size_t hash = llvm::hash_value(lookup_key);
   uint8_t control_byte = computeControlByte(hash);
@@ -1165,23 +1330,23 @@ auto insertIndexHashed(const LookupKeyT& lookup_key, int growth_budget,
   Group::MatchedByteRange<> deleted_matched_range;
 
   auto return_insert_at_index =
-      [&](ssize_t group_index, ssize_t byte_index) -> std::pair<bool, ssize_t> {
+      [&](ssize_t index) -> std::pair<bool, ssize_t> {
     // We'll need to insert at this index so set the control group byte to the
     // proper value.
-    groups[group_index].setByte(byte_index, control_byte);
-    return {/*needs_insertion=*/true, group_index * GroupSize + byte_index};
+    groups[index] = control_byte;
+    return {/*needs_insertion=*/true, index};
   };
 
   for (ProbeSequence s(hash_index, groups.size());; s.step()) {
     ssize_t group_index = s.getIndex();
-    auto& g = groups[group_index];
+    Group g = Group::load(groups, group_index);
 
     auto control_byte_matched_range = g.match(control_byte);
     if (LLVM_LIKELY(control_byte_matched_range)) {
       auto byte_it = control_byte_matched_range.begin();
       auto byte_end = control_byte_matched_range.end();
       do {
-        ssize_t index = group_index * GroupSize + *byte_it;
+        ssize_t index = group_index + *byte_it;
         if (LLVM_LIKELY(keys[index] == lookup_key)) {
           return {/*needs_insertion=*/false, index};
         }
@@ -1223,16 +1388,16 @@ auto insertIndexHashed(const LookupKeyT& lookup_key, int growth_budget,
       return {/*needs_insertion=*/true, -1};
     }
 
-    return return_insert_at_index(group_index, *empty_matched_range.begin());
+    return return_insert_at_index(group_index + *empty_matched_range.begin());
   }
 
-  return return_insert_at_index(group_with_deleted_index,
+  return return_insert_at_index(group_with_deleted_index +
                                 *deleted_matched_range.begin());
 }
 
 template <typename LookupKeyT>
 auto insertIntoEmptyIndex(const LookupKeyT& lookup_key, int entropy,
-                          llvm::MutableArrayRef<Group> groups)
+                          llvm::MutableArrayRef<uint8_t> groups)
     -> ssize_t {
   size_t hash = llvm::hash_value(lookup_key);
   uint8_t control_byte = computeControlByte(hash);
@@ -1240,12 +1405,12 @@ auto insertIntoEmptyIndex(const LookupKeyT& lookup_key, int entropy,
 
   for (ProbeSequence s(hash_index, groups.size());; s.step()) {
     ssize_t group_index = s.getIndex();
-    auto& g = groups[group_index];
+    Group g = Group::load(groups, group_index);
 
     if (auto empty_matched_range = g.matchEmpty()) {
-      ssize_t first_byte_index = *empty_matched_range.begin();
-      g.setByte(first_byte_index, control_byte);
-      return group_index * GroupSize + first_byte_index;
+      ssize_t index = group_index + *empty_matched_range.begin();
+      groups[index] = control_byte;
+      return index;
     }
 
     // Otherwise we continue probing.
@@ -1296,7 +1461,7 @@ inline auto growthThresholdForSize(ssize_t size) -> ssize_t {
 
 template <typename KeyT, typename ValueT>
 auto growAndRehash(MapInfo& info, ssize_t small_size, Storage* storage, Storage*& allocated_storage)
-    -> llvm::MutableArrayRef<Group> {
+    -> llvm::MutableArrayRef<uint8_t> {
   // Capture the old values we will use early to make in unambiguous that they
   // aren't being updated.
   ssize_t old_size = info.size;
@@ -1309,10 +1474,8 @@ auto growAndRehash(MapInfo& info, ssize_t small_size, Storage* storage, Storage*
   // everything out.
   ssize_t new_size = computeNewSize(old_size);
   Storage* new_storage = allocateStorage<KeyT, ValueT>(new_size);
-  llvm::MutableArrayRef<Group> new_groups = getGroups(new_storage, new_size);
-  for (Group &g : new_groups) {
-    g.clear();
-  }
+  llvm::MutableArrayRef<uint8_t> new_groups = getGroups(new_storage, new_size);
+  std::memset(new_groups.data(), 0, new_groups.size());
   KeyT* new_keys = getKeys<KeyT>(new_storage, new_size);
   ValueT* new_values = getValues<KeyT, ValueT>(new_storage, new_size);
   int new_growth_budget = growthThresholdForSize(new_size);
@@ -1360,15 +1523,20 @@ auto insertHashed(
   ssize_t& size = info.size;
   int& growth_budget = info.growth_budget;
   int& entropy = info.entropy;
-  llvm::MutableArrayRef<Group> groups = getGroups(storage, size);
+  llvm::MutableArrayRef<uint8_t> groups = getGroups(storage, size);
   KeyT* keys = getKeys<KeyT>(storage, size);
   ValueT* values = getValues<KeyT, ValueT>(storage, size);
 
-  auto [needs_insertion, index] =
-      insertIndexHashed(lookup_key, growth_budget, entropy, groups, keys);
-  if (!needs_insertion) {
-    assert(index >= 0 && "Must have a valid group when we find an existing entry.");
-    return {false, keys[index], values[index]};
+  ssize_t index = -1;
+
+  if (size > 0) {
+    bool needs_insertion;
+    std::tie(needs_insertion, index) =
+        insertIndexHashed(lookup_key, growth_budget, entropy, groups, keys);
+    if (!needs_insertion) {
+      assert(index >= 0 && "Must have a valid group when we find an existing entry.");
+      return {false, keys[index], values[index]};
+    }
   }
 
   if (index < 0) {
@@ -1423,7 +1591,7 @@ auto insertSmallLinear(
   } else {
     // No space for a linear insert so grow into a hash table and then do
     // a hashed insert.
-    llvm::MutableArrayRef<Group> groups =
+    llvm::MutableArrayRef<uint8_t> groups =
         growAndRehash<KeyT, ValueT>(info, small_size, storage, allocated_storage);
     assert(info.growth_budget > 0 && "Must create growth budget after growing1");
     // Make sure to update our keys and values pointers based on the updated storage.
@@ -1447,10 +1615,11 @@ auto insert(
         insert_cb,
     MapInfo& info, ssize_t small_size, Storage* storage, Storage*& allocated_storage)
     -> InsertKVResult<KeyT, ValueT> {
+  _mm_prefetch(storage, _MM_HINT_T2);
   // The entropy will be negative when using the small buffer, and we can
   // recompute from the small buffer size whether that implies linear lookups
   // due to fitting on a cacheline.
-  if (shouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
     return insertSmallLinear<KeyT, ValueT>(lookup_key, insert_cb, info,
                                            small_size, storage, allocated_storage);
   }
@@ -1505,17 +1674,19 @@ auto eraseSmallLinear(const LookupKeyT& lookup_key, ssize_t& size, ssize_t small
 template <typename KeyT, typename ValueT, typename LookupKeyT>
 auto eraseHashed(const LookupKeyT& lookup_key, MapInfo& info, Storage* storage)
     -> bool {
-  llvm::MutableArrayRef<Group> groups = getGroups(storage, info.size);
+  //llvm::MutableArrayRef<uint8_t> groups = getGroups(storage, info.size);
+  uint8_t* groups = getGroupsPtr(storage);
   KeyT* keys = getKeys<KeyT>(storage, info.size);
-  ValueT* values = getValues<KeyT, ValueT>(storage, info.size);
 
-  ssize_t index = lookupIndexHashed(lookup_key, info.entropy, groups, keys);
+  ssize_t index = lookupIndexHashed(lookup_key, info.size, info.entropy, groups, keys);
   if (index < 0) {
     return false;
   }
 
-  keys[index].~KeyT();
-  values[index].~ValueT();
+  KeyT* key = &keys[index];
+  key->~KeyT();
+  ValueT* value = getValueFromKey<KeyT, ValueT>(key, info.size);
+  value->~ValueT();
 
   // If there are empty slots in this group then nothing will probe past this
   // group looking for an entry so we can simply set this slot to empty as
@@ -1525,15 +1696,14 @@ auto eraseHashed(const LookupKeyT& lookup_key, MapInfo& info, Storage* storage)
   //
   // If we mark the slot as empty, we'll also need to increase the growth
   // budget.
-  ssize_t group_index = index / GroupSize;
-  ssize_t byte_index = index % GroupSize;
-  Group &g = groups[group_index];
+  ssize_t group_index = index & ~GroupMask;
+  Group g = Group::load(groups, group_index);
   auto empty_matched_range = g.matchEmpty();
   if (empty_matched_range) {
-    g.setByte(byte_index, Group::Empty);
+    groups[index] = Group::Empty;
     ++info.growth_budget;
   } else {
-    g.setByte(byte_index, Group::Deleted);
+    groups[index] = Group::Deleted;
   }
   return true;
 }
@@ -1544,7 +1714,7 @@ auto erase(const LookupKeyT& lookup_key, MapInfo& info, ssize_t small_size,
   // The entropy will be negative when using the small buffer, and we can
   // recompute from the small buffer size whether that implies linear erases
   // due to fitting on a cacheline.
-  if (shouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
     return eraseSmallLinear<KeyT, ValueT>(lookup_key, info.size, small_size,
                                           storage);
   }
@@ -1565,7 +1735,7 @@ void clear(MapInfo& info, ssize_t small_size, Storage* storage) {
   // The entropy will be negative when using the small buffer, and we can
   // recompute from the small buffer size whether that implies linear lookups
   // due to fitting on a cacheline.
-  if (shouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
     // Destroy all the keys and values.
     forEachLinear<KeyT, ValueT>(info.size, small_size, storage, destroy_cb);
 
@@ -1577,11 +1747,12 @@ void clear(MapInfo& info, ssize_t small_size, Storage* storage) {
 
   // Otherwise walk the non-empty slots in the control group destroying each
   // one and clearing out the group.
-  forEachHashed<KeyT, ValueT>(info.size, storage, destroy_cb,
-                              [](Group& g) {
-                                // Clear the group.
-                                g.clear();
-                              });
+  forEachHashed<KeyT, ValueT>(
+      info.size, storage, destroy_cb,
+      [](llvm::MutableArrayRef<uint8_t> groups, ssize_t group_index) {
+        // Clear the group.
+        std::memset(groups.data() + group_index, 0, GroupSize);
+      });
 
   // And reset the growth budget.
   info.growth_budget = growthThresholdForSize(info.size);
@@ -1594,7 +1765,7 @@ void init(MapInfo& info, ssize_t small_size, Storage* small_storage,
   // Mark that we don't have external storage allocated.
   info.entropy = -info.entropy;
 
-  if (MapInternal::shouldUseLinearLookup<KeyT>(small_size)) {
+  if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size)) {
     // We use size to mean empty when doing linear lookups.
     info.size = 0;
     // Growth budget isn't relevant as long as we're doing linear lookups.
@@ -1606,10 +1777,8 @@ void init(MapInfo& info, ssize_t small_size, Storage* small_storage,
   // an initial hash table.
   info.size = small_size;
   info.growth_budget = MapInternal::growthThresholdForSize(info.size);
-  auto groups = getGroups(small_storage, info.size);
-  for (Group& g : groups) {
-    g.clear();
-  }
+  llvm::MutableArrayRef<uint8_t> groups = getGroups(small_storage, info.size);
+  std::memset(groups.data(), 0, groups.size());
 }
 
 template <typename KeyT, typename ValueT>
@@ -1628,7 +1797,7 @@ void reset(MapInfo& info, ssize_t small_size, Storage* small_storage,
         k.~KeyT();
         v.~ValueT();
       },
-      [](Group& /*group*/) {});
+      [](auto...) {});
 
   // Deallocate the buffer.
   deallocateStorage<KeyT, ValueT>(storage, info.size);
@@ -1648,7 +1817,7 @@ void destroy(MapInfo& info, ssize_t small_size, Storage* storage) {
   // The entropy will be negative when using the small buffer, and we can
   // recompute from the small buffer size whether that implies linear lookups
   // due to fitting on a cacheline.
-  if (shouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
     // Destroy all the keys and values.
     forEachLinear<KeyT, ValueT>(info.size, small_size, storage, destroy_cb);
 
@@ -1659,7 +1828,7 @@ void destroy(MapInfo& info, ssize_t small_size, Storage* storage) {
   // Otherwise walk the non-empty slots in the control group destroying each
   // one. We don't need to do any clearing as we're destroying the map.
   forEachHashed<KeyT, ValueT>(info.size, storage, destroy_cb,
-                              [](Group& /*group*/) {});
+                              [](auto...) {});
 
   // If small, nothing to deallocate.
   if (info.entropy < 0) {
