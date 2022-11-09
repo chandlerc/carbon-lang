@@ -519,14 +519,12 @@ class MapView {
   }
 
   template <typename LookupKeyT>
-  [[clang::always_inline]]
   auto lookup(const LookupKeyT& lookup_key) const -> LookupKVResultT {
     return MapInternal::lookup<KeyT, ValueT>(lookup_key, size_, entropy_,
                                              small_size(), storage_);
   }
 
   template <typename LookupKeyT>
-  [[clang::always_inline]]
   auto operator[](const LookupKeyT& lookup_key) const -> ValueT* {
     auto result = lookup(lookup_key);
     return result ? &result.getValue() : nullptr;
@@ -1179,7 +1177,6 @@ auto containsHashed(const LookupKeyT& lookup_key, ssize_t size, int entropy,
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
-[[clang::always_inline]]
 auto lookupHashed(LookupKeyT lookup_key, ssize_t size,
                                       int entropy, Storage* storage)
     -> LookupKVResult<KeyT, ValueT> {
@@ -1213,7 +1210,6 @@ auto contains(const LookupKeyT& lookup_key, ssize_t size, int entropy,
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
-[[clang::always_inline]]
 auto lookup(const LookupKeyT& lookup_key, ssize_t size, int entropy, ssize_t small_size,
             Storage* storage) -> LookupKVResult<KeyT, ValueT> {
   _mm_prefetch(storage, _MM_HINT_T2);
