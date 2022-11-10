@@ -333,7 +333,7 @@ constexpr int EntropyMask = INT_MAX & ~(GroupSize - 1);
 constexpr ssize_t CachelineSize = 64;
 
 template <typename KeyT>
-constexpr auto getKeysInCacheline() -> ssize_t {
+constexpr auto getKeysInCacheline() -> int {
   return CachelineSize / sizeof(KeyT);
 }
 
@@ -343,9 +343,8 @@ constexpr auto DefaultMinSmallSize() -> ssize_t {
 }
 
 template <typename KeyT>
-constexpr auto ShouldUseLinearLookup(ssize_t small_size) -> bool {
-  //return false;
-  return small_size <= getKeysInCacheline<KeyT>();
+constexpr auto ShouldUseLinearLookup(int small_size) -> bool {
+  return small_size >= 0 && small_size <= getKeysInCacheline<KeyT>();
 }
 
 template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
@@ -460,9 +459,10 @@ auto getLinearKeys(Storage* storage) -> KeyT* {
 }
 
 template <typename KeyT, typename ValueT>
-auto getLinearValues(Storage* storage, ssize_t small_size) -> ValueT* {
-  return reinterpret_cast<ValueT*>(
-      storage + ComputeValueStorageOffset<KeyT, ValueT>(small_size));
+auto getLinearValues(Storage* storage, int small_size) -> ValueT* {
+  return reinterpret_cast<ValueT*>(storage +
+                                   ComputeValueStorageOffset<KeyT, ValueT>(
+                                       static_cast<unsigned>(small_size)));
 }
 
 inline auto getGroupsSize(ssize_t size) -> ssize_t {
@@ -505,48 +505,6 @@ inline auto getValueFromKey(KeyT* key, ssize_t size) -> ValueT* {
       ComputeValueStorageOffset<KeyT, ValueT>(size));
 }
 
-template <typename KeyT, typename ValueT>
-auto allocateStorage(ssize_t size) -> Storage* {
-  ssize_t allocated_size = ComputeStorageSize<KeyT, ValueT>(size);
-  return reinterpret_cast<Storage*>(__builtin_operator_new(
-      allocated_size, std::align_val_t(StorageAlignment<KeyT, ValueT>),
-      std::nothrow_t()));
-}
-
-template <typename KeyT, typename ValueT>
-void deallocateStorage(Storage* storage, ssize_t size) {
-#if __cpp_sized_deallocation
-  ssize_t allocated_size = computeStorageSize<KeyT, ValueT>(size);
-  return __builtin_operator_delete(
-      storage, allocated_size,
-      std::align_val_t(StorageAlignment<KeyT, ValueT>));
-#else
-  // Ensure `size` is used even in the fallback non-sized deallocation case.
-  (void)size;
-  return __builtin_operator_delete(
-      storage, std::align_val_t(StorageAlignment<KeyT, ValueT>));
-#endif
-}
-
-inline auto computeNewSize(ssize_t old_size) -> ssize_t {
-  if (old_size < (4 * GroupSize)) {
-    // If we're going to heap allocate, get at least four groups.
-    return 4 * GroupSize;
-  }
-
-  // Otherwise, we want the next power of two. This should always be a power of
-  // two coming in, and so we just verify that. Also verify that this doesn't
-  // overflow.
-  assert(old_size == (ssize_t)llvm::PowerOf2Ceil(old_size) &&
-         "Expected a power of two!");
-  return old_size * 2;
-}
-
-inline auto growthThresholdForSize(ssize_t size) -> ssize_t {
-  // We use a 7/8ths load factor to trigger growth.
-  return size - size / 8;
-}
-
 }  // namespace MapInternal
 
 template <typename InputKeyT, typename InputValueT>
@@ -574,30 +532,25 @@ class MapView {
   friend class MapBase<KeyT, ValueT>;
 
   MapView() = default;
-  MapView(ssize_t size, MapInternal::Storage* storage, int entropy,
-          ssize_t small_size)
+  MapView(ssize_t size, MapInternal::Storage* storage,
+          int small_size)
       : size_(size),
         storage_(storage),
-        entropy_(entropy),
         small_size_(small_size) {}
 
   ssize_t size_;
   MapInternal::Storage* storage_;
-  int entropy_;
   int small_size_;
 
   template <typename LookupKeyT>
-  static auto contains(const LookupKeyT& lookup_key, ssize_t size, ssize_t entropy,
-                       ssize_t small_size, void* data) -> bool;
+  static auto contains(const LookupKeyT& lookup_key, ssize_t size,
+                       int small_size, void* data) -> bool;
 
   template <typename LookupKeyT>
-  static auto lookup(const LookupKeyT& lookup_key, ssize_t size, ssize_t entropy,
-                     ssize_t small_size, void* data) -> LookupKVResultT;
+  static auto lookup(const LookupKeyT& lookup_key, ssize_t size,
+                     int small_size, void* data) -> LookupKVResultT;
 
-  auto small_size() const -> ssize_t {
-    // Force zero-extend this as we store it in a smaller type.
-    return static_cast<unsigned>(small_size_);
-  }
+  auto small_size() const -> int { return small_size_; }
 };
 
 template <typename InputKeyT, typename InputValueT>
@@ -631,7 +584,7 @@ class MapBase {
 
   // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
   operator ViewT() const {
-    return {size(), storage(), entropy(), small_size()};
+    return {size(), storage(), small_size()};
   }
 
   template <typename LookupKeyT>
@@ -724,28 +677,25 @@ class MapBase {
   void clear();
 
  protected:
-  MapBase(ssize_t small_size, MapInternal::Storage* small_storage) {
-    init(small_size, small_storage);
+  MapBase(int small_size, MapInternal::Storage* small_storage) {
+    Init(small_size, small_storage);
   }
   // An internal constructor used to build temporary map base objects with a
-  // specific allocated size and an inital entropy seed. This is used internally
-  // to build ephemeral maps.
-  MapBase(ssize_t alloc_size, int input_entropy) {
-    InitAlloc(alloc_size, input_entropy);
+  // specific allocated size. This is used internally to build ephemeral maps.
+  explicit MapBase(ssize_t alloc_size) {
+    InitAlloc(alloc_size);
   }
 
   ~MapBase();
 
   auto size() const -> ssize_t { return impl_view_.size_; }
   auto storage() const -> MapInternal::Storage* { return impl_view_.storage_; }
-  auto entropy() const -> int { return impl_view_.entropy_; }
-  auto small_size() const -> ssize_t { return impl_view_.small_size_; }
+  auto small_size() const -> int { return impl_view_.small_size_; }
 
-  auto is_small() const -> bool { return entropy() < 0; }
+  auto is_small() const -> bool { return small_size() >= 0; }
 
   auto size() -> ssize_t& { return impl_view_.size_; }
   auto storage() -> MapInternal::Storage*& { return impl_view_.storage_; }
-  auto entropy() -> int& { return impl_view_.entropy_; }
   auto small_size() -> int& { return impl_view_.small_size_; }
 
   auto linear_keys() -> KeyT* { return MapInternal::getLinearKeys<KeyT>(storage()); }
@@ -757,8 +707,8 @@ class MapBase {
   auto keys_ptr() -> KeyT* { return MapInternal::getKeys<KeyT>(storage(), size()); }
   auto values_ptr() -> ValueT* { return MapInternal::getValueFromKey<KeyT, ValueT>(keys_ptr(), size()); }
 
-  void init(ssize_t small_size, MapInternal::Storage* small_storage);
-  void InitAlloc(ssize_t alloc_size, int input_entropy);
+  void Init(int small_size, MapInternal::Storage* small_storage);
+  void InitAlloc(ssize_t alloc_size);
 
   template <typename LookupKeyT>
   auto InsertIndexHashed(const LookupKeyT& lookup_key)
@@ -882,13 +832,14 @@ auto containsSmallLinear(const LookupKeyT& lookup_key, ssize_t size, Storage* st
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto lookupSmallLinear(const LookupKeyT& lookup_key, ssize_t size, ssize_t small_size,
+auto lookupSmallLinear(const LookupKeyT& lookup_key, ssize_t size, int small_size,
                        Storage* storage) -> LookupKVResult<KeyT, ValueT> {
   KeyT* keys = getLinearKeys<KeyT>(storage);
   for (ssize_t i = 0; i < size; ++i) {
     KeyT *key = &keys[i];
     if (*key == lookup_key) {
-      return {key, getValueFromKey<KeyT, ValueT>(key, small_size)};
+      return {key, getValueFromKey<KeyT, ValueT>(
+                       key, static_cast<unsigned>(small_size))};
     }
   }
 
@@ -964,19 +915,19 @@ inline auto computeControlByte(size_t hash) -> uint8_t {
   return (hash >> (sizeof(hash) * 8 - 7)) | 0b10000000;
 }
 
-inline auto computeHashIndex(size_t hash, int entropy) -> ssize_t {
-  return hash ^ static_cast<unsigned>(entropy);
+inline auto computeHashIndex(size_t hash, uint8_t* groups) -> ssize_t {
+  return hash ^ reinterpret_cast<uintptr_t>(groups);
 }
 
 template <typename LookupKeyT, typename KeyT>
 inline auto lookupIndexHashed(LookupKeyT lookup_key, ssize_t size,
-                              int entropy, uint8_t* groups, KeyT* keys)
+                              uint8_t* groups, KeyT* keys)
     -> ssize_t {
   //__asm volatile ("# LLVM-MCA-BEGIN hit");
   //__asm volatile ("# LLVM-MCA-BEGIN miss");
   size_t hash = llvm::hash_value(lookup_key);
   uint8_t control_byte = computeControlByte(hash);
-  ssize_t hash_index = computeHashIndex(hash, entropy);
+  ssize_t hash_index = computeHashIndex(hash, groups);
 
   ProbeSequence s(hash_index, size);
   do {
@@ -1009,39 +960,34 @@ inline auto lookupIndexHashed(LookupKeyT lookup_key, ssize_t size,
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto containsHashed(const LookupKeyT& lookup_key, ssize_t size, int entropy,
+auto containsHashed(const LookupKeyT& lookup_key, ssize_t size,
                     Storage* storage) -> bool {
   //llvm::MutableArrayRef<uint8_t> groups = getGroups(storage, size);
   uint8_t* groups = getGroupsPtr(storage);
   KeyT* keys = getKeys<KeyT>(storage, size);
-  return lookupIndexHashed(lookup_key, size, entropy, groups, keys) >= 0;
+  return lookupIndexHashed(lookup_key, size, groups, keys) >= 0;
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto contains(const LookupKeyT& lookup_key, ssize_t size, int entropy,
-              ssize_t small_size, Storage* storage) -> bool {
+auto contains(const LookupKeyT& lookup_key, ssize_t size,
+              int small_size, Storage* storage) -> bool {
   _mm_prefetch(storage, _MM_HINT_T2);
-  // The entropy will be negative when using the small buffer, and we can
-  // recompute from the small buffer size whether that implies linear lookups
-  // due to fitting on a cacheline.
-  if (ShouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size)) {
     return containsSmallLinear<KeyT>(lookup_key, size, storage);
   }
 
   // Otherwise we dispatch to the hashed routine which is the same for small
   // and large.
-  return containsHashed<KeyT, ValueT>(lookup_key, size, entropy, storage);
+  return containsHashed<KeyT, ValueT>(lookup_key, size, storage);
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto lookupHashed(LookupKeyT lookup_key, ssize_t size,
-                                      int entropy, Storage* storage)
+auto lookupHashed(LookupKeyT lookup_key, ssize_t size, Storage* storage)
     -> LookupKVResult<KeyT, ValueT> {
-  //llvm::MutableArrayRef<uint8_t> groups = getGroups(storage, size);
   uint8_t* groups = getGroupsPtr(storage);
   KeyT* keys = getKeys<KeyT>(storage, size);
 
-  ssize_t index = lookupIndexHashed(lookup_key, size, entropy, groups, keys);
+  ssize_t index = lookupIndexHashed(lookup_key, size, groups, keys);
   if (index < 0) {
     return {nullptr, nullptr};
   }
@@ -1051,19 +997,16 @@ auto lookupHashed(LookupKeyT lookup_key, ssize_t size,
 }
 
 template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto lookup(const LookupKeyT& lookup_key, ssize_t size, int entropy, ssize_t small_size,
+auto lookup(const LookupKeyT& lookup_key, ssize_t size, int small_size,
             Storage* storage) -> LookupKVResult<KeyT, ValueT> {
   _mm_prefetch(storage, _MM_HINT_T2);
-  // The entropy will be negative when using the small buffer, and we can
-  // recompute from the small buffer size whether that implies linear lookups
-  // due to fitting on a cacheline.
-  if (ShouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size)) {
     return lookupSmallLinear<KeyT, ValueT>(lookup_key, size, small_size, storage);
   }
 
   // Otherwise we dispatch to the hashed routine which is the same for small
   // and large.
-  return lookupHashed<KeyT, ValueT>(lookup_key, size, entropy, storage);
+  return lookupHashed<KeyT, ValueT>(lookup_key, size, storage);
 }
 
 } // namespace MapInternal
@@ -1071,7 +1014,7 @@ auto lookup(const LookupKeyT& lookup_key, ssize_t size, int entropy, ssize_t sma
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::contains(const LookupKeyT& lookup_key) const -> bool {
-  return MapInternal::contains<KeyT, ValueT>(lookup_key, size_, entropy_,
+  return MapInternal::contains<KeyT, ValueT>(lookup_key, size_,
                                              small_size(), storage_);
 }
 
@@ -1079,7 +1022,7 @@ template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::lookup(const LookupKeyT& lookup_key) const
     -> LookupKVResultT {
-  return MapInternal::lookup<KeyT, ValueT>(lookup_key, size_, entropy_,
+  return MapInternal::lookup<KeyT, ValueT>(lookup_key, size_,
                                            small_size(), storage_);
 }
 
@@ -1094,7 +1037,7 @@ auto MapView<KT, VT>::operator[](const LookupKeyT& lookup_key) const
 namespace MapInternal {
 
 template <typename KeyT, typename ValueT, typename CallbackT>
-void forEachLinear(ssize_t size, ssize_t small_size, Storage* storage,
+void forEachLinear(ssize_t size, int small_size, Storage* storage,
                    CallbackT callback) {
   KeyT* keys = getLinearKeys<KeyT>(storage);
   ValueT* values = getLinearValues<KeyT, ValueT>(storage, small_size);
@@ -1127,10 +1070,10 @@ void forEachHashed(ssize_t size, Storage* storage, KVCallbackT kv_callback,
 }
 
 template <typename KeyT, typename ValueT, typename CallbackT>
-void forEach(ssize_t size, int entropy, ssize_t small_size, Storage* storage,
+void forEach(ssize_t size, int small_size, Storage* storage,
              CallbackT callback) {
   _mm_prefetch(storage, _MM_HINT_T2);
-  if (ShouldUseLinearLookup<KeyT>(small_size) && entropy < 0) {
+  if (ShouldUseLinearLookup<KeyT>(small_size)) {
     forEachLinear<KeyT, ValueT>(size, small_size, storage, callback);
     return;
   }
@@ -1143,7 +1086,7 @@ void forEach(ssize_t size, int entropy, ssize_t small_size, Storage* storage,
 template <typename KT, typename VT>
 template <typename CallbackT>
 void MapView<KT, VT>::forEach(CallbackT callback) {
-    MapInternal::forEach<KeyT, ValueT>(size_, entropy_, small_size(), storage_,
+    MapInternal::forEach<KeyT, ValueT>(size_, small_size(), storage_,
                                        callback);
   }
 
@@ -1158,14 +1101,14 @@ template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapBase<KT, VT>::InsertIndexHashed(const LookupKeyT& lookup_key)
     -> std::pair<bool, ssize_t> {
+  uint8_t* groups = groups_ptr();
+
   size_t hash = llvm::hash_value(lookup_key);
   uint8_t control_byte = MapInternal::computeControlByte(hash);
-  ssize_t hash_index = MapInternal::computeHashIndex(hash, entropy());
+  ssize_t hash_index = MapInternal::computeHashIndex(hash, groups);
 
   ssize_t group_with_deleted_index = -1;
   MapInternal::Group::MatchedByteRange<> deleted_matched_range;
-
-  uint8_t* groups = groups_ptr();
 
   auto return_insert_at_index =
       [&](ssize_t index) -> std::pair<bool, ssize_t> {
@@ -1238,9 +1181,9 @@ template <typename LookupKeyT>
 auto MapBase<KT, VT>::InsertIntoEmptyIndex(const LookupKeyT& lookup_key) -> ssize_t {
   size_t hash = llvm::hash_value(lookup_key);
   uint8_t control_byte = MapInternal::computeControlByte(hash);
-  ssize_t hash_index = MapInternal::computeHashIndex(hash, entropy());
-
   uint8_t* groups = groups_ptr();
+  ssize_t hash_index = MapInternal::computeHashIndex(hash, groups);
+
   for (MapInternal::ProbeSequence s(hash_index, size());; s.step()) {
     ssize_t group_index = s.getIndex();
     auto g = MapInternal::Group::load(groups, group_index);
@@ -1255,12 +1198,57 @@ auto MapBase<KT, VT>::InsertIntoEmptyIndex(const LookupKeyT& lookup_key) -> ssiz
   }
 }
 
+namespace MapInternal {
+
+template <typename KeyT, typename ValueT>
+auto allocateStorage(ssize_t size) -> Storage* {
+  ssize_t allocated_size = ComputeStorageSize<KeyT, ValueT>(size);
+  return reinterpret_cast<Storage*>(__builtin_operator_new(
+      allocated_size, std::align_val_t(StorageAlignment<KeyT, ValueT>),
+      std::nothrow_t()));
+}
+
+template <typename KeyT, typename ValueT>
+void deallocateStorage(Storage* storage, ssize_t size) {
+#if __cpp_sized_deallocation
+  ssize_t allocated_size = computeStorageSize<KeyT, ValueT>(size);
+  return __builtin_operator_delete(
+      storage, allocated_size,
+      std::align_val_t(StorageAlignment<KeyT, ValueT>));
+#else
+  // Ensure `size` is used even in the fallback non-sized deallocation case.
+  (void)size;
+  return __builtin_operator_delete(
+      storage, std::align_val_t(StorageAlignment<KeyT, ValueT>));
+#endif
+}
+
+inline auto computeNewSize(ssize_t old_size) -> ssize_t {
+  if (old_size < (4 * GroupSize)) {
+    // If we're going to heap allocate, get at least four groups.
+    return 4 * GroupSize;
+  }
+
+  // Otherwise, we want the next power of two. This should always be a power of
+  // two coming in, and so we just verify that. Also verify that this doesn't
+  // overflow.
+  assert(old_size == (ssize_t)llvm::PowerOf2Ceil(old_size) &&
+         "Expected a power of two!");
+  return old_size * 2;
+}
+
+inline auto growthThresholdForSize(ssize_t size) -> ssize_t {
+  // We use a 7/8ths load factor to trigger growth.
+  return size - size / 8;
+}
+}  // namespace MapInternal
+
 template <typename KeyT, typename ValueT>
 auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
   // We grow into a new `MapBase` so that both the new and old maps are
   // fully functional until all the entries are moved over. However, we directly
   // manipulate the internals to short circuit many aspects of the growth.
-  MapBase<KeyT, ValueT> new_map(MapInternal::computeNewSize(size()), entropy());
+  MapBase<KeyT, ValueT> new_map(MapInternal::computeNewSize(size()));
   KeyT* new_keys = new_map.keys_ptr();
   ValueT* new_values = new_map.values_ptr();
 
@@ -1275,7 +1263,7 @@ auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
   assert(new_map.growth_budget_ >= 0 &&
          "Must still have a growth budget after rehash!");
 
-  if (entropy() >= 0) {
+  if (!is_small()) {
     // Old isn't a small buffer, so we need to deallocate it.
     MapInternal::deallocateStorage<KeyT, ValueT>(storage(), size());
   }
@@ -1285,6 +1273,11 @@ auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
   // anything aliasing a small buffer.
   impl_view_ = new_map.impl_view_;
   growth_budget_ = new_map.growth_budget_;
+
+  // Set the small size to -1 as we're not small any more. Nothing short of the
+  // original map (which has the small size as a constant) can reset to the
+  // small size so we don't need to preserve what this was once large.
+  small_size() = -1;
 
   // Prevent the interim new map object from doing anything when destroyed as
   // we've taken over it's internals.
@@ -1356,7 +1349,7 @@ auto MapBase<KeyT, ValueT>::InsertSmallLinear(
   size_t index = size();
 
   // We need to insert. First see if we have space.
-  if (size() < small_size()) {
+  if (size() < static_cast<unsigned>(small_size())) {
     // We can do the easy linear insert, just increment the size.
     ++size();
   } else {
@@ -1382,10 +1375,7 @@ auto MapBase<KT, VT>::insert(
         const LookupKeyT& lookup_key, void* key_storage,
         void* value_storage)>>::type insert_cb) -> InsertKVResultT {
   _mm_prefetch(storage(), _MM_HINT_T2);
-  // The entropy will be negative when using the small buffer, and we can
-  // recompute from the small buffer size whether that implies linear lookups
-  // due to fitting on a cacheline.
-  if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size()) && entropy() < 0) {
+  if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size())) {
     return InsertSmallLinear(lookup_key, insert_cb);
   }
 
@@ -1442,7 +1432,7 @@ auto MapBase<KeyT, ValueT>::EraseHashed(const LookupKeyT& lookup_key) -> bool {
   uint8_t* groups = groups_ptr();
   KeyT* keys = keys_ptr();
 
-  ssize_t index = MapInternal::lookupIndexHashed(lookup_key, size(), entropy(), groups, keys);
+  ssize_t index = MapInternal::lookupIndexHashed(lookup_key, size(), groups, keys);
   if (index < 0) {
     return false;
   }
@@ -1474,10 +1464,7 @@ auto MapBase<KeyT, ValueT>::EraseHashed(const LookupKeyT& lookup_key) -> bool {
 
 template <typename KeyT, typename ValueT> template <typename LookupKeyT>
 auto MapBase<KeyT, ValueT>::erase(const LookupKeyT& lookup_key) -> bool {
-  // The entropy will be negative when using the small buffer, and we can
-  // recompute from the small buffer size whether that implies linear erases
-  // due to fitting on a cacheline.
-  if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size()) && entropy() < 0) {
+  if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size())) {
     return EraseSmallLinear(lookup_key);
   }
 
@@ -1494,10 +1481,7 @@ void MapBase<KeyT, ValueT>::clear() {
     v.~ValueT();
   };
 
-  // The entropy will be negative when using the small buffer, and we can
-  // recompute from the small buffer size whether that implies linear lookups
-  // due to fitting on a cacheline.
-  if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size()) && entropy() < 0) {
+  if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size())) {
     // Destroy all the keys and values.
     MapInternal::forEachLinear<KeyT, ValueT>(size(), small_size(), storage(), destroy_cb);
 
@@ -1534,7 +1518,7 @@ MapBase<KeyT, ValueT>::~MapBase() {
   });
 
   // If small, nothing to deallocate.
-  if (entropy() < 0) {
+  if (is_small()) {
     return;
   }
 
@@ -1543,12 +1527,9 @@ MapBase<KeyT, ValueT>::~MapBase() {
 }
 
 template <typename KeyT, typename ValueT>
-void MapBase<KeyT, ValueT>::init(ssize_t small_size_arg, MapInternal::Storage* small_storage) {
+void MapBase<KeyT, ValueT>::Init(int small_size_arg, MapInternal::Storage* small_storage) {
   size() = small_size_arg;
   storage() = small_storage;
-  entropy() = llvm::hash_value(this) & MapInternal::EntropyMask;
-  // Mark that we don't have external storage allocated.
-  entropy() = -entropy();
   small_size() = small_size_arg;
 
   if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size_arg)) {
@@ -1567,9 +1548,9 @@ void MapBase<KeyT, ValueT>::init(ssize_t small_size_arg, MapInternal::Storage* s
 }
 
 template <typename KeyT, typename ValueT>
-void MapBase<KeyT, ValueT>::InitAlloc(ssize_t alloc_size, int input_entropy) {
+void MapBase<KeyT, ValueT>::InitAlloc(ssize_t alloc_size) {
   size() = alloc_size;
-  entropy() = llvm::hash_combine(input_entropy, this) & MapInternal::EntropyMask;
+  small_size() = -1;
   storage() = MapInternal::allocateStorage<KeyT, ValueT>(size());
   std::memset(groups_ptr(), 0, size());
   growth_budget_ = MapInternal::growthThresholdForSize(size());
@@ -1581,9 +1562,9 @@ void Map<KeyT, ValueT, MinSmallSize>::reset() {
   if (this->size() == 0) {
     return;
   }
-  
-  // If we have a small size and are still using it, this is just clearing.
-  if (this->entropy() < 0) {
+
+  // If in the small rep, just clear the objects. 
+  if (this->is_small()) {
     this->clear();
     return;
   }
@@ -1598,7 +1579,7 @@ void Map<KeyT, ValueT, MinSmallSize>::reset() {
   MapInternal::deallocateStorage<KeyT, ValueT>(this->storage(), this->size());
 
   // Re-initialize the whole thing.
-  this->init(SmallSize, small_storage());
+  this->Init(SmallSize, small_storage());
 }
 
 }  // namespace Carbon
