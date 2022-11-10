@@ -328,8 +328,6 @@ constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
          ComputeValueStorageOffset<KeyT, ValueT>(size) + sizeof(ValueT) * size;
 }
 
-constexpr int EntropyMask = INT_MAX & ~(GroupSize - 1);
-
 constexpr ssize_t CachelineSize = 64;
 
 template <typename KeyT>
@@ -532,15 +530,15 @@ class MapView {
   friend class MapBase<KeyT, ValueT>;
 
   MapView() = default;
-  MapView(ssize_t size, MapInternal::Storage* storage,
-          int small_size)
-      : size_(size),
-        storage_(storage),
-        small_size_(small_size) {}
+  MapView(ssize_t size, int small_size, MapInternal::Storage* storage)
+      : packed_sizes_(size | (static_cast<int64_t>(small_size) << 32)),
+        storage_(storage) {
+    assert(size >= 0 && "Cannot have a negative size!");
+    assert(size <= INT_MAX && "Only 32-bit sizes are supported!");
+  }
 
-  ssize_t size_;
+  int64_t packed_sizes_;
   MapInternal::Storage* storage_;
-  int small_size_;
 
   template <typename LookupKeyT>
   static auto contains(const LookupKeyT& lookup_key, ssize_t size,
@@ -550,7 +548,19 @@ class MapView {
   static auto lookup(const LookupKeyT& lookup_key, ssize_t size,
                      int small_size, void* data) -> LookupKVResultT;
 
-  auto small_size() const -> int { return small_size_; }
+  auto size() const -> ssize_t { return static_cast<uint32_t>(packed_sizes_); }
+  auto small_size() const -> int { return packed_sizes_ >> 32; }
+
+  void set_size(ssize_t size) {
+    assert(size >= 0 && "Cannot have a negative size!");
+    assert(size <= INT_MAX && "Only 32-bit sizes are supported!");
+    packed_sizes_ &= -1ULL << 32;
+    packed_sizes_ |= size & ((1LL << 32) - 1);
+  }
+  void set_small_size(int small_size) {
+    packed_sizes_ &= (1ULL << 32) - 1;
+    packed_sizes_ |= static_cast<int64_t>(small_size) << 32;
+  }
 };
 
 template <typename InputKeyT, typename InputValueT>
@@ -584,7 +594,7 @@ class MapBase {
 
   // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
   operator ViewT() const {
-    return {size(), storage(), small_size()};
+    return {size(), small_size(), storage()};
   }
 
   template <typename LookupKeyT>
@@ -688,15 +698,20 @@ class MapBase {
 
   ~MapBase();
 
-  auto size() const -> ssize_t { return impl_view_.size_; }
+  auto size() const -> ssize_t { return impl_view_.size(); }
   auto storage() const -> MapInternal::Storage* { return impl_view_.storage_; }
-  auto small_size() const -> int { return impl_view_.small_size_; }
+  auto small_size() const -> int { return impl_view_.small_size(); }
 
   auto is_small() const -> bool { return small_size() >= 0; }
 
-  auto size() -> ssize_t& { return impl_view_.size_; }
+  void set_size(ssize_t size) {
+    impl_view_.set_size(size);
+  }
+  void set_small_size(int small_size) {
+    impl_view_.set_small_size(small_size);
+  }
+
   auto storage() -> MapInternal::Storage*& { return impl_view_.storage_; }
-  auto small_size() -> int& { return impl_view_.small_size_; }
 
   auto linear_keys() -> KeyT* { return MapInternal::getLinearKeys<KeyT>(storage()); }
   auto linear_values() -> ValueT* {
@@ -1014,7 +1029,7 @@ auto lookup(const LookupKeyT& lookup_key, ssize_t size, int small_size,
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::contains(const LookupKeyT& lookup_key) const -> bool {
-  return MapInternal::contains<KeyT, ValueT>(lookup_key, size_,
+  return MapInternal::contains<KeyT, ValueT>(lookup_key, size(),
                                              small_size(), storage_);
 }
 
@@ -1022,7 +1037,7 @@ template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::lookup(const LookupKeyT& lookup_key) const
     -> LookupKVResultT {
-  return MapInternal::lookup<KeyT, ValueT>(lookup_key, size_,
+  return MapInternal::lookup<KeyT, ValueT>(lookup_key, size(),
                                            small_size(), storage_);
 }
 
@@ -1086,7 +1101,7 @@ void forEach(ssize_t size, int small_size, Storage* storage,
 template <typename KT, typename VT>
 template <typename CallbackT>
 void MapView<KT, VT>::forEach(CallbackT callback) {
-    MapInternal::forEach<KeyT, ValueT>(size_, small_size(), storage_,
+    MapInternal::forEach<KeyT, ValueT>(size(), small_size(), storage_,
                                        callback);
   }
 
@@ -1277,12 +1292,12 @@ auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
   // Set the small size to -1 as we're not small any more. Nothing short of the
   // original map (which has the small size as a constant) can reset to the
   // small size so we don't need to preserve what this was once large.
-  small_size() = -1;
+  set_small_size(-1);
 
   // Prevent the interim new map object from doing anything when destroyed as
   // we've taken over it's internals.
   new_map.storage() = nullptr;
-  new_map.size() = 0;
+  new_map.set_size(0);
 
   // We return the newly allocated groups for immediate use by the caller.
   return groups_ptr();
@@ -1351,7 +1366,7 @@ auto MapBase<KeyT, ValueT>::InsertSmallLinear(
   // We need to insert. First see if we have space.
   if (size() < static_cast<unsigned>(small_size())) {
     // We can do the easy linear insert, just increment the size.
-    ++size();
+    set_size(size() + 1);
   } else {
     // No space for a linear insert so grow into a hash table and then do
     // a hashed insert.
@@ -1414,7 +1429,7 @@ auto MapBase<KeyT, ValueT>::EraseSmallLinear(const LookupKeyT& lookup_key)
     if (keys[i] == lookup_key) {
       // Found the key, so clobber this entry with the last one and decrease
       // the size by one.
-      --size();
+      set_size(size() - 1);
       keys[i] = std::move(keys[size()]);
       keys[size()].~KeyT();
       values[i] = std::move(values[size()]);
@@ -1487,7 +1502,7 @@ void MapBase<KeyT, ValueT>::clear() {
 
     // Now reset the size to zero and we'll start again inserting into the
     // beginning of the small linear buffer.
-    size() = 0;
+    set_size(0);
     return;
   }
 
@@ -1528,13 +1543,14 @@ MapBase<KeyT, ValueT>::~MapBase() {
 
 template <typename KeyT, typename ValueT>
 void MapBase<KeyT, ValueT>::Init(int small_size_arg, MapInternal::Storage* small_storage) {
-  size() = small_size_arg;
+  set_size(small_size_arg);
+  set_small_size(small_size_arg);
+
   storage() = small_storage;
-  small_size() = small_size_arg;
 
   if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size_arg)) {
     // We use size to mean empty when doing linear lookups.
-    size() = 0;
+    set_size(0);
     // Growth budget isn't relevant as long as we're doing linear lookups.
     growth_budget_ = 0;
     return;
@@ -1549,8 +1565,8 @@ void MapBase<KeyT, ValueT>::Init(int small_size_arg, MapInternal::Storage* small
 
 template <typename KeyT, typename ValueT>
 void MapBase<KeyT, ValueT>::InitAlloc(ssize_t alloc_size) {
-  size() = alloc_size;
-  small_size() = -1;
+  set_size(alloc_size);
+  set_small_size(-1);
   storage() = MapInternal::allocateStorage<KeyT, ValueT>(size());
   std::memset(groups_ptr(), 0, size());
   growth_budget_ = MapInternal::growthThresholdForSize(size());
