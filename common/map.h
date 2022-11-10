@@ -37,7 +37,7 @@ namespace Carbon {
 template <typename KeyT, typename ValueT>
 class MapView;
 template <typename KeyT, typename ValueT>
-class MapRef;
+class MapBase;
 template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
 class Map;
 
@@ -590,10 +590,15 @@ class MapView {
  private:
   template <typename MapKeyT, typename MapValueT, ssize_t MinSmallSize>
   friend class Map;
-  friend class MapRef<KeyT, ValueT>;
+  friend class MapBase<KeyT, ValueT>;
 
-  MapView(ssize_t size, int entropy, ssize_t small_size, MapInternal::Storage* storage)
-      : size_(size), entropy_(entropy), small_size_(small_size), storage_(storage) {}
+  MapView() = default;
+  MapView(ssize_t size, MapInternal::Storage* storage, int entropy,
+          ssize_t small_size)
+      : size_(size),
+        storage_(storage),
+        entropy_(entropy),
+        small_size_(small_size) {}
 
   ssize_t size_;
   MapInternal::Storage* storage_;
@@ -645,7 +650,7 @@ class MapBase {
 
   // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
   operator ViewT() const {
-    return {size(), entropy(), small_size(), storage()};
+    return {size(), storage(), entropy(), small_size()};
   }
 
   template <typename LookupKeyT>
@@ -688,9 +693,9 @@ class MapBase {
   template <typename LookupKeyT>
   auto update(
       const LookupKeyT& lookup_key,
-      typename std::__type_identity<llvm::function_ref<std::pair<
-          KeyT*, ValueT*>(const LookupKeyT& lookup_key, void* key_storage,
-                          void* value_storage)>>::type insert_cb,
+      typename std::__type_identity<llvm::function_ref<std::pair<KeyT*, ValueT*>(
+          const LookupKeyT& lookup_key, void* key_storage, void* value_storage)>>::type
+          insert_cb,
       llvm::function_ref<ValueT&(KeyT& key, ValueT& value)> update_cb)
       -> InsertKVResultT;
 
@@ -741,10 +746,14 @@ class MapBase {
   MapBase(ssize_t small_size, MapInternal::Storage* small_storage) {
     init(small_size, small_storage);
   }
-  ~MapBase();
+  // An internal constructor used to build temporary map base objects with a
+  // specific allocated size and an inital entropy seed. This is used internally
+  // to build ephemeral maps.
+  MapBase(ssize_t alloc_size, int input_entropy) {
+    InitAlloc(alloc_size, input_entropy);
+  }
 
-  ViewT impl_view_;
-  int growth_budget_;
+  ~MapBase();
 
   auto size() const -> ssize_t { return impl_view_.size_; }
   auto storage() const -> MapInternal::Storage* { return impl_view_.storage_; }
@@ -756,22 +765,47 @@ class MapBase {
   auto size() -> ssize_t& { return impl_view_.size_; }
   auto storage() -> MapInternal::Storage*& { return impl_view_.storage_; }
   auto entropy() -> int& { return impl_view_.entropy_; }
+  auto small_size() -> int& { return impl_view_.small_size_; }
 
-  auto linear_keys() -> KeyT* { return MapInternal::getLinearKeys(storage()); }
-  auto linear_values() -> KeyT* {
-    return MapInternal::getLinearValues(storage(), small_size());
+  auto linear_keys() -> KeyT* { return MapInternal::getLinearKeys<KeyT>(storage()); }
+  auto linear_values() -> ValueT* {
+    return MapInternal::getLinearValues<KeyT, ValueT>(storage(), small_size());
   }
 
   auto groups_ptr() -> uint8_t* { return MapInternal::getGroupsPtr(storage()); }
   auto keys_ptr() -> KeyT* { return MapInternal::getKeys<KeyT>(storage(), size()); }
-  auto values_ptr() -> ValueT* { return MapInternal::getValueFromKey(keys_ptr(), size()); }
+  auto values_ptr() -> ValueT* { return MapInternal::getValueFromKey<KeyT, ValueT>(keys_ptr(), size()); }
 
   void init(ssize_t small_size, MapInternal::Storage* small_storage);
+  void InitAlloc(ssize_t alloc_size, int input_entropy);
+
+  template <typename LookupKeyT>
+  auto InsertIndexHashed(const LookupKeyT& lookup_key)
+      -> std::pair<bool, ssize_t>;
+  template <typename LookupKeyT>
+  auto InsertIntoEmptyIndex(const LookupKeyT& lookup_key) -> ssize_t;
+  template <typename LookupKeyT>
+  auto InsertHashed(
+      const LookupKeyT& lookup_key,
+      llvm::function_ref<std::pair<KeyT*, ValueT*>(
+          const LookupKeyT& lookup_key, void* key_storage, void* value_storage)>
+          insert_cb) -> InsertKVResultT;
+  template <typename LookupKeyT>
+  auto InsertSmallLinear(
+      const LookupKeyT& lookup_key,
+      llvm::function_ref<std::pair<KeyT*, ValueT*>(
+          const LookupKeyT& lookup_key, void* key_storage, void* value_storage)>
+          insert_cb) -> InsertKVResultT;
+
+  auto GrowAndRehash() -> uint8_t*;
 
   template <typename LookupKeyT>
   auto EraseSmallLinear(const LookupKeyT& lookup_key) -> bool;
   template <typename LookupKeyT>
   auto EraseHashed(const LookupKeyT& lookup_key) -> bool;
+
+  ViewT impl_view_;
+  int growth_budget_;
 };
 
 template <typename InputKeyT, typename InputValueT,
@@ -1097,111 +1131,6 @@ void forEach(ssize_t size, int entropy, ssize_t small_size, Storage* storage,
   forEachHashed<KeyT, ValueT>(size, storage, callback, [](auto...) {});
 }
 
-// Tries to insert the given lookup key into the map. Returns three pieces of
-// data compressed into two registers (in order to avoid an in-memory return).
-// These are the group pointer, a bool representing whether insertion is in fact
-// required, and the byte index of either the found entry in the group or the
-// slot of the group to insert into. The group pointer will be null if insertion
-// isn't possible without growing.
-template <typename LookupKeyT, typename KeyT>
-auto insertIndexHashed(const LookupKeyT& lookup_key, int growth_budget,
-                       int entropy, llvm::MutableArrayRef<uint8_t> groups, KeyT* keys)
-    -> std::pair<bool, ssize_t> {
-  size_t hash = llvm::hash_value(lookup_key);
-  uint8_t control_byte = computeControlByte(hash);
-  ssize_t hash_index = computeHashIndex(hash, entropy);
-
-  ssize_t group_with_deleted_index = -1;
-  Group::MatchedByteRange<> deleted_matched_range;
-
-  auto return_insert_at_index =
-      [&](ssize_t index) -> std::pair<bool, ssize_t> {
-    // We'll need to insert at this index so set the control group byte to the
-    // proper value.
-    groups[index] = control_byte;
-    return {/*needs_insertion=*/true, index};
-  };
-
-  for (ProbeSequence s(hash_index, groups.size());; s.step()) {
-    ssize_t group_index = s.getIndex();
-    Group g = Group::load(groups, group_index);
-
-    auto control_byte_matched_range = g.match(control_byte);
-    if (LLVM_LIKELY(control_byte_matched_range)) {
-      auto byte_it = control_byte_matched_range.begin();
-      auto byte_end = control_byte_matched_range.end();
-      do {
-        ssize_t index = group_index + *byte_it;
-        if (LLVM_LIKELY(keys[index] == lookup_key)) {
-          return {/*needs_insertion=*/false, index};
-        }
-        ++byte_it;
-      } while (LLVM_UNLIKELY(byte_it != byte_end));
-    }
-
-    // Track the first group with a deleted entry that we could insert over.
-    if (group_with_deleted_index < 0) {
-      deleted_matched_range = g.matchDeleted();
-      if (deleted_matched_range) {
-        group_with_deleted_index = group_index;
-      }
-    }
-
-    // We failed to find a matching entry in this bucket, so check if there are
-    // no empty slots. In that case, we'll continue probing.
-    auto empty_matched_range = g.matchEmpty();
-    if (!empty_matched_range) {
-      continue;
-    }
-
-    // Ok, we've finished probing without finding anything and need to insert
-    // instead.
-    if (group_with_deleted_index >= 0) {
-      // If we found a deleted slot, we don't need the probe sequence to insert
-      // so just bail.
-      break;
-    }
-
-    // Otherwise, we're going to need to grow by inserting over one of these
-    // empty slots. Check that we have the budget for that before we compute the
-    // exact index of the empty slot. Without the growth budget we'll have to
-    // completely rehash and so we can just bail here.
-    if (growth_budget == 0) {
-      // Without room to grow, return that no group is viable but also set the
-      // index to be negative. This ensures that a positive index is always
-      // sufficient to determine that an existing was found.
-      return {/*needs_insertion=*/true, -1};
-    }
-
-    return return_insert_at_index(group_index + *empty_matched_range.begin());
-  }
-
-  return return_insert_at_index(group_with_deleted_index +
-                                *deleted_matched_range.begin());
-}
-
-template <typename LookupKeyT>
-auto insertIntoEmptyIndex(const LookupKeyT& lookup_key, int entropy,
-                          llvm::MutableArrayRef<uint8_t> groups)
-    -> ssize_t {
-  size_t hash = llvm::hash_value(lookup_key);
-  uint8_t control_byte = computeControlByte(hash);
-  ssize_t hash_index = computeHashIndex(hash, entropy);
-
-  for (ProbeSequence s(hash_index, groups.size());; s.step()) {
-    ssize_t group_index = s.getIndex();
-    Group g = Group::load(groups, group_index);
-
-    if (auto empty_matched_range = g.matchEmpty()) {
-      ssize_t index = group_index + *empty_matched_range.begin();
-      groups[index] = control_byte;
-      return index;
-    }
-
-    // Otherwise we continue probing.
-  }
-}
-
 template <typename KeyT, typename ValueT>
 auto allocateStorage(ssize_t size) -> Storage* {
   ssize_t allocated_size = ComputeStorageSize<KeyT, ValueT>(size);
@@ -1244,147 +1173,228 @@ inline auto growthThresholdForSize(ssize_t size) -> ssize_t {
   return size - size / 8;
 }
 
+}  // namespace MapInternal
+
+
+// Tries to insert the given lookup key into the map. Returns three pieces of
+// data compressed into two registers (in order to avoid an in-memory return).
+// These are the group pointer, a bool representing whether insertion is in fact
+// required, and the byte index of either the found entry in the group or the
+// slot of the group to insert into. The group pointer will be null if insertion
+// isn't possible without growing.
+template <typename KT, typename VT>
+template <typename LookupKeyT>
+auto MapBase<KT, VT>::InsertIndexHashed(const LookupKeyT& lookup_key)
+    -> std::pair<bool, ssize_t> {
+  size_t hash = llvm::hash_value(lookup_key);
+  uint8_t control_byte = MapInternal::computeControlByte(hash);
+  ssize_t hash_index = MapInternal::computeHashIndex(hash, entropy());
+
+  ssize_t group_with_deleted_index = -1;
+  MapInternal::Group::MatchedByteRange<> deleted_matched_range;
+
+  uint8_t* groups = groups_ptr();
+
+  auto return_insert_at_index =
+      [&](ssize_t index) -> std::pair<bool, ssize_t> {
+    // We'll need to insert at this index so set the control group byte to the
+    // proper value.
+    groups[index] = control_byte;
+    return {/*needs_insertion=*/true, index};
+  };
+
+  for (MapInternal::ProbeSequence s(hash_index, size());; s.step()) {
+    ssize_t group_index = s.getIndex();
+    auto g = MapInternal::Group::load(groups, group_index);
+
+    auto control_byte_matched_range = g.match(control_byte);
+    if (LLVM_LIKELY(control_byte_matched_range)) {
+      auto byte_it = control_byte_matched_range.begin();
+      auto byte_end = control_byte_matched_range.end();
+      do {
+        ssize_t index = group_index + *byte_it;
+        if (LLVM_LIKELY(keys_ptr()[index] == lookup_key)) {
+          return {/*needs_insertion=*/false, index};
+        }
+        ++byte_it;
+      } while (LLVM_UNLIKELY(byte_it != byte_end));
+    }
+
+    // Track the first group with a deleted entry that we could insert over.
+    if (group_with_deleted_index < 0) {
+      deleted_matched_range = g.matchDeleted();
+      if (deleted_matched_range) {
+        group_with_deleted_index = group_index;
+      }
+    }
+
+    // We failed to find a matching entry in this bucket, so check if there are
+    // no empty slots. In that case, we'll continue probing.
+    auto empty_matched_range = g.matchEmpty();
+    if (!empty_matched_range) {
+      continue;
+    }
+
+    // Ok, we've finished probing without finding anything and need to insert
+    // instead.
+    if (group_with_deleted_index >= 0) {
+      // If we found a deleted slot, we don't need the probe sequence to insert
+      // so just bail.
+      break;
+    }
+
+    // Otherwise, we're going to need to grow by inserting over one of these
+    // empty slots. Check that we have the budget for that before we compute the
+    // exact index of the empty slot. Without the growth budget we'll have to
+    // completely rehash and so we can just bail here.
+    if (growth_budget_ == 0) {
+      // Without room to grow, return that no group is viable but also set the
+      // index to be negative. This ensures that a positive index is always
+      // sufficient to determine that an existing was found.
+      return {/*needs_insertion=*/true, -1};
+    }
+
+    return return_insert_at_index(group_index + *empty_matched_range.begin());
+  }
+
+  return return_insert_at_index(group_with_deleted_index +
+                                *deleted_matched_range.begin());
+}
+
+template <typename KT, typename VT>
+template <typename LookupKeyT>
+auto MapBase<KT, VT>::InsertIntoEmptyIndex(const LookupKeyT& lookup_key) -> ssize_t {
+  size_t hash = llvm::hash_value(lookup_key);
+  uint8_t control_byte = MapInternal::computeControlByte(hash);
+  ssize_t hash_index = MapInternal::computeHashIndex(hash, entropy());
+
+  uint8_t* groups = groups_ptr();
+  for (MapInternal::ProbeSequence s(hash_index, size());; s.step()) {
+    ssize_t group_index = s.getIndex();
+    auto g = MapInternal::Group::load(groups, group_index);
+
+    if (auto empty_matched_range = g.matchEmpty()) {
+      ssize_t index = group_index + *empty_matched_range.begin();
+      groups[index] = control_byte;
+      return index;
+    }
+
+    // Otherwise we continue probing.
+  }
+}
+
 template <typename KeyT, typename ValueT>
-auto growAndRehash(MapInfo& info, ssize_t small_size, Storage* storage, Storage*& allocated_storage)
-    -> llvm::MutableArrayRef<uint8_t> {
-  // Capture the old values we will use early to make in unambiguous that they
-  // aren't being updated.
-  ssize_t old_size = info.size;
-  int old_entropy = info.entropy;
-  Storage* old_storage = storage;
+auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
+  // We grow into a new `MapBase` so that both the new and old maps are
+  // fully functional until all the entries are moved over. However, we directly
+  // manipulate the internals to short circuit many aspects of the growth.
+  MapBase<KeyT, ValueT> new_map(MapInternal::computeNewSize(size()), entropy());
+  KeyT* new_keys = new_map.keys_ptr();
+  ValueT* new_values = new_map.values_ptr();
 
-  // Build up the new structure after growth without modifying the underlying
-  // structures. This is important as some of those may be aliased by a small
-  // buffer. We don't want to change the underlying state until we copy
-  // everything out.
-  ssize_t new_size = computeNewSize(old_size);
-  Storage* new_storage = allocateStorage<KeyT, ValueT>(new_size);
-  llvm::MutableArrayRef<uint8_t> new_groups = getGroups(new_storage, new_size);
-  std::memset(new_groups.data(), 0, new_groups.size());
-  KeyT* new_keys = getKeys<KeyT>(new_storage, new_size);
-  ValueT* new_values = getValues<KeyT, ValueT>(new_storage, new_size);
-  int new_growth_budget = growthThresholdForSize(new_size);
-  int new_entropy =
-      llvm::hash_combine(old_entropy, new_storage) & EntropyMask;
-
-  forEach<KeyT, ValueT>(
-      old_size, old_entropy, small_size, old_storage,
-      [&](KeyT& old_key, ValueT& old_value) {
-        ssize_t index = insertIntoEmptyIndex(old_key, new_entropy, new_groups);
-        --new_growth_budget;
-        new (&new_keys[index]) KeyT(std::move(old_key));
-        old_key.~KeyT();
-        new (&new_values[index]) ValueT(std::move(old_value));
-        old_value.~ValueT();
-      });
-  assert(new_growth_budget >= 0 &&
+  forEach([&](KeyT& old_key, ValueT& old_value) {
+    ssize_t index = new_map.InsertIntoEmptyIndex(old_key);
+    --new_map.growth_budget_;
+    new (&new_keys[index]) KeyT(std::move(old_key));
+    old_key.~KeyT();
+    new (&new_values[index]) ValueT(std::move(old_value));
+    old_value.~ValueT();
+  });
+  assert(new_map.growth_budget_ >= 0 &&
          "Must still have a growth budget after rehash!");
 
-  if (old_entropy >= 0) {
+  if (entropy() >= 0) {
     // Old isn't a small buffer, so we need to deallocate it.
-    deallocateStorage<KeyT, ValueT>(old_storage, old_size);
+    MapInternal::deallocateStorage<KeyT, ValueT>(storage(), size());
   }
 
   // Now that we've fully built the new, grown structures, replace the entries
   // in the data structure. At this point we can be certain to not clobber
   // anything aliasing a small buffer.
-  info.size = new_size;
-  info.growth_budget = new_growth_budget;
-  info.entropy = new_entropy;
-  allocated_storage = new_storage;
+  impl_view_ = new_map.impl_view_;
+  growth_budget_ = new_map.growth_budget_;
+
+  // Prevent the interim new map object from doing anything when destroyed as
+  // we've taken over it's internals.
+  new_map.storage() = nullptr;
+  new_map.size() = 0;
 
   // We return the newly allocated groups for immediate use by the caller.
-  return new_groups;
+  return groups_ptr();
 }
 
-template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto insertHashed(
+template <typename KeyT, typename ValueT>
+template <typename LookupKeyT>
+auto MapBase<KeyT, ValueT>::InsertHashed(
     const LookupKeyT& lookup_key,
     llvm::function_ref<std::pair<KeyT*, ValueT*>(
         const LookupKeyT& lookup_key, void* key_storage, void* value_storage)>
-        insert_cb,
-    MapInfo& info, ssize_t small_size, Storage* storage, Storage*& allocated_storage)
-    -> InsertKVResult<KeyT, ValueT> {
-  ssize_t& size = info.size;
-  int& growth_budget = info.growth_budget;
-  int& entropy = info.entropy;
-  llvm::MutableArrayRef<uint8_t> groups = getGroups(storage, size);
-  KeyT* keys = getKeys<KeyT>(storage, size);
-  ValueT* values = getValues<KeyT, ValueT>(storage, size);
-
+        insert_cb) -> InsertKVResultT {
   ssize_t index = -1;
-
-  if (size > 0) {
+  // Try inserting if we have storage at all.
+  if (size() > 0) {
     bool needs_insertion;
-    std::tie(needs_insertion, index) =
-        insertIndexHashed(lookup_key, growth_budget, entropy, groups, keys);
+    std::tie(needs_insertion, index) = InsertIndexHashed(lookup_key);
     if (!needs_insertion) {
-      assert(index >= 0 && "Must have a valid group when we find an existing entry.");
-      return {false, keys[index], values[index]};
+      assert(index >= 0 &&
+             "Must have a valid group when we find an existing entry.");
+      return {false, keys_ptr()[index], values_ptr()[index]};
     }
   }
 
   if (index < 0) {
     assert(
-        growth_budget == 0 &&
+        growth_budget_ == 0 &&
         "Shouldn't need to grow the table until we exhaust our growth budget!");
 
-    groups = growAndRehash<KeyT, ValueT>(info, small_size, storage, allocated_storage);
-    assert(growth_budget > 0 && "Must create growth budget after growing1");
-    // Make sure to update our keys and values pointers based on the updated storage.
-    storage = allocated_storage;
-    keys = getKeys<KeyT>(storage, size);
-    values = getValues<KeyT, ValueT>(storage, size);
+    GrowAndRehash();
     // Directly insert into an empty index as we know we have one.
-    index = insertIntoEmptyIndex(lookup_key, entropy, groups);
+    index = InsertIntoEmptyIndex(lookup_key);
   }
 
   assert(index >= 0 && "Should have a group to insert into now.");
-  assert(growth_budget >= 0 && "Cannot insert with zero budget!");
-  --growth_budget;
+  assert(growth_budget_ >= 0 && "Cannot insert with zero budget!");
+  --growth_budget_;
 
   KeyT* k;
   ValueT* v;
   std::tie(k, v) =
-      insert_cb(lookup_key, &keys[index], &values[index]);
+      insert_cb(lookup_key, &keys_ptr()[index], &values_ptr()[index]);
   return {true, *k, *v};
 }
 
-template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto insertSmallLinear(
+template <typename KeyT, typename ValueT>
+template <typename LookupKeyT>
+auto MapBase<KeyT, ValueT>::InsertSmallLinear(
     const LookupKeyT& lookup_key,
     llvm::function_ref<std::pair<KeyT*, ValueT*>(
         const LookupKeyT& lookup_key, void* key_storage, void* value_storage)>
-        insert_cb,
-    MapInfo& info, ssize_t small_size, Storage* storage, Storage*& allocated_storage)
-    -> InsertKVResult<KeyT, ValueT> {
-  KeyT* keys = getLinearKeys<KeyT>(storage);
-  ValueT* values = getLinearValues<KeyT, ValueT>(storage, small_size);
-  for (ssize_t i : llvm::seq<ssize_t>(0, info.size)) {
+        insert_cb)
+    -> InsertKVResultT {
+  assert(is_small() && "Must be using the small size.");
+
+  KeyT* keys = linear_keys();
+  ValueT* values = linear_values();
+  for (ssize_t i : llvm::seq<ssize_t>(0, size())) {
     if (keys[i] == lookup_key) {
       return {false, keys[i], values[i]};
     }
   }
 
-  size_t index;
+  size_t index = size();
 
   // We need to insert. First see if we have space.
-  if (info.size < small_size) {
-    // We can do the easy linear insert.
-    index = info.size;
-    ++info.size;
+  if (size() < small_size()) {
+    // We can do the easy linear insert, just increment the size.
+    ++size();
   } else {
     // No space for a linear insert so grow into a hash table and then do
     // a hashed insert.
-    llvm::MutableArrayRef<uint8_t> groups =
-        growAndRehash<KeyT, ValueT>(info, small_size, storage, allocated_storage);
-    assert(info.growth_budget > 0 && "Must create growth budget after growing1");
-    // Make sure to update our keys and values pointers based on the updated storage.
-    storage = allocated_storage;
-    keys = getKeys<KeyT>(storage, info.size);
-    values = getValues<KeyT, ValueT>(storage, info.size);
-    index = insertIntoEmptyIndex(lookup_key, info.entropy, groups);
-    --info.growth_budget;
+    GrowAndRehash();
+    index = InsertIntoEmptyIndex(lookup_key);
+    --growth_budget_;
+    keys = keys_ptr();
+    values = values_ptr();
   }
   KeyT* k;
   ValueT* v;
@@ -1392,40 +1402,37 @@ auto insertSmallLinear(
   return {true, *k, *v};
 }
 
-template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto insert(
+template <typename KT, typename VT>
+template <typename LookupKeyT>
+auto MapBase<KT, VT>::insert(
     const LookupKeyT& lookup_key,
-    llvm::function_ref<std::pair<KeyT*, ValueT*>(
-        const LookupKeyT& lookup_key, void* key_storage, void* value_storage)>
-        insert_cb,
-    MapInfo& info, ssize_t small_size, Storage* storage, Storage*& allocated_storage)
-    -> InsertKVResult<KeyT, ValueT> {
-  _mm_prefetch(storage, _MM_HINT_T2);
+    typename std::__type_identity<llvm::function_ref<std::pair<KeyT*, ValueT*>(
+        const LookupKeyT& lookup_key, void* key_storage,
+        void* value_storage)>>::type insert_cb) -> InsertKVResultT {
+  _mm_prefetch(storage(), _MM_HINT_T2);
   // The entropy will be negative when using the small buffer, and we can
   // recompute from the small buffer size whether that implies linear lookups
   // due to fitting on a cacheline.
-  if (ShouldUseLinearLookup<KeyT>(small_size) && info.entropy < 0) {
-    return insertSmallLinear<KeyT, ValueT>(lookup_key, insert_cb, info,
-                                           small_size, storage, allocated_storage);
+  if (MapInternal::ShouldUseLinearLookup<KeyT>(small_size()) && entropy() < 0) {
+    return InsertSmallLinear(lookup_key, insert_cb);
   }
 
   // Otherwise we dispatch to the hashed routine which is the same for small
   // and large.
-  return insertHashed<KeyT, ValueT>(lookup_key, insert_cb, info, small_size,
-                                    storage, allocated_storage);
+  return InsertHashed(lookup_key, insert_cb);
 }
 
-template <typename KeyT, typename ValueT, typename LookupKeyT>
-auto update(
+template <typename KT, typename VT>
+template <typename LookupKeyT>
+auto MapBase<KT, VT>::update(
     const LookupKeyT& lookup_key,
-    llvm::function_ref<std::pair<KeyT*, ValueT*>(
-        const LookupKeyT& lookup_key, void* key_storage, void* value_storage)>
-        insert_cb,
-    llvm::function_ref<ValueT&(KeyT& key, ValueT& value)> update_cb,
-    MapInfo& info, ssize_t small_size, Storage* storage, Storage*& allocated_storage)
-    -> InsertKVResult<KeyT, ValueT> {
+    typename std::__type_identity<llvm::function_ref<std::pair<KeyT*, ValueT*>(
+        const LookupKeyT& lookup_key, void* key_storage,
+        void* value_storage)>>::type insert_cb,
+    llvm::function_ref<ValueT&(KeyT& key, ValueT& value)> update_cb)
+    -> InsertKVResultT {
   auto i_result =
-      insert(lookup_key, insert_cb, info, small_size, storage, allocated_storage);
+      insert(lookup_key, insert_cb);
 
   if (i_result.isInserted()) {
     return i_result;
@@ -1434,8 +1441,6 @@ auto update(
   ValueT& v = update_cb(i_result.getKey(), i_result.getValue());
   return {false, i_result.getKey(), v};
 }
-
-}  // namespace MapInternal
 
 template <typename KeyT, typename ValueT>
 template <typename LookupKeyT>
@@ -1465,7 +1470,7 @@ auto MapBase<KeyT, ValueT>::EraseHashed(const LookupKeyT& lookup_key) -> bool {
   uint8_t* groups = groups_ptr();
   KeyT* keys = keys_ptr();
 
-  ssize_t index = lookupIndexHashed(lookup_key, size(), entropy(), groups, keys);
+  ssize_t index = MapInternal::lookupIndexHashed(lookup_key, size(), entropy(), groups, keys);
   if (index < 0) {
     return false;
   }
@@ -1540,11 +1545,16 @@ void MapBase<KeyT, ValueT>::clear() {
       });
 
   // And reset the growth budget.
-  growth_budget_ = growthThresholdForSize(size());
+  growth_budget_ = MapInternal::growthThresholdForSize(size());
 }
 
 template <typename KeyT, typename ValueT>
 MapBase<KeyT, ValueT>::~MapBase() {
+  // Nothing to do when in the un-allocated and unused state.
+  if (size() == 0) {
+    return;
+  }
+  
   // Destroy all the keys and values.
   forEach([](KeyT& k, ValueT& v) {
     k.~KeyT();
@@ -1584,8 +1594,22 @@ void MapBase<KeyT, ValueT>::init(ssize_t small_size_arg, MapInternal::Storage* s
   std::memset(groups.data(), 0, groups.size());
 }
 
+template <typename KeyT, typename ValueT>
+void MapBase<KeyT, ValueT>::InitAlloc(ssize_t alloc_size, int input_entropy) {
+  size() = alloc_size;
+  entropy() = llvm::hash_combine(input_entropy, this) & MapInternal::EntropyMask;
+  storage() = MapInternal::allocateStorage<KeyT, ValueT>(size());
+  std::memset(groups_ptr(), 0, size());
+  growth_budget_ = MapInternal::growthThresholdForSize(size());
+}
+
 template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
 void Map<KeyT, ValueT, MinSmallSize>::reset() {
+  // Nothing to do when in the un-allocated and unused state.
+  if (this->size() == 0) {
+    return;
+  }
+  
   // If we have a small size and are still using it, this is just clearing.
   if (this->entropy() < 0) {
     this->clear();
@@ -1593,12 +1617,10 @@ void Map<KeyT, ValueT, MinSmallSize>::reset() {
   }
 
   // Otherwise do the first part of the clear to destroy all the elements.
-  this->forEach(
-      [](KeyT& k, ValueT& v) {
-        k.~KeyT();
-        v.~ValueT();
-      },
-      [](auto...) {});
+  this->forEach([](KeyT& k, ValueT& v) {
+    k.~KeyT();
+    v.~ValueT();
+  });
 
   // Deallocate the buffer.
   MapInternal::deallocateStorage<KeyT, ValueT>(this->storage(), this->size());

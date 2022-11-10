@@ -43,7 +43,7 @@ void expectUnorderedElementsAre(
 
 TEST(MapTest, Basic) {
   Map<int, int, 4> m;
-  using RefT = MapRef<int, int>;
+  using BaseT = MapBase<int, int>;
   using ViewT = MapView<int, int>;
 
   EXPECT_FALSE(m.contains(42));
@@ -95,7 +95,7 @@ TEST(MapTest, Basic) {
   expectUnorderedElementsAre(
       m, {Pair(1, 101), Pair(2, 201), Pair(3, 301), Pair(4, 401)});
   expectUnorderedElementsAre(
-      RefT(m), {Pair(1, 101), Pair(2, 201), Pair(3, 301), Pair(4, 401)});
+      *static_cast<BaseT*>(&m), {Pair(1, 101), Pair(2, 201), Pair(3, 301), Pair(4, 401)});
   expectUnorderedElementsAre(
       ViewT(m), {Pair(1, 101), Pair(2, 201), Pair(3, 301), Pair(4, 401)});
 
@@ -328,9 +328,9 @@ TEST(MapTest, FactoryAPI) {
 TEST(MapTest, BasicRef) {
   Map<int, int, 4> real_m;
   using ViewT = MapView<int, int>;
-  using RefT = MapRef<int, int>;
+  using BaseT = MapBase<int, int>;
 
-  RefT m = real_m;
+  BaseT& m = real_m;
 
   EXPECT_FALSE(m.contains(42));
   EXPECT_EQ(nullptr, m[42]);
@@ -434,7 +434,7 @@ TEST(MapTest, BasicRef) {
   EXPECT_EQ(73 * 100 + 3, *m[73]);
 
   // Reset back to empty and small.
-  m.reset();
+  real_m.reset();
   EXPECT_FALSE(m.contains(42));
   EXPECT_EQ(nullptr, m[42]);
 
