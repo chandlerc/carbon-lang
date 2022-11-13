@@ -38,21 +38,21 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
   }
 
   auto BenchContains(KeyT k) -> bool {
-    return MV.contains(k);
+    return MV.Contains(k);
   }
 
   auto BenchInsert(KeyT k, ValueT v) -> bool {
-    auto result = M.insert(k, v);
-    benchmark::DoNotOptimize(result.isInserted());
-    return result.isInserted();
+    auto result = M.Insert(k, v);
+    benchmark::DoNotOptimize(result.is_inserted());
+    return result.is_inserted();
   }
 
   auto BenchUpdate(KeyT k, ValueT v) -> void {
-    M.update(k, v);
+    M.Update(k, v);
   }
 
   auto BenchErase(KeyT k) -> bool {
-    return M.erase(k);
+    return M.Erase(k);
   }
 };
 
