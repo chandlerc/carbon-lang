@@ -31,16 +31,28 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
 
   void CreateView() { MV = M; }
 
-  [[clang::noinline]] auto BenchLookup(KeyT k) -> ValueT* {
+  auto BenchLookup(KeyT k) -> ValueT* {
     ValueT* v = MV[k];
     benchmark::DoNotOptimize(v);
     return v;
   }
 
-  [[clang::noinline]] auto BenchInsert(KeyT k, ValueT v) -> bool {
+  auto BenchContains(KeyT k) -> bool {
+    return MV.contains(k);
+  }
+
+  auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert(k, v);
     benchmark::DoNotOptimize(result.isInserted());
     return result.isInserted();
+  }
+
+  auto BenchUpdate(KeyT k, ValueT v) -> void {
+    M.update(k, v);
+  }
+
+  auto BenchErase(KeyT k) -> bool {
+    return M.erase(k);
   }
 };
 
@@ -54,17 +66,29 @@ struct MapWrapper<absl::flat_hash_map<KT, VT, HasherT>> {
   
   void CreateView() {}
 
-  [[clang::noinline]] auto BenchLookup(KeyT k) -> ValueT* {
+  auto BenchContains(KeyT k) -> bool {
+    return M.find(k) != M.end();
+  }
+
+  auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
     ValueT* v = &it->second;
     benchmark::DoNotOptimize(v);
     return v;
   }
 
-  [[clang::noinline]] auto BenchInsert(KeyT k, ValueT v) -> bool {
+  auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert({k, v});
     benchmark::DoNotOptimize(result.second);
     return result.second;
+  }
+
+  auto BenchUpdate(KeyT k, ValueT v) -> void {
+    M[k] = v;
+  }
+
+  auto BenchErase(KeyT k) -> bool {
+    return M.erase(k) != 0;
   }
 };
 
@@ -78,17 +102,29 @@ struct MapWrapper<llvm::DenseMap<KT, VT, HasherT>> {
 
   void CreateView() {}
 
-  [[clang::noinline]] auto BenchLookup(KeyT k) -> ValueT* {
+  auto BenchContains(KeyT k) -> bool {
+    return M.find(k) != M.end();
+  }
+
+  auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
     ValueT* v = &it->second;
     benchmark::DoNotOptimize(v);
     return v;
   }
 
-  [[clang::noinline]] auto BenchInsert(KeyT k, ValueT v) -> bool {
+  auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert({k, v});
     benchmark::DoNotOptimize(result.second);
     return result.second;
+  }
+
+  auto BenchUpdate(KeyT k, ValueT v) -> void {
+    M[k] = v;
+  }
+
+  auto BenchErase(KeyT k) -> bool {
+    return M.erase(k) != 0;
   }
 };
 
@@ -99,6 +135,12 @@ struct MapWrapper<llvm::SmallDenseMap<KT, VT, SmallSize, HasherT>> {
   using ValueT = VT;
 
   MapT M;
+
+  void CreateView() {}
+
+  auto BenchContains(KeyT k) -> bool {
+    return benchmark::DoNotOptimize(M.find(k) != M.end());
+  }
 
   auto BenchLookup(KeyT k) -> bool {
     auto it = M.find(k);
@@ -111,6 +153,14 @@ struct MapWrapper<llvm::SmallDenseMap<KT, VT, SmallSize, HasherT>> {
     auto result = M.insert({k, v});
     benchmark::DoNotOptimize(result.second);
     return result.second;
+  }
+
+  auto BenchUpdate(KeyT k, ValueT v) -> void {
+    M[k] = v;
+  }
+
+  auto BenchErase(KeyT k) -> bool {
+    return M.erase(k) != 0;
   }
 };
 
@@ -193,13 +243,10 @@ auto BuildShuffledKeys(const KeyVectorT& keys) -> llvm::SmallVector<int*, 32> {
 }
 
 static void OneOpSizeArgs(benchmark::internal::Benchmark *b) {
-    b->Arg(1);
-    b->Arg(2);
-    b->Arg(4);
-    b->Arg(8);
-    b->Arg(16);
-    b->Arg(32);
-    b->Range(1 << 6, 1 << 20);
+  b->DenseRange(1, 8, 1);
+  b->DenseRange(10, 16, 2);
+  b->DenseRange(24, 64, 8);
+  b->Range(1 << 7, 1 << 20);
 }
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
@@ -249,6 +296,8 @@ static void BM_MapLookupMissPtr(benchmark::State& s) {
   constexpr ssize_t NumOtherKeys = 1024LL * 64;
   KeyVectorT other_keys = BuildKeys(NumOtherKeys);
 
+  m.CreateView();
+
   ssize_t i = 0;
   for (auto _ : s) {
     T* value = m.BenchLookup(other_keys[i].get());
@@ -259,19 +308,96 @@ static void BM_MapLookupMissPtr(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_MapLookupMissPtr);
 
+template <typename MapT>
+static void BM_MapContainsHitPtr(benchmark::State& s) {
+  using MapWrapperT = MapWrapper<MapT>;
+  using T = typename MapWrapperT::ValueT;
+  MapWrapperT m;
+  KeyVectorT keys =
+      BuildKeys(s.range(0), [&m](int* key) { m.BenchInsert(key, T()); });
+  llvm::SmallVector<int*, 32> shuffled_keys = BuildShuffledKeys(keys);
+
+  m.CreateView();
+
+  ssize_t i = 0;
+  for (auto _ : s) {
+    bool result = m.BenchContains(shuffled_keys[i]);
+    assert(result && "Should hit!");
+    benchmark::DoNotOptimize(result);
+    i = (i + 1) & (NumShuffledKeys - 1);
+  }
+}
+MAP_BENCHMARK_ONE_OP(BM_MapContainsHitPtr);
+
+template <typename MapT>
+static void BM_MapContainsMissPtr(benchmark::State& s) {
+  using MapWrapperT = MapWrapper<MapT>;
+  using T = typename MapWrapperT::ValueT;
+  MapWrapperT m;
+  KeyVectorT keys =
+      BuildKeys(s.range(0), [&m](int* key) { m.BenchInsert(key, T()); });
+  constexpr ssize_t NumOtherKeys = 1024LL * 64;
+  KeyVectorT other_keys = BuildKeys(NumOtherKeys);
+
+  m.CreateView();
+
+  ssize_t i = 0;
+  for (auto _ : s) {
+    bool result = m.BenchContains(other_keys[i].get());
+    assert(!result && "Should miss!");
+    benchmark::DoNotOptimize(result);
+    i = (i + 1) & (NumOtherKeys - 1);
+  }
+}
+MAP_BENCHMARK_ONE_OP(BM_MapContainsMissPtr);
+
+template <typename MapT>
+static void BM_MapUpdateHitPtr(benchmark::State& s) {
+  using MapWrapperT = MapWrapper<MapT>;
+  using T = typename MapWrapperT::ValueT;
+  MapWrapperT m;
+  KeyVectorT keys =
+      BuildKeys(s.range(0), [&m](int* key) { m.BenchInsert(key, T()); });
+  llvm::SmallVector<int*, 32> shuffled_keys = BuildShuffledKeys(keys);
+
+  m.CreateView();
+
+  ssize_t i = 0;
+  for (auto _ : s) {
+    benchmark::ClobberMemory();
+    m.BenchUpdate(shuffled_keys[i], {});
+    i = (i + 1) & (NumShuffledKeys - 1);
+  }
+}
+MAP_BENCHMARK_ONE_OP(BM_MapUpdateHitPtr);
+
+template <typename MapT>
+static void BM_MapEraseUpdateHitPtr(benchmark::State& s) {
+  using MapWrapperT = MapWrapper<MapT>;
+  using T = typename MapWrapperT::ValueT;
+  MapWrapperT m;
+  KeyVectorT keys =
+      BuildKeys(s.range(0), [&m](int* key) { m.BenchInsert(key, T()); });
+  llvm::SmallVector<int*, 32> shuffled_keys = BuildShuffledKeys(keys);
+
+  m.CreateView();
+
+  ssize_t i = 0;
+  for (auto _ : s) {
+    m.BenchErase(shuffled_keys[i]);
+    benchmark::ClobberMemory();
+    m.BenchUpdate(shuffled_keys[i], {});
+    i = (i + 1) & (NumShuffledKeys - 1);
+  }
+}
+MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHitPtr);
+
 static void OpSeqSizeArgs(benchmark::internal::Benchmark *b) {
-    b->Arg(1);
-    b->Arg(2);
-    b->Arg(3);
-    b->Arg(4);
-    b->Arg(5);
-    b->Arg(8);
-    b->Arg(9);
-    b->Arg(16);
-    b->Arg(17);
-    b->Arg(32);
-    b->Arg(33);
-    b->Range(1 << 6, 1 << 15);
+  b->DenseRange(1, 13, 1);
+  b->DenseRange(15, 17, 1);
+  b->DenseRange(23, 25, 1);
+  b->DenseRange(31, 33, 1);
+  b->Range(1 << 6, 1 << 15);
 }
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
