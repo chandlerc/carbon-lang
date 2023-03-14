@@ -362,7 +362,7 @@ template <typename KeyT, typename ValueT, ssize_t SmallSize>
 struct alignas(StorageAlignment<KeyT, ValueT>)
     SmallSizeStorage<KeyT, ValueT, false, SmallSize> : Storage {
   // FIXME: One interesting question is whether the small size should be a
-  // minumum here or an exact figure.
+  // minimum here or an exact figure.
   static_assert(llvm::isPowerOf2_64(SmallSize),
                 "SmallSize must be a power of two for a hashed buffer!");
   static_assert(SmallSize >= MapInternal::GroupSize,
