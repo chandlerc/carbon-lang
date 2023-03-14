@@ -37,9 +37,7 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
     return v;
   }
 
-  auto BenchContains(KeyT k) -> bool {
-    return MV.Contains(k);
-  }
+  auto BenchContains(KeyT k) -> bool { return MV.Contains(k); }
 
   auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.Insert(k, v);
@@ -47,13 +45,9 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
     return result.is_inserted();
   }
 
-  auto BenchUpdate(KeyT k, ValueT v) -> void {
-    M.Update(k, v);
-  }
+  auto BenchUpdate(KeyT k, ValueT v) -> void { M.Update(k, v); }
 
-  auto BenchErase(KeyT k) -> bool {
-    return M.Erase(k);
-  }
+  auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
 };
 
 template <typename KT, typename VT, typename HasherT>
@@ -63,12 +57,10 @@ struct MapWrapper<absl::flat_hash_map<KT, VT, HasherT>> {
   using ValueT = VT;
 
   MapT M;
-  
+
   void CreateView() {}
 
-  auto BenchContains(KeyT k) -> bool {
-    return M.find(k) != M.end();
-  }
+  auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
 
   auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
@@ -83,13 +75,9 @@ struct MapWrapper<absl::flat_hash_map<KT, VT, HasherT>> {
     return result.second;
   }
 
-  auto BenchUpdate(KeyT k, ValueT v) -> void {
-    M[k] = v;
-  }
+  auto BenchUpdate(KeyT k, ValueT v) -> void { M[k] = v; }
 
-  auto BenchErase(KeyT k) -> bool {
-    return M.erase(k) != 0;
-  }
+  auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 
 template <typename KT, typename VT, typename HasherT>
@@ -102,9 +90,7 @@ struct MapWrapper<llvm::DenseMap<KT, VT, HasherT>> {
 
   void CreateView() {}
 
-  auto BenchContains(KeyT k) -> bool {
-    return M.find(k) != M.end();
-  }
+  auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
 
   auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
@@ -119,13 +105,9 @@ struct MapWrapper<llvm::DenseMap<KT, VT, HasherT>> {
     return result.second;
   }
 
-  auto BenchUpdate(KeyT k, ValueT v) -> void {
-    M[k] = v;
-  }
+  auto BenchUpdate(KeyT k, ValueT v) -> void { M[k] = v; }
 
-  auto BenchErase(KeyT k) -> bool {
-    return M.erase(k) != 0;
-  }
+  auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 
 template <typename KT, typename VT, unsigned SmallSize, typename HasherT>
@@ -155,13 +137,9 @@ struct MapWrapper<llvm::SmallDenseMap<KT, VT, SmallSize, HasherT>> {
     return result.second;
   }
 
-  auto BenchUpdate(KeyT k, ValueT v) -> void {
-    M[k] = v;
-  }
+  auto BenchUpdate(KeyT k, ValueT v) -> void { M[k] = v; }
 
-  auto BenchErase(KeyT k) -> bool {
-    return M.erase(k) != 0;
-  }
+  auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 
 struct LLVMHash {
@@ -205,8 +183,7 @@ struct LLVMHashingDenseMapInfo {
 
 using KeyVectorT = llvm::SmallVector<std::unique_ptr<int>, 32>;
 
-[[clang::noinline]]
-auto BuildKeys(
+[[clang::noinline]] auto BuildKeys(
     ssize_t size, llvm::function_ref<void(int*)> callback = [](int*) {})
     -> KeyVectorT {
   KeyVectorT keys;
@@ -223,8 +200,8 @@ auto BuildKeys(
 
 constexpr ssize_t NumShuffledKeys = 1024LL * 64;
 
-[[clang::noinline]]
-auto BuildShuffledKeys(const KeyVectorT& keys) -> llvm::SmallVector<int*, 32> {
+[[clang::noinline]] auto BuildShuffledKeys(const KeyVectorT& keys)
+    -> llvm::SmallVector<int*, 32> {
   std::random_device r_dev;
   std::seed_seq seed(
       {r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev()});
@@ -242,7 +219,7 @@ auto BuildShuffledKeys(const KeyVectorT& keys) -> llvm::SmallVector<int*, 32> {
   return shuffled_keys;
 }
 
-static void OneOpSizeArgs(benchmark::internal::Benchmark *b) {
+static void OneOpSizeArgs(benchmark::internal::Benchmark* b) {
   b->DenseRange(1, 8, 1);
   b->DenseRange(10, 16, 2);
   b->DenseRange(24, 64, 8);
@@ -259,11 +236,11 @@ static void OneOpSizeArgs(benchmark::internal::Benchmark *b) {
       ->Apply(OneOpSizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_ONE_OP(NAME) \
-    MAP_BENCHMARK_ONE_OP_SIZE(NAME, 1); \
-    MAP_BENCHMARK_ONE_OP_SIZE(NAME, 2); \
-    MAP_BENCHMARK_ONE_OP_SIZE(NAME, 4); \
-    MAP_BENCHMARK_ONE_OP_SIZE(NAME, 64)
+#define MAP_BENCHMARK_ONE_OP(NAME)    \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, 1); \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, 2); \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, 4); \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, 64)
 
 template <typename MapT>
 static void BM_MapLookupHitPtr(benchmark::State& s) {
@@ -392,7 +369,7 @@ static void BM_MapEraseUpdateHitPtr(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHitPtr);
 
-static void OpSeqSizeArgs(benchmark::internal::Benchmark *b) {
+static void OpSeqSizeArgs(benchmark::internal::Benchmark* b) {
   b->DenseRange(1, 13, 1);
   b->DenseRange(15, 17, 1);
   b->DenseRange(23, 25, 1);
@@ -410,11 +387,11 @@ static void OpSeqSizeArgs(benchmark::internal::Benchmark *b) {
       ->Apply(OneOpSizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_OP_SEQ(NAME) \
-    MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 1); \
-    MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 2); \
-    MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 4); \
-    MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 64)
+#define MAP_BENCHMARK_OP_SEQ(NAME)    \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 1); \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 2); \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 4); \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 64)
 
 template <typename MapT>
 static void BM_MapInsertPtrSeq(benchmark::State& s) {

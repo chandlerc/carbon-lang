@@ -95,7 +95,8 @@ TEST(MapTest, Basic) {
   expectUnorderedElementsAre(
       m, {Pair(1, 101), Pair(2, 201), Pair(3, 301), Pair(4, 401)});
   expectUnorderedElementsAre(
-      *static_cast<BaseT*>(&m), {Pair(1, 101), Pair(2, 201), Pair(3, 301), Pair(4, 401)});
+      *static_cast<BaseT*>(&m),
+      {Pair(1, 101), Pair(2, 201), Pair(3, 301), Pair(4, 401)});
   expectUnorderedElementsAre(
       ViewT(m), {Pair(1, 101), Pair(2, 201), Pair(3, 301), Pair(4, 401)});
 

@@ -20,12 +20,12 @@
 #include <utility>
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/bit.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/Support/AlignOf.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/Compiler.h"
@@ -1485,4 +1485,4 @@ void Map<KeyT, ValueT, MinSmallSize>::Reset() {
 
 }  // namespace Carbon
 
-#endif
+#endif  // CARBON_COMMON_MAP_H_
