@@ -28,6 +28,8 @@ EXTERNAL_REPOS: Dict[str, Callable[[str], str]] = {
     # @llvm-project//llvm:include/llvm/Support/Error.h ->
     #   llvm/Support/Error.h
     "@llvm-project": lambda x: re.sub("^(.*:(lib|include))/", "", x),
+    # @com_google_absl//absl/a/b:c.h -> absl/a/b/c.h
+    "@com_google_absl": lambda x: re.sub(":", "/", x),
     # @com_google_protobuf//:src/google/protobuf/descriptor.h ->
     #   google/protobuf/descriptor.h
     "@com_google_protobuf": lambda x: re.sub("^(.*:src)/", "", x),
