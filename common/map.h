@@ -20,6 +20,7 @@
 #include <utility>
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerIntPair.h"
@@ -120,7 +121,7 @@ class GroupMatchedByteIterator
 
   auto operator*() -> ssize_t& {
     assert(mask != 0 && "Cannot get an index from a zero mask!");
-    byte_index = llvm::countTrailingZeros(mask, llvm::ZB_Undefined);
+    byte_index = llvm::countr_zero(mask);
     return byte_index;
   }
 
