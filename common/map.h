@@ -5,8 +5,6 @@
 #ifndef CARBON_COMMON_MAP_H_
 #define CARBON_COMMON_MAP_H_
 
-#include <x86intrin.h>
-
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -33,6 +31,13 @@
 #include "llvm/Support/ReverseIteration.h"
 #include "llvm/Support/type_traits.h"
 
+// Detect whether we can use SIMD accelerated implementations of the control
+// groups.
+#if defined(__SSSE3__)
+#include <x86intrin.h>
+#define CARBON_USE_SSE_CONTROL_GROUP 1
+#endif
+
 namespace Carbon {
 
 template <typename KeyT, typename ValueT>
@@ -43,15 +48,6 @@ template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
 class Map;
 
 namespace MapInternal {
-
-// Detect whether we can use SIMD accelerated implementations of the control
-// groups.
-#if 1 || defined(__SSSE3__)
-#define CARBON_USE_SSE_CONTROL_GROUP 1
-#if 0 && defined(__SSE4_1__)
-#define CARBON_OPTIMIZE_SSE4_1 1
-#endif
-#endif
 
 template <typename KeyT, typename ValueT>
 class LookupKVResult {
@@ -137,15 +133,9 @@ class GroupMatchedByteRange {
   friend struct Group;
   using MatchedByteIterator = GroupMatchedByteIterator;
 
-#if CARBON_OPTIMIZE_SSE4_1
-  __m128i mask_vec;
-
-  explicit GroupMatchedByteRange(__m128i mask_vec) : mask_vec(mask_vec) {}
-#else
   unsigned mask_;
 
   explicit GroupMatchedByteRange(unsigned mask) : mask_(mask) {}
-#endif
 
  public:
   GroupMatchedByteRange() = default;
@@ -163,22 +153,11 @@ class GroupMatchedByteRange {
   /// iteration. Even when it isn't optimized, any duplication with the
   /// initial test for a loop should get eliminated during optimization.
   auto empty() const -> bool {
-#if CARBON_OPTIMIZE_SSE4_1
-    return _mm_test_all_zeros(
-        mask_vec,
-        IsCmpVec ? mask_vec : _mm_set1_epi8(static_cast<char>(0b10000000U)));
-#else
     return mask_ == 0;
-#endif
   }
 
   auto begin() const -> MatchedByteIterator {
-#if CARBON_OPTIMIZE_SSE4_1
-    unsigned mask = _mm_movemask_epi8(mask_vec);
-    return MatchedByteIterator(mask);
-#else
     return MatchedByteIterator(mask_);
-#endif
   }
 
   auto end() const -> MatchedByteIterator { return MatchedByteIterator(); }
@@ -217,14 +196,10 @@ struct Group {
 #if CARBON_USE_SSE_CONTROL_GROUP
     auto match_byte_vec = _mm_set1_epi8(match_byte);
     auto match_byte_cmp_vec = _mm_cmpeq_epi8(byte_vec, match_byte_vec);
-#if CARBON_OPTIMIZE_SSE4_1
-    return MatchedByteRange<>(match_byte_cmp_vec);
-#else
     return MatchedByteRange<>((unsigned)_mm_movemask_epi8(match_byte_cmp_vec));
-#endif
 #else
     unsigned mask = 0;
-    for (ssize_t byte_index : llvm::seq(0, GroupSize)) {
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
       mask |= (Bytes[byte_index] == match_byte) << byte_index;
     }
     return MatchedByteRange<>(mask);
@@ -237,14 +212,10 @@ struct Group {
 
   auto MatchPresent() const -> MatchedByteRange</*IsCmpVec=*/false> {
 #if CARBON_USE_SSE_CONTROL_GROUP
-#if CARBON_OPTIMIZE_SSE4_1
-    return MatchedByteRange</*IsCmpVec=*/false>(byte_vec);
-#else
     // We arrange the byte vector for present bytes so that we can directly
     // extract it as a mask.
     return MatchedByteRange</*IsCmpVec=*/false>(
         (unsigned)_mm_movemask_epi8(byte_vec));
-#endif
 #else
     // Generic code to compute a bitmask.
     unsigned mask = 0;
