@@ -889,7 +889,7 @@ template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::Contains(LookupKeyT lookup_key) const -> bool {
   //_mm_prefetch(storage_, _MM_HINT_T2);
-  __builtin_prefetch(storage_, /*read*/0, /*low-locality*/1);
+  __builtin_prefetch(storage_, /*read*/ 0, /*low-locality*/ 1);
   if (is_linear()) {
     return MapInternal::ContainsSmallLinear<KeyT>(lookup_key, size(),
                                                   linear_keys());
@@ -904,7 +904,7 @@ template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::Lookup(LookupKeyT lookup_key) const -> LookupKVResultT {
   //_mm_prefetch(storage_, _MM_HINT_T2);
-  __builtin_prefetch(storage_, /*read*/0, /*low-locality*/1);
+  __builtin_prefetch(storage_, /*read*/ 0, /*low-locality*/ 1);
   if (is_linear()) {
     return LookupSmallLinear(lookup_key);
   }
@@ -960,7 +960,7 @@ template <typename KT, typename VT>
 template <typename CallbackT>
 void MapView<KT, VT>::ForEach(CallbackT callback) {
   //_mm_prefetch(storage_, _MM_HINT_T2);
-  __builtin_prefetch(storage_, /*read*/0, /*low-locality*/1);
+  __builtin_prefetch(storage_, /*read*/ 0, /*low-locality*/ 1);
   if (is_linear()) {
     ForEachLinear(callback);
     return;
@@ -1250,7 +1250,7 @@ auto MapBase<KT, VT>::Insert(
         LookupKeyT lookup_key, void* key_storage, void* value_storage)>>::type
         insert_cb) -> InsertKVResultT {
   ///_mm_prefetch(storage(), _MM_HINT_T2);
-  __builtin_prefetch(storage(), /*read*/0, /*low-locality*/1);
+  __builtin_prefetch(storage(), /*read*/ 0, /*low-locality*/ 1);
   if (impl_view_.is_linear()) {
     return InsertSmallLinear(lookup_key, insert_cb);
   }
