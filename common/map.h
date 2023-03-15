@@ -152,9 +152,7 @@ class GroupMatchedByteRange {
   /// With appropriate SIMD support, this may be faster than beginning
   /// iteration. Even when it isn't optimized, any duplication with the
   /// initial test for a loop should get eliminated during optimization.
-  auto empty() const -> bool {
-    return mask_ == 0;
-  }
+  auto empty() const -> bool { return mask_ == 0; }
 
   auto begin() const -> MatchedByteIterator {
     return MatchedByteIterator(mask_);
