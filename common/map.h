@@ -225,6 +225,13 @@ struct Group {
   }
 };
 
+[[clang::always_inline]] inline void Prefetch(const void* address) {
+  // Currently we just hard code a single "low" temporal locality prefetch as
+  // we're primarily expecting a brief use of the storage and then to return to
+  // application code.
+  __builtin_prefetch(address, /*read*/ 0, /*low-locality*/ 1);
+}
+
 // We use pointers to this empty class to model the pointer to a dynamically
 // allocated structure of arrays with the groups, keys, and values.
 //
@@ -888,8 +895,7 @@ inline auto MapView<KT, VT>::LookupHashed(LookupKeyT lookup_key) const
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::Contains(LookupKeyT lookup_key) const -> bool {
-  //_mm_prefetch(storage_, _MM_HINT_T2);
-  __builtin_prefetch(storage_, /*read*/ 0, /*low-locality*/ 1);
+  MapInternal::Prefetch(storage_);
   if (is_linear()) {
     return MapInternal::ContainsSmallLinear<KeyT>(lookup_key, size(),
                                                   linear_keys());
@@ -903,8 +909,7 @@ auto MapView<KT, VT>::Contains(LookupKeyT lookup_key) const -> bool {
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::Lookup(LookupKeyT lookup_key) const -> LookupKVResultT {
-  //_mm_prefetch(storage_, _MM_HINT_T2);
-  __builtin_prefetch(storage_, /*read*/ 0, /*low-locality*/ 1);
+  MapInternal::Prefetch(storage_);
   if (is_linear()) {
     return LookupSmallLinear(lookup_key);
   }
@@ -959,8 +964,7 @@ void MapView<KeyT, ValueT>::ForEachHashed(KVCallbackT kv_callback,
 template <typename KT, typename VT>
 template <typename CallbackT>
 void MapView<KT, VT>::ForEach(CallbackT callback) {
-  //_mm_prefetch(storage_, _MM_HINT_T2);
-  __builtin_prefetch(storage_, /*read*/ 0, /*low-locality*/ 1);
+  MapInternal::Prefetch(storage_);
   if (is_linear()) {
     ForEachLinear(callback);
     return;
@@ -1249,8 +1253,7 @@ auto MapBase<KT, VT>::Insert(
     typename std::__type_identity<llvm::function_ref<std::pair<KeyT*, ValueT*>(
         LookupKeyT lookup_key, void* key_storage, void* value_storage)>>::type
         insert_cb) -> InsertKVResultT {
-  ///_mm_prefetch(storage(), _MM_HINT_T2);
-  __builtin_prefetch(storage(), /*read*/ 0, /*low-locality*/ 1);
+  Prefetch(storage());
   if (impl_view_.is_linear()) {
     return InsertSmallLinear(lookup_key, insert_cb);
   }
