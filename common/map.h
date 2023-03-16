@@ -18,7 +18,6 @@
 #include <utility>
 
 #include "common/check.h"
-
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/Optional.h"
@@ -364,7 +363,8 @@ struct Group {
       mask |= static_cast<uint64_t>(Bytes[byte_index] == match_byte) << (byte_index * 8 + 7);
     }
 #else
-    CARBON_DCHECK(match_byte & 0b1000'0000) << llvm::formatv("{0:b}", match_byte);
+    CARBON_DCHECK(match_byte & 0b1000'0000)
+        << llvm::formatv("{0:b}", match_byte);
     // Broadcast the match byte to all bytes.
     uint64_t pattern = ~0ULL / 0xFF * match_byte;
     // Materialize the group into a word.
@@ -376,7 +376,8 @@ struct Group {
     mask = group | 0x8080'8080'8080'8080ULL;
     // Xor the broadcast pattern, making matched bytes become zero bytes.
     mask = mask ^ pattern;
-    // Subtract the mask bytes from `0x80` bytes so that any non-zero mask byte clears the high byte but zero leaves it intact.
+    // Subtract the mask bytes from `0x80` bytes so that any non-zero mask byte
+    // clears the high byte but zero leaves it intact.
     mask = 0x8080'8080'8080'8080ULL - mask;
     // Mask down to those high bits.
     mask &= 0x8080'8080'8080'8080ULL;
@@ -412,7 +413,7 @@ struct Group {
     std::memcpy(&group, &Bytes, GroupSize);
     mask = group | (group << 7);
     mask = ~mask & 0x8080'8080'8080'8080;
-    #ifndef NDEBUG
+#ifndef NDEBUG
     for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
       if (Bytes[byte_index] == Empty) {
@@ -425,7 +426,7 @@ struct Group {
             << llvm::formatv("{0:x}", byte);
       }
     }
-    #endif
+#endif
     return MatchedByteRange(mask);
 #endif
   }
@@ -440,7 +441,7 @@ struct Group {
     std::memcpy(&group, &Bytes, GroupSize);
     mask = group | (~group << 7);
     mask = ~mask & 0x8080'8080'8080'8080;
-    #ifndef NDEBUG
+#ifndef NDEBUG
     for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
       if (Bytes[byte_index] == Deleted) {
@@ -453,7 +454,7 @@ struct Group {
             << llvm::formatv("{0:x}", byte);
       }
     }
-    #endif
+#endif
     return MatchedByteRange(mask);
 #endif
   }

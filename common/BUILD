@@ -98,8 +98,8 @@ cc_test(
     name = "map_test",
     srcs = ["map_test.cpp"],
     deps = [
-        ":map",
         ":gtest_main",
+        ":map",
         "@com_google_googletest//:gtest",
     ],
 )
