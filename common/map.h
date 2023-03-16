@@ -17,6 +17,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "common/check.h"
+
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/Optional.h"
@@ -27,13 +29,14 @@
 #include "llvm/Support/AlignOf.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/ReverseIteration.h"
 #include "llvm/Support/type_traits.h"
 
 // Detect whether we can use SIMD accelerated implementations of the control
 // groups.
-#if defined(__SSSE3__)
+#if 0 && defined(__SSSE3__)
 #include <x86intrin.h>
 #define CARBON_USE_SSE_CONTROL_GROUP 1
 #endif
@@ -82,6 +85,7 @@ class InsertKVResult {
   ValueT* value_ = nullptr;
 };
 
+#if CARBON_USE_SSE_CONTROL_GROUP
 // We organize the hashtable into 16-slot groups so that we can use 16 control
 // bytes to understand the contents efficiently.
 constexpr ssize_t GroupSize = 16;
@@ -224,6 +228,267 @@ struct Group {
 #endif
   }
 };
+#else
+// We organize the hashtable into 8-slot groups so that we can use 16 control
+// bytes to understand the contents efficiently.
+constexpr ssize_t GroupSize = 8;
+static_assert(llvm::isPowerOf2_64(GroupSize),
+              "The group size must be a constant power of two so dividing by "
+              "it is a simple shift.");
+constexpr ssize_t GroupMask = GroupSize - 1;
+
+struct Group;
+class GroupMatchedByteRange;
+
+class GroupMatchedByteIterator
+    : public llvm::iterator_facade_base<GroupMatchedByteIterator,
+                                        std::forward_iterator_tag, ssize_t,
+                                        ssize_t> {
+  friend struct Group;
+  friend class GroupMatchedByteRange;
+
+  ssize_t byte_index;
+
+  uint64_t mask = 0;
+#if 1
+  explicit GroupMatchedByteIterator(uint64_t mask) : mask(mask) {}
+
+ public:
+  GroupMatchedByteIterator() = default;
+
+  auto operator==(const GroupMatchedByteIterator& rhs) const -> bool {
+    return mask == rhs.mask;
+  }
+
+  auto operator*() -> ssize_t& {
+    assert(mask != 0 && "Cannot get an index from a zero mask!");
+    byte_index = llvm::countr_zero(mask);
+    assert(byte_index >= 7 && "First high bit has 7 zeros!");
+    assert((byte_index - 7) % 8 == 0 && "Must be a high bit of a byte!");
+    byte_index /= 8;
+    return byte_index;
+  }
+#else
+  explicit GroupMatchedByteIterator(uint64_t input_mask) {
+    CARBON_DCHECK((input_mask & 0x7f7f'7f7f'7f7f'7f7fLLU) == 0)
+        << llvm::formatv("{0:x}", input_mask);
+
+    constexpr unsigned __int128 MovMsk =
+        (1LLU << (1 * 8 - 0)) | (1LLU << (2 * 8 - 1)) | (1LLU << (3 * 8 - 2)) |
+        (1LLU << (4 * 8 - 3)) | (1LLU << (5 * 8 - 4)) | (1LLU << (6 * 8 - 5)) |
+        (1LLU << (7 * 8 - 6)) | (1LLU << (8 * 8 - 7));
+
+    unsigned __int128 ext_mask =
+        MovMsk * static_cast<unsigned __int128>(input_mask);
+
+    mask = (ext_mask >> 64) & 0xff;
+  }
+
+ public:
+  GroupMatchedByteIterator() = default;
+
+  auto operator==(const GroupMatchedByteIterator& rhs) const -> bool {
+    return mask == rhs.mask;
+  }
+
+  auto operator*() -> ssize_t& {
+    assert(mask != 0 && "Cannot get an index from a zero mask!");
+    byte_index = llvm::countr_zero(mask);
+    return byte_index;
+  }
+#endif
+
+  auto operator++() -> GroupMatchedByteIterator& {
+    assert(mask != 0 && "Must not be called with a zero mask!");
+    mask &= (mask - 1);
+    return *this;
+  }
+};
+
+class GroupMatchedByteRange {
+  friend struct Group;
+  using MatchedByteIterator = GroupMatchedByteIterator;
+
+  uint64_t mask_;
+
+  explicit GroupMatchedByteRange(uint64_t mask) : mask_(mask) {}
+
+ public:
+  GroupMatchedByteRange() = default;
+
+  /// Returns false if this range is empty. Provided as a conversion to
+  /// simplify usage with condition variables prior to C++17.
+  ///
+  /// Because testing for emptiness is potentially optimized, we want to
+  /// encourage guarding with an empty test.
+  explicit operator bool() const { return !empty(); }
+
+  /// Potentially optimized test for empty.
+  ///
+  /// With appropriate SIMD support, this may be faster than beginning
+  /// iteration. Even when it isn't optimized, any duplication with the
+  /// initial test for a loop should get eliminated during optimization.
+  auto empty() const -> bool { return mask_ == 0; }
+
+  auto begin() const -> MatchedByteIterator {
+    return MatchedByteIterator(mask_);
+  }
+
+  auto end() const -> MatchedByteIterator { return MatchedByteIterator(); }
+};
+
+struct Group {
+  // Each control byte can have special values. All special values have the
+  // most significant bit set to distinguish them from the seven hash bits
+  // stored when the control byte represents a full bucket.
+  //
+  // Otherwise, their values are chose primarily to provide efficient SIMD
+  // implementations of the common operations on an entire control group.
+  static constexpr uint8_t Empty = 0;
+  static constexpr uint8_t Deleted = 1;
+
+  using MatchedByteRange = GroupMatchedByteRange;
+
+  alignas(GroupSize) std::array<uint8_t, GroupSize> Bytes = {};
+
+  static auto Load(uint8_t* groups, ssize_t index) -> Group {
+    Group g;
+    std::memcpy(&g.Bytes, groups + index, GroupSize);
+    return g;
+  }
+
+  auto Match(uint8_t match_byte) const -> MatchedByteRange {
+    uint64_t mask = 0;
+#if 0
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+      mask |= static_cast<uint64_t>(Bytes[byte_index] == match_byte) << (byte_index * 8 + 7);
+    }
+#else
+    CARBON_DCHECK(match_byte & 0b1000'0000) << llvm::formatv("{0:b}", match_byte);
+    // Broadcast the match byte to all bytes.
+    uint64_t pattern = ~0ULL / 0xFF * match_byte;
+    // Materialize the group into a word.
+    uint64_t group;
+    std::memcpy(&group, &Bytes, GroupSize);
+    // Set the high bit of every byte to `1`. The match byte always has this bit
+    // set as well, which ensures the xor below, in addition to zeroing the byte
+    // that matches, also clears the high bit of every byte.
+    mask = group | 0x8080'8080'8080'8080ULL;
+    // Xor the broadcast pattern, making matched bytes become zero bytes.
+    mask = mask ^ pattern;
+    // Subtract the mask bytes from `0x80` bytes so that any non-zero mask byte clears the high byte but zero leaves it intact.
+    mask = 0x8080'8080'8080'8080ULL - mask;
+    // Mask down to those high bits.
+    mask &= 0x8080'8080'8080'8080ULL;
+    // Now intersect again with the original group which will clear any high
+    // bits also clear there, which clears all non-present bytes which collided
+    // after the or at the top.
+    mask &= group;
+#ifndef NDEBUG
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+      uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
+      if (Bytes[byte_index] == match_byte) {
+        CARBON_DCHECK(byte == 0x80)
+            << "Should have a high bit set for a matched byte, found: "
+            << llvm::formatv("{0:x}", byte);
+      } else {
+        CARBON_DCHECK(byte == 0)
+            << "Should have no bits set for an unmatched byte, found: "
+            << llvm::formatv("{0:x}", byte);
+      }
+    }
+#endif
+#endif
+    return MatchedByteRange(mask);
+  }
+
+  auto MatchEmpty() const -> MatchedByteRange {
+#if 0
+    return Match(Empty);
+#else
+    uint64_t mask = 0;
+    // Materialize the group into a word.
+    uint64_t group;
+    std::memcpy(&group, &Bytes, GroupSize);
+    mask = group | (group << 7);
+    mask = ~mask & 0x8080'8080'8080'8080;
+    #ifndef NDEBUG
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+      uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
+      if (Bytes[byte_index] == Empty) {
+        CARBON_DCHECK(byte == 0x80)
+            << "Should have a high bit set for a matched byte, found: "
+            << llvm::formatv("{0:x}", byte);
+      } else {
+        CARBON_DCHECK(byte == 0)
+            << "Should have no bits set for an unmatched byte, found: "
+            << llvm::formatv("{0:x}", byte);
+      }
+    }
+    #endif
+    return MatchedByteRange(mask);
+#endif
+  }
+
+  auto MatchDeleted() const -> MatchedByteRange {
+#if 0
+    return Match(Deleted);
+#else
+    uint64_t mask = 0;
+    // Materialize the group into a word.
+    uint64_t group;
+    std::memcpy(&group, &Bytes, GroupSize);
+    mask = group | (~group << 7);
+    mask = ~mask & 0x8080'8080'8080'8080;
+    #ifndef NDEBUG
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+      uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
+      if (Bytes[byte_index] == Deleted) {
+        CARBON_DCHECK(byte == 0x80)
+            << "Should have a high bit set for a matched byte, found: "
+            << llvm::formatv("{0:x}", byte);
+      } else {
+        CARBON_DCHECK(byte == 0)
+            << "Should have no bits set for an unmatched byte, found: "
+            << llvm::formatv("{0:x}", byte);
+      }
+    }
+    #endif
+    return MatchedByteRange(mask);
+#endif
+  }
+
+  auto MatchPresent() const -> MatchedByteRange {
+    uint64_t mask = 0;
+#if 0
+    // Generic code to compute a bitmask.
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+      mask |= static_cast<uint64_t>(static_cast<bool>(Bytes[byte_index] & 0b10000000U)) << (byte_index * 8 + 7);
+    }
+#else
+    // Materialize the group into a word.
+    uint64_t group;
+    std::memcpy(&group, &Bytes, GroupSize);
+    mask = group & 0x80808080'80808080ULL;
+#ifndef NDEBUG
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+      uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
+      if (Bytes[byte_index] & 0b1000'0000U) {
+        CARBON_DCHECK(byte == 0x80)
+            << "Should have a high bit set for a present byte, found: "
+            << llvm::formatv("{0:x}", byte);
+      } else {
+        CARBON_DCHECK(byte == 0)
+            << "Should have no bits set for a not-present byte, found: "
+            << llvm::formatv("{0:x}", byte);
+      }
+    }
+#endif
+#endif
+    return MatchedByteRange(mask);
+  }
+};
+#endif
 
 [[clang::always_inline]] inline void Prefetch(const void* address) {
   // Currently we just hard code a single "low" temporal locality prefetch as
@@ -991,7 +1256,7 @@ auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
   ssize_t hash_index = MapInternal::ComputeHashIndex(hash, groups);
 
   ssize_t group_with_deleted_index = -1;
-  MapInternal::Group::MatchedByteRange<> deleted_matched_range;
+  MapInternal::Group::MatchedByteRange deleted_matched_range;
 
   auto return_insert_at_index = [&](ssize_t index) -> std::pair<bool, ssize_t> {
     // We'll need to insert at this index so set the control group byte to the
