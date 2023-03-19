@@ -16,6 +16,18 @@
 namespace Carbon::Testing {
 namespace {
 
+// This map has an intentional inlining blocker to avoid code growth. However,
+// both Abseil and LLVM's maps don't have this and at least on AArch64 both
+// inline heavily and show performance differences that seem entirely to stem
+// from that. We use this to block inlining on the wrapper as a way to get
+// slightly more comparable benchmark results. It's not perfect, but seems more
+// useful than the alternatives.
+#ifdef __aarch64__
+#define CARBON_ARM64_NOINLINE [[clang::noinline]]
+#else
+#define CARBON_ARM64_NOINLINE
+#endif
+
 template <typename MapT>
 struct MapWrapper;
 
@@ -60,8 +72,10 @@ struct MapWrapper<absl::flat_hash_map<KT, VT, HasherT>> {
 
   void CreateView() {}
 
+  CARBON_ARM64_NOINLINE
   auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
 
+  CARBON_ARM64_NOINLINE
   auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
     ValueT* v = &it->second;
@@ -69,14 +83,17 @@ struct MapWrapper<absl::flat_hash_map<KT, VT, HasherT>> {
     return v;
   }
 
+  CARBON_ARM64_NOINLINE
   auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert({k, v});
     benchmark::DoNotOptimize(result.second);
     return result.second;
   }
 
+  CARBON_ARM64_NOINLINE
   auto BenchUpdate(KeyT k, ValueT v) -> void { M[k] = v; }
 
+  CARBON_ARM64_NOINLINE
   auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 
@@ -90,8 +107,10 @@ struct MapWrapper<llvm::DenseMap<KT, VT, HasherT>> {
 
   void CreateView() {}
 
+  CARBON_ARM64_NOINLINE
   auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
 
+  CARBON_ARM64_NOINLINE
   auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
     ValueT* v = &it->second;
@@ -99,14 +118,17 @@ struct MapWrapper<llvm::DenseMap<KT, VT, HasherT>> {
     return v;
   }
 
+  CARBON_ARM64_NOINLINE
   auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert({k, v});
     benchmark::DoNotOptimize(result.second);
     return result.second;
   }
 
+  CARBON_ARM64_NOINLINE
   auto BenchUpdate(KeyT k, ValueT v) -> void { M[k] = v; }
 
+  CARBON_ARM64_NOINLINE
   auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 

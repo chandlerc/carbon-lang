@@ -38,6 +38,9 @@
 #if defined(__SSSE3__)
 #include <x86intrin.h>
 #define CARBON_USE_X86_SIMD_CONTROL_GROUP 1
+#elif defined(__ARM_NEON)
+#include <arm_neon.h>
+#define CARBON_USE_NEON_SIMD_CONTROL_GROUP 1
 #endif
 
 namespace Carbon {
@@ -135,16 +138,15 @@ class BitIndexRange {
 };
 
 #if CARBON_USE_X86_SIMD_CONTROL_GROUP
-
-// We organize the hashtable into 16-slot groups so that we can use 16 control
-// bytes to understand the contents efficiently.
-constexpr ssize_t GroupSize = 16;
-static_assert(llvm::isPowerOf2_64(GroupSize),
-              "The group size must be a constant power of two so dividing by "
-              "it is a simple shift.");
-constexpr ssize_t GroupMask = GroupSize - 1;
-
-struct Group {
+// An X86 SIMD optimized control group representation. This uses a 128-bit
+// vector register to implement the control group. While this could also be
+// expanded to 256-bit vector widths on sufficiently modern x86 processors, that
+// doesn't provide an especially large performance benefit. Largely, it would
+// allow increasing load factor. But a major goal is to keep the load factor and
+// other benefits of the control group design while minimizing latency of
+// various critical path operations, and larger control groups fundamentally
+// increase the cache pressure for the critical path.
+struct X86Group {
   // Each control byte can have special values. All special values have the
   // most significant bit set to distinguish them from the seven hash bits
   // stored when the control byte represents a full bucket.
@@ -159,8 +161,8 @@ struct Group {
 
   __m128i byte_vec = {};
 
-  static auto Load(uint8_t* groups, ssize_t index) -> Group {
-    Group g;
+  static auto Load(uint8_t* groups, ssize_t index) -> X86Group {
+    X86Group g;
     g.byte_vec = _mm_load_si128(reinterpret_cast<__m128i*>(groups + index));
     return g;
   }
@@ -182,18 +184,13 @@ struct Group {
     return MatchedRange(_mm_movemask_epi8(byte_vec));
   }
 };
+#endif
 
-#else
-
-// We organize the hashtable into 8-slot groups so that we can use 16 control
-// bytes to understand the contents efficiently.
-constexpr ssize_t GroupSize = 8;
-static_assert(llvm::isPowerOf2_64(GroupSize),
-              "The group size must be a constant power of two so dividing by "
-              "it is a simple shift.");
-constexpr ssize_t GroupMask = GroupSize - 1;
-
-struct Group {
+#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
+// An ARM NEON optimized control group. This is the same size and in fact layout
+// as the portable group, but largely uses NEON operations to implement the
+// logic on an 8-byte vector.
+struct NeonGroup {
   // Each control byte can have special values. All special values have the
   // most significant bit set to distinguish them from the seven hash bits
   // stored when the control byte represents a full bucket.
@@ -203,16 +200,62 @@ struct Group {
   static constexpr uint8_t Empty = 0;
   static constexpr uint8_t Deleted = 1;
 
+  using MatchedRange = BitIndexRange<uint64_t, /*Shift=*/3>;
+
+  uint8x8_t byte_vec = {};
+
+  static auto Load(uint8_t* groups, ssize_t index) -> NeonGroup {
+    NeonGroup g;
+    g.byte_vec = vld1_u8(groups + index);
+    return g;
+  }
+
+  auto Match(uint8_t match_byte) const -> MatchedRange {
+    auto match_byte_vec = vdup_n_u8(match_byte);
+    auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
+    uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
+    return MatchedRange(mask);
+  }
+
+  auto MatchEmpty() const -> MatchedRange {
+    auto match_byte_cmp_vec = vceqz_u8(byte_vec);
+    uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
+    return MatchedRange(mask);
+  }
+
+  auto MatchDeleted() const -> MatchedRange { return Match(Deleted); }
+
+  auto MatchPresent() const -> MatchedRange {
+    static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
+    uint64_t mask;
+    std::memcpy(&mask, &byte_vec, sizeof(byte_vec));
+    mask &= MSBs;
+    return MatchedRange(mask);
+  }
+};
+#endif
+
+struct PortableGroup {
+  // Each control byte can have special values. All special values have the
+  // most significant bit set to distinguish them from the seven hash bits
+  // stored when the control byte represents a full bucket.
+  //
+  // Otherwise, their values are chose primarily to provide efficient SIMD
+  // implementations of the common operations on an entire control group.
+  static constexpr uint8_t Empty = 0;
+  static constexpr uint8_t Deleted = 1;
+
+  // Constants used to implement the various bit manipulation tricks.
   static constexpr uint64_t LSBs = 0x0101'0101'0101'0101ULL;
   static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
 
   using MatchedRange = BitIndexRange<uint64_t, 3>;
 
-  alignas(GroupSize) std::array<uint8_t, GroupSize> Bytes = {};
+  uint64_t group = {};
 
-  static auto Load(uint8_t* groups, ssize_t index) -> Group {
-    Group g;
-    std::memcpy(&g.Bytes, groups + index, GroupSize);
+  static auto Load(uint8_t* groups, ssize_t index) -> PortableGroup {
+    PortableGroup g;
+    std::memcpy(&g.group, groups + index, sizeof(group));
     return g;
   }
 
@@ -238,9 +281,6 @@ struct Group {
     // particular layout.
     CARBON_DCHECK(match_byte & 0b1000'0000)
         << llvm::formatv("{0:b}", match_byte);
-    // Materialize the group into a word.
-    uint64_t group;
-    std::memcpy(&group, &Bytes, GroupSize);
     // Set the high bit of every byte to `1`. The match byte always has this bit
     // set as well, which ensures the xor below, in addition to zeroing the byte
     // that matches, also clears the high bit of every byte.
@@ -255,9 +295,10 @@ struct Group {
     // Mask down to the high bits, but only those in the original group.
     mask &= (group & MSBs);
 #ifndef NDEBUG
-    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+    const auto* group_bytes = reinterpret_cast<const uint8_t*>(&group);
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, sizeof(group))) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
-      if (Bytes[byte_index] == match_byte) {
+      if (group_bytes[byte_index] == match_byte) {
         CARBON_DCHECK(byte == 0x80)
             << "Should have a high bit set for a matched byte, found: "
             << llvm::formatv("{0:x}", byte);
@@ -273,14 +314,13 @@ struct Group {
 
   auto MatchEmpty() const -> MatchedRange {
     // Materialize the group into a word.
-    uint64_t group;
-    std::memcpy(&group, &Bytes, GroupSize);
     uint64_t mask = group | (group << 7);
     mask = ~mask & MSBs;
 #ifndef NDEBUG
-    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+    const auto* group_bytes = reinterpret_cast<const uint8_t*>(&group);
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, sizeof(group))) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
-      if (Bytes[byte_index] == Empty) {
+      if (group_bytes[byte_index] == Empty) {
         CARBON_DCHECK(byte == 0x80)
             << "Should have a high bit set for a matched byte, found: "
             << llvm::formatv("{0:x}", byte);
@@ -296,14 +336,13 @@ struct Group {
 
   auto MatchDeleted() const -> MatchedRange {
     // Materialize the group into a word.
-    uint64_t group;
-    std::memcpy(&group, &Bytes, GroupSize);
     uint64_t mask = group | (~group << 7);
     mask = ~mask & MSBs;
 #ifndef NDEBUG
-    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+    const auto* group_bytes = reinterpret_cast<const uint8_t*>(&group);
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, sizeof(group))) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
-      if (Bytes[byte_index] == Deleted) {
+      if (group_bytes[byte_index] == Deleted) {
         CARBON_DCHECK(byte == 0x80)
             << "Should have a high bit set for a matched byte, found: "
             << llvm::formatv("{0:x}", byte);
@@ -319,13 +358,12 @@ struct Group {
 
   auto MatchPresent() const -> MatchedRange {
     // Materialize the group into a word.
-    uint64_t group;
-    std::memcpy(&group, &Bytes, GroupSize);
     uint64_t mask = group & MSBs;
 #ifndef NDEBUG
-    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
+    const auto* group_bytes = reinterpret_cast<const uint8_t*>(&group);
+    for (ssize_t byte_index : llvm::seq<ssize_t>(0, sizeof(group))) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
-      if (Bytes[byte_index] & 0b1000'0000U) {
+      if (group_bytes[byte_index] & 0b1000'0000U) {
         CARBON_DCHECK(byte == 0x80)
             << "Should have a high bit set for a present byte, found: "
             << llvm::formatv("{0:x}", byte);
@@ -339,7 +377,20 @@ struct Group {
     return MatchedRange(mask);
   }
 };
+
+#if CARBON_USE_X86_SIMD_CONTROL_GROUP
+using Group = X86Group;
+#elif CARBON_USE_NEON_SIMD_CONTROL_GROUP
+using Group = NeonGroup;
+#else
+using Group = PortableGroup;
 #endif
+
+constexpr ssize_t GroupSize = sizeof(Group);
+static_assert(llvm::isPowerOf2_64(GroupSize),
+              "The group size must be a constant power of two so dividing by "
+              "it is a simple shift.");
+constexpr ssize_t GroupMask = GroupSize - 1;
 
 [[clang::always_inline]] inline void Prefetch(const void* address) {
   // Currently we just hard code a single "low" temporal locality prefetch as
