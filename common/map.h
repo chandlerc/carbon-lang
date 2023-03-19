@@ -84,7 +84,7 @@ class InsertKVResult {
   ValueT* value_ = nullptr;
 };
 
-template <typename MaskT, int Shift = 0>
+template <typename MaskT, int Shift = 0, MaskT ZeroMask = 0>
 class BitIndexRange {
  public:
   class Iterator
@@ -100,12 +100,14 @@ class BitIndexRange {
 
     auto operator*() -> ssize_t& {
       CARBON_DCHECK(mask_ != 0) << "Cannot get an index from a zero mask!";
-      index_ = llvm::countr_zero(mask_) >> Shift;
+      __builtin_assume(mask_ != 0);
+      index_ = static_cast<size_t>(llvm::countr_zero(mask_)) >> Shift;
       return index_;
     }
 
     auto operator++() -> Iterator& {
       CARBON_DCHECK(mask_ != 0) << "Must not increment past the end!";
+      __builtin_assume(mask_ != 0);
       mask_ &= (mask_ - 1);
       return *this;
     }
@@ -119,7 +121,11 @@ class BitIndexRange {
   explicit BitIndexRange(MaskT mask) : mask_(mask) {}
 
   explicit operator bool() const { return !empty(); }
-  auto empty() const -> bool { return mask_ == 0; }
+  auto empty() const -> bool {
+    CARBON_DCHECK((mask_ & ZeroMask) == 0) << "Unexpected non-zero bits!";
+    __builtin_assume((mask_ & ZeroMask) == 0);
+    return mask_ == 0;
+  }
 
   auto begin() const -> Iterator { return Iterator(mask_); }
   auto end() const -> Iterator { return Iterator(); }
@@ -148,7 +154,8 @@ struct Group {
   static constexpr uint8_t Empty = 0;
   static constexpr uint8_t Deleted = 1;
 
-  using MatchedRange = BitIndexRange<uint32_t>;
+  using MatchedRange =
+      BitIndexRange<uint32_t, /*Shift=*/0, /*ZeroMask=*/0xFFFF0000>;
 
   __m128i byte_vec = {};
 
@@ -161,7 +168,8 @@ struct Group {
   auto Match(uint8_t match_byte) const -> MatchedRange {
     auto match_byte_vec = _mm_set1_epi8(match_byte);
     auto match_byte_cmp_vec = _mm_cmpeq_epi8(byte_vec, match_byte_vec);
-    return MatchedRange(_mm_movemask_epi8(match_byte_cmp_vec));
+    uint32_t mask = _mm_movemask_epi8(match_byte_cmp_vec);
+    return MatchedRange(mask);
   }
 
   auto MatchEmpty() const -> MatchedRange { return Match(Empty); }
