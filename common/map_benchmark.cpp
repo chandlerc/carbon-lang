@@ -403,10 +403,10 @@ static void OpSeqSizeArgs(benchmark::internal::Benchmark* b) {
 #define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, SIZE)                                 \
   BENCHMARK(NAME<Map<int*, std::array<int, SIZE>>>)->Apply(OpSeqSizeArgs);    \
   BENCHMARK(NAME<absl::flat_hash_map<int*, std::array<int, SIZE>, LLVMHash>>) \
-      ->Apply(OneOpSizeArgs);                                                 \
+      ->Apply(OpSeqSizeArgs);                                                 \
   BENCHMARK(NAME<llvm::DenseMap<int*, std::array<int, SIZE>,                  \
                                 LLVMHashingDenseMapInfo>>)                    \
-      ->Apply(OneOpSizeArgs)
+      ->Apply(OpSeqSizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
 #define MAP_BENCHMARK_OP_SEQ(NAME)    \
