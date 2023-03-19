@@ -249,7 +249,6 @@ class GroupMatchedByteIterator
   ssize_t byte_index;
 
   uint64_t mask = 0;
-#if 1
   explicit GroupMatchedByteIterator(uint64_t mask) : mask(mask) {}
 
  public:
@@ -267,35 +266,6 @@ class GroupMatchedByteIterator
     byte_index /= 8;
     return byte_index;
   }
-#else
-  explicit GroupMatchedByteIterator(uint64_t input_mask) {
-    CARBON_DCHECK((input_mask & 0x7f7f'7f7f'7f7f'7f7fLLU) == 0)
-        << llvm::formatv("{0:x}", input_mask);
-
-    constexpr unsigned __int128 MovMsk =
-        (1LLU << (1 * 8 - 0)) | (1LLU << (2 * 8 - 1)) | (1LLU << (3 * 8 - 2)) |
-        (1LLU << (4 * 8 - 3)) | (1LLU << (5 * 8 - 4)) | (1LLU << (6 * 8 - 5)) |
-        (1LLU << (7 * 8 - 6)) | (1LLU << (8 * 8 - 7));
-
-    unsigned __int128 ext_mask =
-        MovMsk * static_cast<unsigned __int128>(input_mask);
-
-    mask = (ext_mask >> 64) & 0xff;
-  }
-
- public:
-  GroupMatchedByteIterator() = default;
-
-  auto operator==(const GroupMatchedByteIterator& rhs) const -> bool {
-    return mask == rhs.mask;
-  }
-
-  auto operator*() -> ssize_t& {
-    assert(mask != 0 && "Cannot get an index from a zero mask!");
-    byte_index = llvm::countr_zero(mask);
-    return byte_index;
-  }
-#endif
 
   auto operator++() -> GroupMatchedByteIterator& {
     assert(mask != 0 && "Must not be called with a zero mask!");
@@ -346,6 +316,9 @@ struct Group {
   static constexpr uint8_t Empty = 0;
   static constexpr uint8_t Deleted = 1;
 
+  static constexpr uint64_t LSBs = 0x0101'0101'0101'0101ULL;
+  static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
+
   using MatchedByteRange = GroupMatchedByteRange;
 
   alignas(GroupSize) std::array<uint8_t, GroupSize> Bytes = {};
@@ -357,34 +330,43 @@ struct Group {
   }
 
   auto Match(uint8_t match_byte) const -> MatchedByteRange {
-    uint64_t mask = 0;
-#if 0
-    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
-      mask |= static_cast<uint64_t>(Bytes[byte_index] == match_byte) << (byte_index * 8 + 7);
-    }
-#else
+    // This algorithm only works for matching *present* bytes. We leverage the
+    // set high bit in the present case as part of the algorithm. The whole
+    // algorithm has a critical path height of 4 operations, and does 6
+    // operations total:
+    //
+    //          group | MSBs    LSBs * match_byte
+    //                 \            /
+    //                 mask ^ pattern
+    //                      |
+    // group & MSBs    MSBs - mask
+    //        \            /
+    //    group_MSBs & mask
+    //
+    // While it is superficially similar to the "find zero bytes in a word" bit
+    // math trick, it is different because this is designed to
+    // have no false positives and perfectly produce 0x80 for matching bytes and
+    // 0x00 for non-matching bytes. This is do-able because we constrain to only
+    // handle present matches which only require testing 7 bits and have a
+    // particular layout.
     CARBON_DCHECK(match_byte & 0b1000'0000)
         << llvm::formatv("{0:b}", match_byte);
-    // Broadcast the match byte to all bytes.
-    uint64_t pattern = ~0ULL / 0xFF * match_byte;
     // Materialize the group into a word.
     uint64_t group;
     std::memcpy(&group, &Bytes, GroupSize);
     // Set the high bit of every byte to `1`. The match byte always has this bit
     // set as well, which ensures the xor below, in addition to zeroing the byte
     // that matches, also clears the high bit of every byte.
-    mask = group | 0x8080'8080'8080'8080ULL;
+    uint64_t mask = group | MSBs;
+    // Broadcast the match byte to all bytes.
+    uint64_t pattern = LSBs * match_byte;
     // Xor the broadcast pattern, making matched bytes become zero bytes.
     mask = mask ^ pattern;
     // Subtract the mask bytes from `0x80` bytes so that any non-zero mask byte
     // clears the high byte but zero leaves it intact.
-    mask = 0x8080'8080'8080'8080ULL - mask;
-    // Mask down to those high bits.
-    mask &= 0x8080'8080'8080'8080ULL;
-    // Now intersect again with the original group which will clear any high
-    // bits also clear there, which clears all non-present bytes which collided
-    // after the or at the top.
-    mask &= group;
+    mask = MSBs - mask;
+    // Mask down to the high bits, but only those in the original group.
+    mask &= (group & MSBs);
 #ifndef NDEBUG
     for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
@@ -399,20 +381,15 @@ struct Group {
       }
     }
 #endif
-#endif
     return MatchedByteRange(mask);
   }
 
   auto MatchEmpty() const -> MatchedByteRange {
-#if 0
-    return Match(Empty);
-#else
-    uint64_t mask = 0;
     // Materialize the group into a word.
     uint64_t group;
     std::memcpy(&group, &Bytes, GroupSize);
-    mask = group | (group << 7);
-    mask = ~mask & 0x8080'8080'8080'8080;
+    uint64_t mask = group | (group << 7);
+    mask = ~mask & MSBs;
 #ifndef NDEBUG
     for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
@@ -428,19 +405,14 @@ struct Group {
     }
 #endif
     return MatchedByteRange(mask);
-#endif
   }
 
   auto MatchDeleted() const -> MatchedByteRange {
-#if 0
-    return Match(Deleted);
-#else
-    uint64_t mask = 0;
     // Materialize the group into a word.
     uint64_t group;
     std::memcpy(&group, &Bytes, GroupSize);
-    mask = group | (~group << 7);
-    mask = ~mask & 0x8080'8080'8080'8080;
+    uint64_t mask = group | (~group << 7);
+    mask = ~mask & MSBs;
 #ifndef NDEBUG
     for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
@@ -456,21 +428,13 @@ struct Group {
     }
 #endif
     return MatchedByteRange(mask);
-#endif
   }
 
   auto MatchPresent() const -> MatchedByteRange {
-    uint64_t mask = 0;
-#if 0
-    // Generic code to compute a bitmask.
-    for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
-      mask |= static_cast<uint64_t>(static_cast<bool>(Bytes[byte_index] & 0b10000000U)) << (byte_index * 8 + 7);
-    }
-#else
     // Materialize the group into a word.
     uint64_t group;
     std::memcpy(&group, &Bytes, GroupSize);
-    mask = group & 0x80808080'80808080ULL;
+    uint64_t mask = group & MSBs;
 #ifndef NDEBUG
     for (ssize_t byte_index : llvm::seq<ssize_t>(0, GroupSize)) {
       uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
@@ -484,7 +448,6 @@ struct Group {
             << llvm::formatv("{0:x}", byte);
       }
     }
-#endif
 #endif
     return MatchedByteRange(mask);
   }
