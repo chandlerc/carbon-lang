@@ -110,7 +110,7 @@ class BitIndexRange {
       return *this;
     }
 
-  private:
+   private:
     ssize_t index_;
     MaskT mask_ = 0;
   };
