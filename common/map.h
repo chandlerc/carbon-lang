@@ -1149,6 +1149,7 @@ void MapView<KT, VT>::ForEach(CallbackT callback) {
 // isn't possible without growing.
 template <typename KT, typename VT>
 template <typename LookupKeyT>
+[[clang::noinline]]
 auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
     -> std::pair<bool, ssize_t> {
   uint8_t* groups = groups_ptr();
@@ -1172,7 +1173,7 @@ auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
     auto g = MapInternal::Group::Load(groups, group_index);
 
     auto control_byte_matched_range = g.Match(control_byte);
-    if (LLVM_LIKELY(control_byte_matched_range)) {
+    if (control_byte_matched_range) {
       auto byte_it = control_byte_matched_range.begin();
       auto byte_end = control_byte_matched_range.end();
       do {
@@ -1227,6 +1228,7 @@ auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
 
 template <typename KT, typename VT>
 template <typename LookupKeyT>
+[[clang::noinline]]
 auto MapBase<KT, VT>::InsertIntoEmptyIndex(LookupKeyT lookup_key) -> ssize_t {
   size_t hash = llvm::hash_value(lookup_key);
   uint8_t control_byte = MapInternal::ComputeControlByte(hash);
@@ -1294,6 +1296,7 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
 }  // namespace MapInternal
 
 template <typename KeyT, typename ValueT>
+[[clang::noinline]]
 auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
   // We grow into a new `MapBase` so that both the new and old maps are
   // fully functional until all the entries are moved over. However, we directly
