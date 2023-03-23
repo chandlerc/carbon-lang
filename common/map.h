@@ -1095,6 +1095,7 @@ auto MapView<KT, VT>::operator[](LookupKeyT lookup_key) const -> ValueT* {
 
 template <typename KeyT, typename ValueT>
 template <typename CallbackT>
+__attribute__((always_inline))
 void MapView<KeyT, ValueT>::ForEachLinear(CallbackT callback) {
   KeyT* keys = linear_keys();
   ValueT* values = linear_values();
@@ -1107,6 +1108,7 @@ template <typename KeyT, typename ValueT>
 template <typename KVCallbackT, typename GroupCallbackT>
 void MapView<KeyT, ValueT>::ForEachHashed(KVCallbackT kv_callback,
                                           GroupCallbackT group_callback) {
+  MapInternal::Prefetch(storage_);
   uint8_t* groups = groups_ptr();
   KeyT* keys = keys_ptr();
   ValueT* values = values_ptr();
@@ -1131,7 +1133,6 @@ void MapView<KeyT, ValueT>::ForEachHashed(KVCallbackT kv_callback,
 template <typename KT, typename VT>
 template <typename CallbackT>
 void MapView<KT, VT>::ForEach(CallbackT callback) {
-  MapInternal::Prefetch(storage_);
   if (is_linear()) {
     ForEachLinear(callback);
     return;
@@ -1196,7 +1197,7 @@ auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
     // We failed to find a matching entry in this bucket, so check if there are
     // no empty slots. In that case, we'll continue probing.
     auto empty_matched_range = g.MatchEmpty();
-    if (!empty_matched_range) {
+    if (LLVM_LIKELY(!empty_matched_range)) {
       continue;
     }
 
@@ -1212,7 +1213,7 @@ auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
     // empty slots. Check that we have the budget for that before we compute the
     // exact index of the empty slot. Without the growth budget we'll have to
     // completely rehash and so we can just bail here.
-    if (growth_budget_ == 0) {
+    if (LLVM_UNLIKELY(growth_budget_ == 0)) {
       // Without room to grow, return that no group is viable but also set the
       // index to be negative. This ensures that a positive index is always
       // sufficient to determine that an existing was found.
@@ -1305,20 +1306,36 @@ auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
   KeyT* new_keys = new_map.keys_ptr();
   ValueT* new_values = new_map.values_ptr();
 
-  ForEach([&](KeyT& old_key, ValueT& old_value) {
-    ssize_t index = new_map.InsertIntoEmptyIndex(old_key);
-    --new_map.growth_budget_;
-    new (&new_keys[index]) KeyT(std::move(old_key));
-    old_key.~KeyT();
-    new (&new_values[index]) ValueT(std::move(old_value));
-    old_value.~ValueT();
-  });
-  assert(new_map.growth_budget_ >= 0 &&
-         "Must still have a growth budget after rehash!");
+  // We specially handle the linear and small case to make it easy to optimize
+  // that.
+  if (LLVM_LIKELY(impl_view_.is_linear())) {
+    impl_view_.ForEachLinear([&](KeyT& old_key, ValueT& old_value) {
+      ssize_t index = new_map.InsertIntoEmptyIndex(old_key);
+      new (&new_keys[index]) KeyT(std::move(old_key));
+      old_key.~KeyT();
+      new (&new_values[index]) ValueT(std::move(old_value));
+      old_value.~ValueT();
+    });
+    assert(new_map.growth_budget_ > size() &&
+          "Must still have a growth budget after rehash!");
+    new_map.growth_budget_ -= size();
+    assert(is_small() && "Should only have linear scans in the small mode!");
+  } else {
+    impl_view_.ForEachHashed([&](KeyT& old_key, ValueT& old_value) {
+      ssize_t index = new_map.InsertIntoEmptyIndex(old_key);
+      --new_map.growth_budget_;
+      new (&new_keys[index]) KeyT(std::move(old_key));
+      old_key.~KeyT();
+      new (&new_values[index]) ValueT(std::move(old_value));
+      old_value.~ValueT();
+    }, [](auto...) {});
+    assert(new_map.growth_budget_ >= 0 &&
+          "Must still have a growth budget after rehash!");
 
-  if (!is_small()) {
-    // Old isn't a small buffer, so we need to deallocate it.
-    MapInternal::DeallocateStorage<KeyT, ValueT>(storage(), size());
+    if (LLVM_LIKELY(!is_small())) {
+      // Old isn't a small buffer, so we need to deallocate it.
+      MapInternal::DeallocateStorage<KeyT, ValueT>(storage(), size());
+    }
   }
 
   // Now that we've fully built the new, grown structures, replace the entries
