@@ -1095,7 +1095,6 @@ auto MapView<KT, VT>::operator[](LookupKeyT lookup_key) const -> ValueT* {
 
 template <typename KeyT, typename ValueT>
 template <typename CallbackT>
-__attribute__((always_inline))
 void MapView<KeyT, ValueT>::ForEachLinear(CallbackT callback) {
   KeyT* keys = linear_keys();
   ValueT* values = linear_values();
@@ -1153,9 +1152,8 @@ void MapView<KT, VT>::ForEach(CallbackT callback) {
 // that seems to result in good code.
 template <typename KT, typename VT>
 template <typename LookupKeyT>
-[[clang::noinline]]
-auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
-    -> std::pair<uint32_t, ssize_t> {
+[[clang::noinline]] auto MapBase<KT, VT>::InsertIndexHashed(
+    LookupKeyT lookup_key) -> std::pair<uint32_t, ssize_t> {
   uint8_t* groups = groups_ptr();
 
   size_t hash = llvm::hash_value(lookup_key);
@@ -1232,8 +1230,8 @@ auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
 
 template <typename KT, typename VT>
 template <typename LookupKeyT>
-[[clang::noinline]]
-auto MapBase<KT, VT>::InsertIntoEmptyIndex(LookupKeyT lookup_key) -> ssize_t {
+[[clang::noinline]] auto MapBase<KT, VT>::InsertIntoEmptyIndex(
+    LookupKeyT lookup_key) -> ssize_t {
   size_t hash = llvm::hash_value(lookup_key);
   uint8_t control_byte = MapInternal::ComputeControlByte(hash);
   uint8_t* groups = groups_ptr();
@@ -1300,8 +1298,7 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
 }  // namespace MapInternal
 
 template <typename KeyT, typename ValueT>
-[[clang::noinline]]
-auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
+[[clang::noinline]] auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
   // We grow into a new `MapBase` so that both the new and old maps are
   // fully functional until all the entries are moved over. However, we directly
   // manipulate the internals to short circuit many aspects of the growth.
@@ -1320,20 +1317,22 @@ auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
       old_value.~ValueT();
     });
     assert(new_map.growth_budget_ > size() &&
-          "Must still have a growth budget after rehash!");
+           "Must still have a growth budget after rehash!");
     new_map.growth_budget_ -= size();
     assert(is_small() && "Should only have linear scans in the small mode!");
   } else {
-    impl_view_.ForEachHashed([&](KeyT& old_key, ValueT& old_value) {
-      ssize_t index = new_map.InsertIntoEmptyIndex(old_key);
-      --new_map.growth_budget_;
-      new (&new_keys[index]) KeyT(std::move(old_key));
-      old_key.~KeyT();
-      new (&new_values[index]) ValueT(std::move(old_value));
-      old_value.~ValueT();
-    }, [](auto...) {});
+    impl_view_.ForEachHashed(
+        [&](KeyT& old_key, ValueT& old_value) {
+          ssize_t index = new_map.InsertIntoEmptyIndex(old_key);
+          --new_map.growth_budget_;
+          new (&new_keys[index]) KeyT(std::move(old_key));
+          old_key.~KeyT();
+          new (&new_values[index]) ValueT(std::move(old_value));
+          old_value.~ValueT();
+        },
+        [](auto...) {});
     assert(new_map.growth_budget_ >= 0 &&
-          "Must still have a growth budget after rehash!");
+           "Must still have a growth budget after rehash!");
 
     if (LLVM_LIKELY(!is_small())) {
       // Old isn't a small buffer, so we need to deallocate it.
