@@ -788,7 +788,7 @@ class MapBase {
   void InitAlloc(ssize_t alloc_size);
 
   template <typename LookupKeyT>
-  auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<bool, ssize_t>;
+  auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<uint32_t, ssize_t>;
   template <typename LookupKeyT>
   auto InsertIntoEmptyIndex(LookupKeyT lookup_key) -> ssize_t;
   template <typename LookupKeyT>
@@ -1146,13 +1146,16 @@ void MapView<KT, VT>::ForEach(CallbackT callback) {
 // data compressed into two registers (in order to avoid an in-memory return).
 // These are the group pointer, a bool representing whether insertion is in fact
 // required, and the byte index of either the found entry in the group or the
-// slot of the group to insert into. The group pointer will be null if insertion
-// isn't possible without growing.
+// slot of the group to insert into. The index will be `-1` if insertion
+// isn't possible without growing. Last but not least, because we leave this
+// outlined for code size, we also need to encode the `bool` in a way that is
+// effective with various encodings and ABIs. Currently this is `uint32_t` as
+// that seems to result in good code.
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 [[clang::noinline]]
 auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
-    -> std::pair<bool, ssize_t> {
+    -> std::pair<uint32_t, ssize_t> {
   uint8_t* groups = groups_ptr();
 
   size_t hash = llvm::hash_value(lookup_key);
@@ -1203,7 +1206,7 @@ auto MapBase<KT, VT>::InsertIndexHashed(LookupKeyT lookup_key)
 
     // Ok, we've finished probing without finding anything and need to insert
     // instead.
-    if (group_with_deleted_index >= 0) {
+    if (LLVM_UNLIKELY(group_with_deleted_index >= 0)) {
       // If we found a deleted slot, we don't need the probe sequence to insert
       // so just bail.
       break;
@@ -1440,7 +1443,6 @@ auto MapBase<KT, VT>::Insert(
     typename std::__type_identity<llvm::function_ref<std::pair<KeyT*, ValueT*>(
         LookupKeyT lookup_key, void* key_storage, void* value_storage)>>::type
         insert_cb) -> InsertKVResultT {
-  Prefetch(storage());
   if (impl_view_.is_linear()) {
     return InsertSmallLinear(lookup_key, insert_cb);
   }
