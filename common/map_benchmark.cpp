@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <random>
 
 #include "absl/container/flat_hash_map.h"
@@ -203,27 +204,31 @@ struct LLVMHashingDenseMapInfo {
   }
 };
 
-using KeyVectorT = llvm::SmallVector<std::unique_ptr<int>, 32>;
+using KeyVectorT = llvm::ArrayRef<std::unique_ptr<int>>;
 
 [[clang::noinline]] auto BuildKeys(
     ssize_t size, llvm::function_ref<void(int*)> callback = [](int*) {})
     -> KeyVectorT {
-  KeyVectorT keys;
-  for (ssize_t i : llvm::seq<ssize_t>(0, size)) {
-    keys.emplace_back(new int(i));
-  }
+  constexpr ssize_t MaxKeysSize = 1 << 20;
+  static std::vector<std::unique_ptr<int>>& keys = *([] {
+    auto *keys_ptr = new std::vector<std::unique_ptr<int>>();
+    for (ssize_t i : llvm::seq<ssize_t>(0, MaxKeysSize)) {
+      keys_ptr->emplace_back(new int(i));
+    }
+    return keys_ptr;
+  }());
 
   for (ssize_t i : llvm::seq<ssize_t>(0, size)) {
     callback(keys[i].get());
   }
 
-  return keys;
+  return llvm::ArrayRef(keys).take_front(size);
 }
 
 constexpr ssize_t NumShuffledKeys = 1024LL * 64;
 
 [[clang::noinline]] auto BuildShuffledKeys(const KeyVectorT& keys)
-    -> llvm::SmallVector<int*, 32> {
+    -> llvm::SmallVector<int*, 0> {
   std::random_device r_dev;
   std::seed_seq seed(
       {r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev(), r_dev()});
@@ -420,7 +425,7 @@ static void BM_MapInsertPtrSeq(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
   using T = typename MapWrapperT::ValueT;
   KeyVectorT keys = BuildKeys(s.range(0));
-  llvm::SmallVector<int*, 32> shuffled_keys = BuildShuffledKeys(keys);
+  llvm::SmallVector<int*, 0> shuffled_keys = BuildShuffledKeys(keys);
 
   ssize_t i = 0;
   for (auto _ : s) {

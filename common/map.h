@@ -804,7 +804,8 @@ class MapBase {
           LookupKeyT lookup_key, void* key_storage, void* value_storage)>
           insert_cb) -> InsertKVResultT;
 
-  auto GrowAndRehash() -> uint8_t*;
+  template <typename LookupKeyT>
+  auto GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> ssize_t;
 
   template <typename LookupKeyT>
   auto EraseSmallLinear(LookupKeyT lookup_key) -> bool;
@@ -1105,9 +1106,9 @@ void MapView<KeyT, ValueT>::ForEachLinear(CallbackT callback) {
 
 template <typename KeyT, typename ValueT>
 template <typename KVCallbackT, typename GroupCallbackT>
+[[clang::always_inline]]
 void MapView<KeyT, ValueT>::ForEachHashed(KVCallbackT kv_callback,
                                           GroupCallbackT group_callback) {
-  MapInternal::Prefetch(storage_);
   uint8_t* groups = groups_ptr();
   KeyT* keys = keys_ptr();
   ValueT* values = values_ptr();
@@ -1298,19 +1299,20 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
 }  // namespace MapInternal
 
 template <typename KeyT, typename ValueT>
-[[clang::noinline]] auto MapBase<KeyT, ValueT>::GrowAndRehash() -> uint8_t* {
+template <typename LookupKeyT>
+[[clang::noinline]] auto MapBase<KeyT, ValueT>::GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> ssize_t {
   // We grow into a new `MapBase` so that both the new and old maps are
   // fully functional until all the entries are moved over. However, we directly
   // manipulate the internals to short circuit many aspects of the growth.
   MapBase<KeyT, ValueT> new_map(MapInternal::ComputeNewSize(size()));
-  KeyT* new_keys = new_map.keys_ptr();
-  ValueT* new_values = new_map.values_ptr();
 
   // We specially handle the linear and small case to make it easy to optimize
   // that.
   if (LLVM_LIKELY(impl_view_.is_linear())) {
     impl_view_.ForEachLinear([&](KeyT& old_key, ValueT& old_value) {
       ssize_t index = new_map.InsertIntoEmptyIndex(old_key);
+      KeyT* new_keys = new_map.keys_ptr();
+      ValueT* new_values = new_map.values_ptr();
       new (&new_keys[index]) KeyT(std::move(old_key));
       old_key.~KeyT();
       new (&new_values[index]) ValueT(std::move(old_value));
@@ -1321,16 +1323,20 @@ template <typename KeyT, typename ValueT>
     new_map.growth_budget_ -= size();
     assert(is_small() && "Should only have linear scans in the small mode!");
   } else {
+    ssize_t insert_count = 0;
     impl_view_.ForEachHashed(
         [&](KeyT& old_key, ValueT& old_value) {
+          ++insert_count;
           ssize_t index = new_map.InsertIntoEmptyIndex(old_key);
-          --new_map.growth_budget_;
+          KeyT* new_keys = new_map.keys_ptr();
+          ValueT* new_values = new_map.values_ptr();
           new (&new_keys[index]) KeyT(std::move(old_key));
           old_key.~KeyT();
           new (&new_values[index]) ValueT(std::move(old_value));
           old_value.~ValueT();
         },
         [](auto...) {});
+    new_map.growth_budget_ -= insert_count;
     assert(new_map.growth_budget_ >= 0 &&
            "Must still have a growth budget after rehash!");
 
@@ -1354,8 +1360,10 @@ template <typename KeyT, typename ValueT>
   new_map.storage() = nullptr;
   new_map.impl_view_.SetSize(0);
 
-  // We return the newly allocated groups for immediate use by the caller.
-  return groups_ptr();
+  // And lastly insert the lookup_key into an index in the newly grown map and
+  // return that index for use.
+  --growth_budget_;
+  return InsertIntoEmptyIndex(lookup_key);
 }
 
 template <typename KeyT, typename ValueT>
@@ -1370,7 +1378,7 @@ auto MapBase<KeyT, ValueT>::InsertHashed(
   if (size() > 0) {
     bool needs_insertion;
     std::tie(needs_insertion, index) = InsertIndexHashed(lookup_key);
-    if (!needs_insertion) {
+    if (LLVM_LIKELY(!needs_insertion)) {
       assert(index >= 0 &&
              "Must have a valid group when we find an existing entry.");
       return {false, keys_ptr()[index], values_ptr()[index]};
@@ -1382,14 +1390,13 @@ auto MapBase<KeyT, ValueT>::InsertHashed(
         growth_budget_ == 0 &&
         "Shouldn't need to grow the table until we exhaust our growth budget!");
 
-    GrowAndRehash();
-    // Directly insert into an empty index as we know we have one.
-    index = InsertIntoEmptyIndex(lookup_key);
+    index = GrowRehashAndInsertIndex(lookup_key);
+  } else {
+    assert(growth_budget_ >= 0 && "Cannot insert with zero budget!");
+    --growth_budget_;
   }
 
   assert(index >= 0 && "Should have a group to insert into now.");
-  assert(growth_budget_ >= 0 && "Cannot insert with zero budget!");
-  --growth_budget_;
 
   KeyT* k;
   ValueT* v;
@@ -1423,9 +1430,7 @@ auto MapBase<KeyT, ValueT>::InsertSmallLinear(
   } else {
     // No space for a linear insert so grow into a hash table and then do
     // a hashed insert.
-    GrowAndRehash();
-    index = InsertIntoEmptyIndex(lookup_key);
-    --growth_budget_;
+    index = GrowRehashAndInsertIndex(lookup_key);
     keys = keys_ptr();
     values = values_ptr();
   }
@@ -1460,14 +1465,63 @@ auto MapBase<KT, VT>::Update(
         insert_cb,
     llvm::function_ref<ValueT&(KeyT& key, ValueT& value)> update_cb)
     -> InsertKVResultT {
-  auto i_result = Insert(lookup_key, insert_cb);
+  ssize_t index = -1;
 
-  if (i_result.is_inserted()) {
-    return i_result;
+  KeyT* keys;
+  ValueT* values;
+  if (impl_view_.is_linear()) {
+    keys = linear_keys();
+    values = linear_values();
+    for (ssize_t i : llvm::seq<ssize_t>(0, size())) {
+      if (keys[i] == lookup_key) {
+        KeyT& k = keys[i];
+        ValueT& v = update_cb(k, values[i]);
+        return {false, k, v};
+      }
+    }
+    ssize_t old_size = size();
+    if (old_size < small_size()) {
+      index = old_size;
+      impl_view_.SetSize(old_size + 1);
+    }
+  } else {
+    if (size() > 0) {
+      bool needs_insertion = true;
+      std::tie(needs_insertion, index) = InsertIndexHashed(lookup_key);
+      keys = keys_ptr();
+      values = values_ptr();
+      if (LLVM_LIKELY(!needs_insertion)) {
+        assert(index >= 0 &&
+               "Must have a valid group when we find an existing entry.");
+        KeyT& k = keys[index];
+        ValueT& v = update_cb(k, values[index]);
+        return {false, k, v};
+      }
+
+      if (index >= 0) {
+        // If inserting without growth, track that we've used that budget.
+        --growth_budget_;
+      }
+    }
   }
 
-  ValueT& v = update_cb(i_result.key(), i_result.value());
-  return {false, i_result.key(), v};
+  if (LLVM_UNLIKELY(index < 0)) {
+    assert(
+        impl_view_.is_linear() || growth_budget_ == 0 &&
+        "Shouldn't need to grow the table until we exhaust our growth budget!");
+
+    index = GrowRehashAndInsertIndex(lookup_key);
+    // Refresh the keys and values.
+    keys = keys_ptr();
+    values = values_ptr();
+  }
+
+  assert(index >= 0 && "Should have a group to insert into now.");
+  KeyT* k;
+  ValueT* v;
+  std::tie(k, v) =
+      insert_cb(lookup_key, &keys[index], &values[index]);
+  return {true, *k, *v};
 }
 
 template <typename KeyT, typename ValueT>
