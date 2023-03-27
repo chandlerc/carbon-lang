@@ -211,7 +211,7 @@ using KeyVectorT = llvm::ArrayRef<std::unique_ptr<int>>;
     -> KeyVectorT {
   constexpr ssize_t MaxKeysSize = 1 << 20;
   static std::vector<std::unique_ptr<int>>& keys = *([] {
-    auto *keys_ptr = new std::vector<std::unique_ptr<int>>();
+    auto* keys_ptr = new std::vector<std::unique_ptr<int>>();
     for (ssize_t i : llvm::seq<ssize_t>(0, MaxKeysSize)) {
       keys_ptr->emplace_back(new int(i));
     }

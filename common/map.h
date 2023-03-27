@@ -1106,9 +1106,8 @@ void MapView<KeyT, ValueT>::ForEachLinear(CallbackT callback) {
 
 template <typename KeyT, typename ValueT>
 template <typename KVCallbackT, typename GroupCallbackT>
-[[clang::always_inline]]
-void MapView<KeyT, ValueT>::ForEachHashed(KVCallbackT kv_callback,
-                                          GroupCallbackT group_callback) {
+[[clang::always_inline]] void MapView<KeyT, ValueT>::ForEachHashed(
+    KVCallbackT kv_callback, GroupCallbackT group_callback) {
   uint8_t* groups = groups_ptr();
   KeyT* keys = keys_ptr();
   ValueT* values = values_ptr();
@@ -1300,7 +1299,8 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
 
 template <typename KeyT, typename ValueT>
 template <typename LookupKeyT>
-[[clang::noinline]] auto MapBase<KeyT, ValueT>::GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> ssize_t {
+[[clang::noinline]] auto MapBase<KeyT, ValueT>::GrowRehashAndInsertIndex(
+    LookupKeyT lookup_key) -> ssize_t {
   // We grow into a new `MapBase` so that both the new and old maps are
   // fully functional until all the entries are moved over. However, we directly
   // manipulate the internals to short circuit many aspects of the growth.
@@ -1506,9 +1506,9 @@ auto MapBase<KT, VT>::Update(
   }
 
   if (LLVM_UNLIKELY(index < 0)) {
-    assert(
-        impl_view_.is_linear() || growth_budget_ == 0 &&
-        "Shouldn't need to grow the table until we exhaust our growth budget!");
+    assert(impl_view_.is_linear() || growth_budget_ == 0 &&
+                                         "Shouldn't need to grow the table "
+                                         "until we exhaust our growth budget!");
 
     index = GrowRehashAndInsertIndex(lookup_key);
     // Refresh the keys and values.
@@ -1519,8 +1519,7 @@ auto MapBase<KT, VT>::Update(
   assert(index >= 0 && "Should have a group to insert into now.");
   KeyT* k;
   ValueT* v;
-  std::tie(k, v) =
-      insert_cb(lookup_key, &keys[index], &values[index]);
+  std::tie(k, v) = insert_cb(lookup_key, &keys[index], &values[index]);
   return {true, *k, *v};
 }
 
