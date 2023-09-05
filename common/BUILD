@@ -108,6 +108,29 @@ cc_test(
 )
 
 cc_library(
+    name = "hashing",
+    srcs = ["hashing.cpp"],
+    hdrs = ["hashing.h"],
+    deps = [
+        ":check",
+        ":ostream",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_test(
+    name = "hashing_test",
+    srcs = ["hashing_test.cpp"],
+    deps = [
+        ":hashing",
+        "//testing/base:gtest_main",
+        "//testing/base:test_raw_ostream",
+        "@com_google_googletest//:gtest",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
     name = "indirect_value",
     hdrs = ["indirect_value.h"],
 )

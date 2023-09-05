@@ -300,3 +300,17 @@ http_archive(
 load("@rules_tree_sitter//tree_sitter:tree_sitter.bzl", "tree_sitter_register_toolchains")
 
 tree_sitter_register_toolchains()
+
+###############################################################################
+# SMHasher for hash function testing.
+###############################################################################
+
+smhasher_version = "652db72119e5be8fcfc7e40951dff75a71574d74"
+
+http_archive(
+    name = "smhasher",
+    #build_file = "@//:third_party/smhasher/BUILD",
+    sha256 = "78b5bb73748fc0dbcc74e88990f6d4d3951af181f97fde3f3eff703671505b13",
+    strip_prefix = "smhasher-{0}".format(smhasher_version),
+    urls = ["https://github.com/rurban/smhasher/archive/{0}.tar.gz".format(smhasher_version)],
+)
