@@ -11,7 +11,31 @@
 
 namespace Carbon {
 
-auto Detail::HashState::UpdateByteSequence(
+inline auto Read8(const std::byte *data) -> uint64_t {
+  uint8_t result;
+  std::memcpy(&result, data, sizeof(result));
+  return result;
+}
+
+inline auto Read16(const std::byte *data) -> uint64_t {
+  uint16_t result;
+  std::memcpy(&result, data, sizeof(result));
+  return result;
+}
+
+inline auto Read32(const std::byte *data) -> uint64_t {
+  uint32_t result;
+  std::memcpy(&result, data, sizeof(result));
+  return result;
+}
+
+inline auto Read64(const std::byte *data) -> uint64_t {
+  uint64_t result;
+  std::memcpy(&result, data, sizeof(result));
+  return result;
+}
+
+auto HashState::UpdateByteSequence(
     llvm::ArrayRef<std::byte> bytes) -> void {
   const std::byte* data = bytes.data();
   const ssize_t size = bytes.size();
@@ -97,9 +121,9 @@ auto Detail::HashState::UpdateByteSequence(
   // hard to guess at performance tradeoff. One one hand, it might hide
   // latency of a more likely misaligned read. On the other hand, it seems
   // much less likely to benefit from prefetching.
-  uint64_t data0 = Read64(data + size - 16);
-  uint64_t data1 = Read64(data + size - 8);
-  UpdateTwoChunks(data0, data1);
+  //uint64_t data0 = Read64(data + size - 16);
+  //uint64_t data1 = Read64(data + size - 8);
+  //UpdateTwoChunks(data0, data1);
 
   // Now mix the data in order except for the tail.
   const std::byte* end = data + size - 16;
@@ -107,6 +131,7 @@ auto Detail::HashState::UpdateByteSequence(
     UpdateTwoChunks(Read64(data), Read64(data + 8));
     data += 16;
   }
+  UpdateTwoChunks(Read64(end), Read64(end + 8));
 }
 
 }  // namespace Carbon
