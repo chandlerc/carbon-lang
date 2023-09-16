@@ -130,6 +130,30 @@ cc_test(
     ],
 )
 
+cc_binary(
+    name = "hashing_benchmark",
+    srcs = ["hashing_benchmark.cpp"],
+    testonly = 1,
+    deps = [
+        ":hashing",
+        "@llvm-project//llvm:Support",
+        "@com_github_google_benchmark//:benchmark_main",
+        "@com_google_absl//absl/random",
+        "@com_google_absl//absl/hash",
+    ],
+)
+
+cc_library(
+    name = "smhasher_stub",
+    hdrs = ["smhasher_stub.h"],
+    deps = [
+        ":hashing",
+        "@llvm-project//llvm:Support",
+        "@com_google_absl//absl/hash",
+    ],
+    testonly = 1,
+)
+
 cc_library(
     name = "indirect_value",
     hdrs = ["indirect_value.h"],

@@ -134,130 +134,310 @@ inline auto HashValue(const T& value, HashCode seed) -> HashCode;
 // update it.
 class HashState {
 public:
-  inline auto Update(uint64_t data) -> void {
-    buffer = FoldedMultiply(data ^ buffer, MulConstant);
+  HashState(HashState&& arg) = default;
+  HashState(const HashState& arg) = delete;
+  auto operator=(HashState&& rhs) -> HashState& = default;
+
+  static auto HashOne(HashState hash, uint64_t data) -> HashState;
+  static auto HashTwo(HashState hash, uint64_t data0, uint64_t data1)
+      -> HashState;
+  static auto HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> bytes)
+      -> HashState;
+  static auto HashSize(HashState hash, size_t size) -> HashState;
+
+  template <typename T, typename = std::enable_if_t<
+                            std::has_unique_object_representations_v<T>>>
+  static auto Hash(HashState hash, const T& value) -> HashState;
+
+  template <
+      typename T, typename U,
+      typename = std::enable_if_t<std::has_unique_object_representations_v<T> &&
+                                  std::has_unique_object_representations_v<U>>>
+  static auto Hash(HashState hash, const std::pair<T, U>& value) -> HashState;
+
+  template <typename... Ts,
+            typename = std::enable_if_t<
+                (... && std::has_unique_object_representations_v<Ts>)>>
+  static auto Hash(HashState hash, const std::tuple<Ts...>& value) -> HashState;
+
+#if 0
+  inline auto ShortFinish() -> HashCode {
+    return HashCode(llvm::rotl(buffer, RandomData[2] & 63));
   }
 
-  inline auto UpdateTwoChunks(uint64_t data0, uint64_t data1) -> void  {
-    uint64_t combined = FoldedMultiply(data0 ^ extra_keys[0], data1 ^ extra_keys[1]);
-    buffer = llvm::rotl((buffer + pad) ^ combined, RotConstant);
+  inline auto Finish() -> HashCode {
+    return HashCode(llvm::rotl(FoldedMultiply(buffer, RandomData[2]), buffer & 63));
   }
-  
-  auto UpdateByteSequence(llvm::ArrayRef<std::byte> bytes) -> void;
+#endif
+
+  explicit operator HashCode() const { return HashCode(buffer); }
 
  private:
   template <typename T>
+  friend auto HashValue(const T& value, HashCode seed) -> HashCode;
+  template <typename T>
   friend auto HashValue(const T& value) -> HashCode;
-  friend auto HashValue(llvm::StringRef s) -> HashCode;
+  friend auto HashValue(llvm::StringRef s, HashCode seed) -> HashCode;
+
+  static auto Read1(const std::byte* data) -> uint64_t;
+  static auto Read2(const std::byte* data) -> uint64_t;
+  static auto Read4(const std::byte* data) -> uint64_t;
+  static auto Read8(const std::byte* data) -> uint64_t;
+  static auto Read1To3(const std::byte* data, ssize_t size) -> uint64_t;
+  static auto Read4To8(const std::byte* data, ssize_t size) -> uint64_t;
+  static auto Read8To16(const std::byte* data, ssize_t size)
+      -> std::pair<uint64_t, uint64_t>;
+
+  template <typename T, typename = std::enable_if_t<
+                            std::has_unique_object_representations_v<T>>>
+  static auto ReadSmall(const T& value) -> uint64_t;
+
+  static auto FoldedMultiply(uint64_t lhs, uint64_t rhs) -> uint64_t;
+
+  static auto ComputeRandomData() -> std::array<uint64_t, 4>;
+
+  inline static auto HashTwoImpl(HashState hash, uint64_t data0, uint64_t data1,
+                                 llvm::ArrayRef<uint64_t> keys) -> HashState;
+
+  explicit HashState(HashCode seed)
+      : buffer(static_cast<uint64_t>(seed)) {}
 
   HashState() = default;
-  explicit HashState(HashCode seed) : buffer(seed) {}
 
-  inline auto ShortFinish() -> HashCode { return HashCode(buffer + pad); }
+  // Random data that will be initialized on program start. This will vary as
+  // much as possible from execution to execution, but should be stable when
+  // debugging or using ptrace (anything that fully stabilizes ASLR).
+  static const std::array<uint64_t, 4> RandomData;
 
-  inline auto Finish() -> HashCode {
-    return HashCode(llvm::rotl(FoldedMultiply(buffer, pad), buffer & 63));
-  }
-
-  inline auto FoldedMultiply(uint64_t lhs, uint64_t rhs) -> uint64_t {
-    // Use the C23 extended integer support that Clang provides as a general
-    // language extension.
-    using U128 = unsigned _BitInt(128);
-    U128 result = static_cast<U128>(lhs) * static_cast<U128>(rhs);
-    return static_cast<uint64_t>(result) ^ static_cast<uint64_t>(result >> 64);
-  }
-
-  // Random data taken from the hexadecimal digits of Pi's fractional component,
-  // written in lexical order for convenience of reading. The resulting
-  // byte-stream will be different due to little-endian integers. This can be
-  // generated with the following shell script:
-  //
-  // ```sh
-  // echo 'obase=16; scale=154; 4*a(1)' | env BC_LINE_LENGTH=132 bc -l \
-  //  | cut -c 3- | tr '[:upper:]' '[:lower:]' \
-  //  | sed -e "s/.\{4\}/&'/g" \
-  //  | sed -e "s/\(.\{4\}'.\{4\}'.\{4\}'.\{4\}\)'/0x\1,\n/g"
-  // ```
-  static constexpr uint64_t RandomData[8] = {
-      0x243f'6a88'85a3'08d3, 0x1319'8a2e'0370'7344, 0xa409'3822'299f'31d0,
-      0x082e'fa98'ec4e'6c89, 0x4528'21e6'38d0'1377, 0xbe54'66cf'34e9'0c6c,
-      0xc0ac'29b7'c97c'50dd, 0x3f84'd5b5'b547'0913,
-  };
+  // An empty global variable with linkage whose address is used.
+  static volatile char global_variable;
 
   // This constant from Knuth's PRNG. Claimed to work better than others from
   // "splitmix32" by the AHash authors.
-  static constexpr uint64_t MulConstant = 6364136223846793005;
+  //static constexpr uint64_t MulConstant = 0x5851'f42d'4c95'7f2dU;
+  // Actually use the constant from `fmix64` in MurmurHash3 as that seems to
+  // work better.
+  //static constexpr uint64_t MulConstant = 0xc4ce'b9fe'1a85'ec53U;
+  static constexpr uint64_t MulConstant = 0xff51'afd7'ed55'8ccdU;
 
   // Undocumented constant from AHash for rotations.
   static constexpr uint64_t RotConstant = 23;
 
-  uint64_t buffer = RandomData[0];
-  uint64_t pad = RandomData[1];
-  uint64_t extra_keys[2] = {RandomData[2], RandomData[3]};
+  uint64_t buffer;
 };
 
 namespace Detail {
 
-inline auto CarbonHash(HashState &hash, int8_t value) -> void {
-  hash.Update(static_cast<uint64_t>(value));
+inline auto CarbonHash(HashState hash, llvm::ArrayRef<std::byte> bytes) -> HashState {
+  //hash.UpdateSize(bytes.size());
+  hash = HashState::HashSizedBytes(std::move(hash), bytes);
+  return hash;
 }
 
-inline auto CarbonHash(HashState &hash, uint8_t value) -> void {
-  hash.Update(static_cast<uint64_t>(value));
+inline auto CarbonHash(HashState hash, llvm::StringRef value) -> HashState {
+  return CarbonHash(std::move(hash), llvm::ArrayRef<std::byte>(
+                              reinterpret_cast<const std::byte*>(value.data()),
+                              value.size()));
+}
+
+template <typename T, typename U,
+          typename = std::enable_if_t<
+              std::has_unique_object_representations_v<T> &&
+              std::has_unique_object_representations_v<U> &&
+              sizeof(T) <= sizeof(uint64_t) && sizeof(U) <= sizeof(uint64_t)>>
+inline auto CarbonHash(HashState hash, const std::pair<T, U>& value)
+    -> HashState {
+  return HashState::Hash(std::move(hash), value);
+}
+
+static_assert(std::has_unique_object_representations_v<int8_t>);
+static_assert(std::has_unique_object_representations_v<int16_t>);
+static_assert(std::has_unique_object_representations_v<int32_t>);
+static_assert(std::has_unique_object_representations_v<int64_t>);
+
+template <typename T, typename = std::enable_if_t<
+                          std::has_unique_object_representations_v<T>>>
+inline auto CarbonHash(HashState hash, const T& value)
+    -> HashState {
+  return HashState::Hash(std::move(hash), value);
 }
 
 template <typename T>
-inline auto CarbonHashDispatch(HashState &hash, const T& value) -> void {
-  CarbonHash(hash, value);
+inline auto CarbonHashDispatch(HashState hash, const T& value) -> HashState {
+  return CarbonHash(std::move(hash), value);
 }
 
 }  // namespace Detail
 
-// Compute a HashCode for any integer value.
-//
-// Note that this function is intended to compute the same HashCode for
-// a particular value without regard to the pre-promotion type. This is in
-// contrast to hash_combine which may produce different HashCodes for
-// differing argument types even if they would implicit promote to a common
-// type without changing the value.
-//template <typename T,
-//          typename = std::enable_if_t<std::is_integral<T>::value, void>>
-//auto HashValue(T value) -> HashCode;
-
-// Compute a HashCode for a pointer's address.
-//
-// Note that this hashes the *address*, and not the value nor the type.
-//template <typename T> auto HashValue(const T *ptr) -> HashCode;
-
-// Compute a HashCode for a pair of objects.
-//template <typename T, typename U>
-//auto HashValue(const std::pair<T, U> &arg) -> HashCode;
-
-// Compute a HashCode for a tuple.
-//template <typename... Ts>
-//auto HashValue(const std::tuple<Ts...> &arg) -> HashCode;
-
-// Compute a HashCode for a standard string.
-//template <typename T>
-//auto HashValue(const std::basic_string<T> &arg) -> HashCode;
-
-// Compute a HashCode for a standard string.
-//template <typename T> auto HashValue(const std::optional<T> &arg) -> HashCode;
+template <typename T>
+inline auto HashValue(const T& value, HashCode seed) -> HashCode {
+  return static_cast<HashCode>(
+      Detail::CarbonHashDispatch(HashState(seed), value));
+}
 
 template <typename T>
 inline auto HashValue(const T& value) -> HashCode {
-  HashState state;
-  Detail::CarbonHashDispatch(state, value);
-  return state.Finish();
+  return HashValue(value, HashCode(HashState::RandomData[0]));
 }
 
-inline auto HashValue(llvm::StringRef s) -> HashCode {
-  HashState state;
-  llvm::ArrayRef<std::byte> bytes(reinterpret_cast<const std::byte*>(s.data()),
-                                  s.size());
-  state.UpdateByteSequence(bytes);
-  return state.Finish();
+inline auto HashState::Read1(const std::byte *data) -> uint64_t {
+  uint8_t result;
+  std::memcpy(&result, data, sizeof(result));
+  return result;
 }
+
+inline auto HashState::Read2(const std::byte *data) -> uint64_t {
+  uint16_t result;
+  std::memcpy(&result, data, sizeof(result));
+  return result;
+}
+
+inline auto HashState::Read4(const std::byte *data) -> uint64_t {
+  uint32_t result;
+  std::memcpy(&result, data, sizeof(result));
+  return result;
+}
+
+inline auto HashState::Read8(const std::byte *data) -> uint64_t {
+  uint64_t result;
+  std::memcpy(&result, data, sizeof(result));
+  return result;
+}
+
+inline auto HashState::Read1To3(const std::byte *data, ssize_t size) -> uint64_t {
+  // Use carefully crafted indexing to avoid branches on the exact size while
+  // reading.
+  uint64_t byte0 = static_cast<uint8_t>(data[0]);
+  uint64_t byte1 = static_cast<uint8_t>(data[size / 2]);
+  uint64_t byte2 = static_cast<uint8_t>(data[size - 1]);
+  return byte0 | (byte1 << ((size / 2) * 8)) | (byte2 << ((size - 1) * 8));
+}
+
+inline auto HashState::Read4To8(const std::byte *data, ssize_t size) -> uint64_t {
+  uint32_t low;
+  std::memcpy(&low, data, sizeof(low));
+  uint32_t high;
+  std::memcpy(&high, data + size - sizeof(high), sizeof(high));
+  return low | (static_cast<uint64_t>(high) << ((size - sizeof(high)) * 8));
+}
+
+inline auto HashState::Read8To16(const std::byte* data, ssize_t size)
+    -> std::pair<uint64_t, uint64_t> {
+  uint64_t low;
+  std::memcpy(&low, data, sizeof(low));
+  uint64_t high;
+  std::memcpy(&high, data + size - sizeof(high), sizeof(high));
+  return {low, high};
+}
+
+inline auto HashState::FoldedMultiply(uint64_t lhs, uint64_t rhs) -> uint64_t {
+  // Use the C23 extended integer support that Clang provides as a general
+  // language extension.
+  using U128 = unsigned _BitInt(128);
+  U128 result = static_cast<U128>(lhs) * static_cast<U128>(rhs);
+  return static_cast<uint64_t>(result) ^ static_cast<uint64_t>(result >> 64);
+}
+
+inline auto HashState::HashOne(HashState hash, uint64_t data) -> HashState {
+  hash.buffer = FoldedMultiply(data ^ hash.buffer, MulConstant);
+  return hash;
+}
+
+inline auto HashState::HashTwoImpl(HashState hash, uint64_t data0, uint64_t data1,
+                                           llvm::ArrayRef<uint64_t> keys)
+    -> HashState {
+  uint64_t combined = FoldedMultiply(data0 ^ keys[2], data1 ^ keys[3]);
+  // Uses `shld` with LLVM which is frustratingly slow. Is the rotation needed?
+  hash.buffer = llvm::rotl((hash.buffer + keys[1]) ^ combined, RotConstant);
+  //buffer = (buffer + keys[1]) ^ combined;
+  return hash;
+}
+
+inline auto HashState::HashTwo(HashState hash, uint64_t data0, uint64_t data1)
+    -> HashState {
+  hash = HashTwoImpl(std::move(hash), data0, data1, RandomData);
+  return hash;
+}
+
+  // We have special knowledge of sizes of in-memory allocations we are hashing:
+  // the high 32-bits are largely unimportant. Buffers over 4GB in size are rare
+  // to begin with, and also so slow to hash and hash so much data that the
+  // mixture of size isn't important. That means the only important sizes to
+  // effectively mix into the hash are small ones, and we can do that more
+  // cheaply than the full folded multiply by just using the low 64-bits of the
+  // result.
+inline auto HashState::HashSize(HashState hash, size_t size) -> HashState {
+  hash.buffer ^= (size + RandomData[2]) * MulConstant;
+  // buffer *= MulConstant;
+  return hash;
+}
+
+template <typename T, typename /*enable_if*/>
+inline auto HashState::ReadSmall(const T& value) -> uint64_t {
+  const auto* storage = reinterpret_cast<const std::byte*>(&value);
+  if constexpr (sizeof(T) == 1) {
+    return Read1(storage);
+  } else if constexpr (sizeof(T) == 2) {
+    return  Read2(storage);
+  } else if constexpr (sizeof(T) == 3) {
+    return Read2(storage) | (Read1(&storage[2]) << 16);
+  } else if constexpr (sizeof(T) == 4) {
+    return  Read4(storage);
+  } else if constexpr (sizeof(T) == 5) {
+    return  Read4(storage) | (Read1(&storage[4]) << 32);
+  } else if constexpr (sizeof(T) == 6 || sizeof(T) == 7) {
+    // Use overlapping 4-byte reads for 6 and 7 bytes.
+    return  Read4(storage) | (Read4(&storage[sizeof(T) - 4]) << 32);
+  } else if constexpr (sizeof(T) == 8) {
+    return  Read8(storage);
+  } else {
+    static_assert(sizeof(T) <= 8);
+  }
+}
+
+template <typename T, typename /*enable_if*/>
+inline auto HashState::Hash(HashState hash, const T& value) -> HashState {
+  // We don't need the size to be part of the hash, as the size here is just a
+  // function of the type and we're hashing to distinguish different values of
+  // the same type. So we just dispatch to the fastest path for the specific size in question.
+  if constexpr (sizeof(T) <= 8) {
+    return HashOne(std::move(hash), ReadSmall(value));
+  }
+  
+  const auto* storage = reinterpret_cast<const std::byte*>(&value);
+  if constexpr (8 < sizeof(T) && sizeof(T) <= 16) {
+    auto values = Read8To16(storage, sizeof(T));
+    return HashTwo(std::move(hash), values.first, values.second);
+  }
+
+  // Hashing the size isn't relevant here, but is harmless, so fall back to a
+  // common code path.
+  return HashSizedBytes(std::move(hash),
+                        llvm::ArrayRef<std::byte>(storage, sizeof(T)));
+}
+
+template <typename T, typename U, typename /*enable_if*/>
+inline auto HashState::Hash(HashState hash, const std::pair<T, U>& value)
+    -> HashState {
+  if constexpr (sizeof(T) <= 8 && sizeof(U) <= 8) {
+    return HashTwo(std::move(hash), ReadSmall(value.first), ReadSmall(value.second));
+  } else {
+    const auto* storage0 = reinterpret_cast<const std::byte*>(&value.first);
+    const auto* storage1 = reinterpret_cast<const std::byte*>(&value.second); 
+    return HashSizedBytes(
+        HashSizedBytes(std::move(hash),
+                       llvm::ArrayRef<std::byte>(storage0, sizeof(T))),
+        llvm::ArrayRef<std::byte>(storage1, sizeof(U)));
+  }
+}
+
+#if 0
+template <typename... Ts, typename /*enable_if*/>
+inline auto HashState::Hash(HashState hash, const std::tuple<Ts...>& value)
+    -> HashState {
+  
+}
+#endif
 
 }  // namespace Carbon
 
