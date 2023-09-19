@@ -29,13 +29,13 @@ static constexpr std::array<uint64_t, 8> StaticRandomData = {
     0xc0ac'29b7'c97c'50dd, 0x3f84'd5b5'b547'0913,
 };
 
-const std::array<uint64_t, 4> HashState::RandomData =
+const std::array<uint64_t, 8> HashState::RandomData =
     HashState::ComputeRandomData();
 
 volatile char HashState::global_variable;
 
-auto HashState::ComputeRandomData() -> std::array<uint64_t, 4> {
-  std::array<uint64_t, 4> data;
+auto HashState::ComputeRandomData() -> std::array<uint64_t, 8> {
+  std::array<uint64_t, 8> data;
 
   // We want to provide entropy from program run to program run for use when
   // hashing. However, for debugging purposes it is useful to choose a source of
@@ -62,128 +62,150 @@ auto HashState::ComputeRandomData() -> std::array<uint64_t, 4> {
   // Compute hashes to provide a rough RNG seeded by the ASLR above.
   seed_hash = HashTwoImpl(std::move(seed_hash), global_address,
                                local_address, StaticRandomData);
-  data[0] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  // Each round of hashing past this should mix the bits more completely, and
+  // the most important one is the first entry that we use as the initial seed
+  // so initialize the data in reverse order.
+  data[7] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
   seed_hash = HashOne(std::move(seed_hash), global_address);
-  data[1] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  data[6] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
   seed_hash = HashOne(std::move(seed_hash), local_address);
-  data[2] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  data[5] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
   seed_hash = HashOne(std::move(seed_hash), global_address);
+  data[4] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  seed_hash = HashOne(std::move(seed_hash), local_address);
   data[3] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  seed_hash = HashOne(std::move(seed_hash), global_address);
+  data[2] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  seed_hash = HashOne(std::move(seed_hash), local_address);
+  data[1] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  seed_hash = HashOne(std::move(seed_hash), global_address);
+  data[0] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
 
   return data;
 }
 
-inline auto Read1To3(const std::byte *data, ssize_t size) -> uint64_t {
-  // Use carefully crafted indexing to avoid branches on the exact size while
-  // reading.
-  uint64_t byte0 = static_cast<uint8_t>(data[0]);
-  uint64_t byte1 = static_cast<uint8_t>(data[size / 2]);
-  uint64_t byte2 = static_cast<uint8_t>(data[size - 1]);
-  return byte0 | (byte1 << ((size / 2) * 8)) | (byte2 << ((size - 1) * 8));
-}
-
-inline auto Read4To8(const std::byte *data, ssize_t size) -> uint64_t {
-  uint32_t low;
-  std::memcpy(&low, data, sizeof(low));
-  uint32_t high;
-  std::memcpy(&high, data + size - sizeof(high), sizeof(high));
-  return low | (static_cast<uint64_t>(high) << ((size - sizeof(high)) * 8));
-}
-
-inline auto Read8To16(const std::byte* data, ssize_t size)
-    -> std::pair<uint64_t, uint64_t> {
-  uint64_t low;
-  std::memcpy(&low, data, sizeof(low));
-  uint64_t high;
-  std::memcpy(&high, data + size - sizeof(high), sizeof(high));
-  return {low, high};
-}
-
-inline auto Read8(const std::byte *data) -> uint64_t {
-  uint8_t result;
-  std::memcpy(&result, data, sizeof(result));
-  return result;
-}
-
-inline auto Read16(const std::byte *data) -> uint64_t {
-  uint16_t result;
-  std::memcpy(&result, data, sizeof(result));
-  return result;
-}
-
-inline auto Read32(const std::byte *data) -> uint64_t {
-  uint32_t result;
-  std::memcpy(&result, data, sizeof(result));
-  return result;
-}
-
-inline auto Read64(const std::byte *data) -> uint64_t {
-  uint64_t result;
-  std::memcpy(&result, data, sizeof(result));
-  return result;
-}
-
-auto HashState::HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> bytes)
+auto HashState::HashSizedBytesLarge(HashState hash, llvm::ArrayRef<std::byte> bytes)
     -> HashState {
-  const std::byte* data = bytes.data();
+  const std::byte* data_ptr = bytes.data();
   const ssize_t size = bytes.size();
+  CARBON_DCHECK(size > 16);
 
-  //UpdateSize(size);
-  __builtin_prefetch(data, 0, 0);
+  __builtin_prefetch(data_ptr, 0, 0);
+#if 1
+  const std::byte* tail_ptr = data_ptr + (size - 16);
 
-  // First handle short sequences under 8 bytes.
-  if (size <= 8) {
-    uint64_t data0;
-    uint64_t data1 = MulConstant;
-    if (size == 8) {
-      data0 = Read64(data);
-    } else if (size == 4) {
-      data0 = Read32(data);
-    } else if (size > 4) {
-      // 5-7 bytes use potentially overlapping 4 byte reads.
-      data0 = Read32(data);
-      data1 = Read32(data + size - 4) ^ RandomData[3];
-    } else {
-      if (size == 2) {
-        data0 = Read16(data);
-      } else if (size > 2) {
-        // 3 bytes use overlapping 2 byte reads.
-        data0 = Read16(data);
-        data1 = Read16(data + size - 2) ^ RandomData[3];
-
-      } else if (size > 0) {
-        // Use the single byte twice.
-        data0 = Read8(data);
-        //data1 = data0;
-      } else {
-        // TODO: This actually does *some* mixing -- is this needed?
-        data0 = 0;
-        data1 = 0;
-      }
-    }
-    hash.buffer = FoldedMultiply(data0 ^ hash.buffer, data1);
-    //buffer = llvm::rotl(buffer + pad, RotConstant);
-
-    return hash;
-  }
-
-  if (LLVM_LIKELY(size <= 16)) {
-    // Use two overlapping 8-byte reads.
-    return HashTwo(std::move(hash), Read64(data), Read64(data + size - 8));
-    //UpdateSize(size);
-  }
-
-  const std::byte* tail = data + size - 16;
-  if (LLVM_UNLIKELY(size > 32)) {
-    const std::byte* end = data + size - 32;
+  if (size > 64) {
+    // If we have more than 64 bytes, we're going to handle chunks of 64 bytes
+    // at a time using a simplified version of the main algorithm. This is based
+    // heavily on the corresponding 64-byte processing approach used by Abseil.
+    // The goal is to mix the 64-bytes of input data using as few multiplies (or
+    // other operations) as we can and with as much ILP as we can. The ILP comes
+    // largely from creating parallel structures to the operations.
+    uint64_t buffer0 = hash.buffer;
+    uint64_t buffer1 = hash.buffer;
+    const std::byte* end_ptr = data_ptr + (size - 64);
     do {
-      hash = HashTwo(std::move(hash), Read64(data), Read64(data + 8));
-      hash = HashTwo(std::move(hash), Read64(data + 16), Read64(data + 24));
-      data += 32;
-    } while (data < end);
+      // Always prefetch the next cacheline.
+      __builtin_prefetch(data_ptr + 64, 0, 0);
+      //PrefetchToLocalCache(ptr + ABSL_CACHELINE_SIZE);
+
+      uint64_t a = Read8(data_ptr);
+      uint64_t b = Read8(data_ptr + 8);
+      uint64_t c = Read8(data_ptr + 16);
+      uint64_t d = Read8(data_ptr + 24);
+      uint64_t cs0 = Mix(a ^ RandomData[4], b ^ buffer0);
+      uint64_t cs1 = Mix(c ^ RandomData[5], d ^ buffer0);
+      buffer0 = (cs0 ^ cs1);
+
+      uint64_t e = Read8(data_ptr + 32);
+      uint64_t f = Read8(data_ptr + 40);
+      uint64_t g = Read8(data_ptr + 48);
+      uint64_t h = Read8(data_ptr + 56);
+      uint64_t ds0 = Mix(e ^ RandomData[6], f ^ buffer1);
+      uint64_t ds1 = Mix(g ^ RandomData[7], h ^ buffer1);
+      buffer1 = (ds0 ^ ds1);
+
+      data_ptr += 64;
+    } while (data_ptr < end_ptr);
+
+    hash.buffer = buffer0 ^ buffer1;
+    hash = MixState(std::move(hash));
   }
-  hash = HashTwo(std::move(hash), Read64(data), Read64(data + 8));
-  hash = HashTwo(std::move(hash), Read64(tail), Read64(tail + 8));
+
+  while (data_ptr < tail_ptr) {
+    hash = HashTwo(std::move(hash), Read8(data_ptr), Read8(data_ptr + 8));
+    hash = MixState(std::move(hash));
+    data_ptr += 16;
+  }
+  hash = HashTwo(std::move(hash), Read8(tail_ptr), Read8(tail_ptr + 8));
+  hash = MixState(std::move(hash));
+  hash = HashOne(std::move(hash), size);
+#else
+  hash.buffer ^= RandomData[0];
+
+  if (bytes.size() > 64) {
+    // If we have more than 64 bytes, we're going to handle chunks of 64
+    // bytes at a time. We're going to build up two separate hash states
+    // which we will then hash together.
+    uint64_t duplicated_state = hash.buffer;
+
+    do {
+      // Always prefetch the next cacheline.
+      __builtin_prefetch(bytes.data() + 64, 0, 0);
+      //PrefetchToLocalCache(ptr + ABSL_CACHELINE_SIZE);
+
+      uint64_t a = Read8(bytes.data());
+      uint64_t b = Read8(bytes.data() + 8);
+      uint64_t c = Read8(bytes.data() + 16);
+      uint64_t d = Read8(bytes.data() + 24);
+      uint64_t e = Read8(bytes.data() + 32);
+      uint64_t f = Read8(bytes.data() + 40);
+      uint64_t g = Read8(bytes.data() + 48);
+      uint64_t h = Read8(bytes.data() + 56);
+
+      uint64_t cs0 = Mix(a ^ RandomData[1], b ^ hash.buffer);
+      uint64_t cs1 = Mix(c ^ RandomData[2], d ^ hash.buffer);
+      hash.buffer = (cs0 ^ cs1);
+
+      uint64_t ds0 = Mix(e ^ RandomData[3], f ^ duplicated_state);
+      uint64_t ds1 = Mix(g ^ RandomData[4], h ^ duplicated_state);
+      duplicated_state = (ds0 ^ ds1);
+
+      bytes = bytes.drop_front(64);
+    } while (bytes.size() > 64);
+
+    hash.buffer ^= duplicated_state;
+  }
+
+  // We now have a data `ptr` with at most 64 bytes and the current state
+  // of the hashing state machine stored in current_state.
+  while (bytes.size() > 16) {
+    uint64_t a = Read8(bytes.data());
+    uint64_t b = Read8(bytes.data() + 8);
+
+    hash.buffer = Mix(a ^ RandomData[1], b ^ hash.buffer);
+    bytes = bytes.drop_front(16);
+  }
+
+  // We now have a data `ptr` with at most 16 bytes.
+  uint64_t a = 0;
+  uint64_t b = 0;
+  if (bytes.size() > 8) {
+    std::tie(a, b) = Read8To16(bytes.data(), bytes.size());
+  } else if (bytes.size() > 3) {
+    a = Read4To8(bytes.data(), bytes.size());
+  } else if (bytes.size() > 0) {
+    a = Read1To3(bytes.data(), bytes.size());
+    b = 0;
+  } else {
+    a = 0;
+    b = 0;
+  }
+
+  uint64_t w = Mix(a ^ RandomData[5], b ^ hash.buffer);
+  uint64_t z = RandomData[6] ^ size;
+  hash.buffer = Mix(w, z);
+#endif
   return hash;
 }
 

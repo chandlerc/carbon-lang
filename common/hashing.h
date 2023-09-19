@@ -123,6 +123,11 @@ inline auto HashValue(const T& value) -> HashCode;
 template <typename T>
 inline auto HashValue(const T& value, HashCode seed) -> HashCode;
 
+namespace SMHasher {
+auto HashTest(const void* key, int len, uint32_t seed, void* out) -> void;
+auto SizedHashTest(const void* key, int len, uint32_t seed, void* out) -> void;
+}
+
 // Accumulator for hash state that eventually produces a hash code.
 //
 // This type is primarily used by types to implement a customization point
@@ -143,7 +148,8 @@ public:
       -> HashState;
   static auto HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> bytes)
       -> HashState;
-  static auto HashSize(HashState hash, size_t size) -> HashState;
+
+  static auto MixState(HashState hash) -> HashState;
 
   template <typename T, typename = std::enable_if_t<
                             std::has_unique_object_representations_v<T>>>
@@ -160,16 +166,6 @@ public:
                 (... && std::has_unique_object_representations_v<Ts>)>>
   static auto Hash(HashState hash, const std::tuple<Ts...>& value) -> HashState;
 
-#if 0
-  inline auto ShortFinish() -> HashCode {
-    return HashCode(llvm::rotl(buffer, RandomData[2] & 63));
-  }
-
-  inline auto Finish() -> HashCode {
-    return HashCode(llvm::rotl(FoldedMultiply(buffer, RandomData[2]), buffer & 63));
-  }
-#endif
-
   explicit operator HashCode() const { return HashCode(buffer); }
 
  private:
@@ -178,6 +174,8 @@ public:
   template <typename T>
   friend auto HashValue(const T& value) -> HashCode;
   friend auto HashValue(llvm::StringRef s, HashCode seed) -> HashCode;
+  friend auto SMHasher::HashTest(const void* key, int len, uint32_t seed, void* out) -> void;
+  friend auto SMHasher::SizedHashTest(const void* key, int len, uint32_t seed, void* out) -> void;
 
   static auto Read1(const std::byte* data) -> uint64_t;
   static auto Read2(const std::byte* data) -> uint64_t;
@@ -192,12 +190,15 @@ public:
                             std::has_unique_object_representations_v<T>>>
   static auto ReadSmall(const T& value) -> uint64_t;
 
-  static auto FoldedMultiply(uint64_t lhs, uint64_t rhs) -> uint64_t;
+  static auto Mix(uint64_t lhs, uint64_t rhs) -> uint64_t;
 
-  static auto ComputeRandomData() -> std::array<uint64_t, 4>;
+  static auto ComputeRandomData() -> std::array<uint64_t, 8>;
 
   inline static auto HashTwoImpl(HashState hash, uint64_t data0, uint64_t data1,
                                  llvm::ArrayRef<uint64_t> keys) -> HashState;
+
+  static auto HashSizedBytesLarge(HashState hash, llvm::ArrayRef<std::byte> bytes)
+      -> HashState;
 
   explicit HashState(HashCode seed)
       : buffer(static_cast<uint64_t>(seed)) {}
@@ -207,18 +208,13 @@ public:
   // Random data that will be initialized on program start. This will vary as
   // much as possible from execution to execution, but should be stable when
   // debugging or using ptrace (anything that fully stabilizes ASLR).
-  static const std::array<uint64_t, 4> RandomData;
+  static const std::array<uint64_t, 8> RandomData;
 
   // An empty global variable with linkage whose address is used.
   static volatile char global_variable;
 
-  // This constant from Knuth's PRNG. Claimed to work better than others from
-  // "splitmix32" by the AHash authors.
-  //static constexpr uint64_t MulConstant = 0x5851'f42d'4c95'7f2dU;
-  // Actually use the constant from `fmix64` in MurmurHash3 as that seems to
-  // work better.
-  //static constexpr uint64_t MulConstant = 0xc4ce'b9fe'1a85'ec53U;
-  static constexpr uint64_t MulConstant = 0xff51'afd7'ed55'8ccdU;
+  // The multiplicative hash constant from Knuth, derived from 2^64 / Phi.
+  static constexpr uint64_t MulConstant = 0x9e37'79b9'7f4a'7c15U;
 
   // Undocumented constant from AHash for rotations.
   static constexpr uint64_t RotConstant = 23;
@@ -308,9 +304,9 @@ inline auto HashState::Read1To3(const std::byte *data, ssize_t size) -> uint64_t
   // Use carefully crafted indexing to avoid branches on the exact size while
   // reading.
   uint64_t byte0 = static_cast<uint8_t>(data[0]);
-  uint64_t byte1 = static_cast<uint8_t>(data[size / 2]);
-  uint64_t byte2 = static_cast<uint8_t>(data[size - 1]);
-  return byte0 | (byte1 << ((size / 2) * 8)) | (byte2 << ((size - 1) * 8));
+  uint64_t byte1 = static_cast<uint8_t>(data[size - 1]);
+  uint64_t byte2 = static_cast<uint8_t>(data[size / 2]);
+  return byte0 | (byte1 << 16) | (byte2 << 8);
 }
 
 inline auto HashState::Read4To8(const std::byte *data, ssize_t size) -> uint64_t {
@@ -318,7 +314,7 @@ inline auto HashState::Read4To8(const std::byte *data, ssize_t size) -> uint64_t
   std::memcpy(&low, data, sizeof(low));
   uint32_t high;
   std::memcpy(&high, data + size - sizeof(high), sizeof(high));
-  return low | (static_cast<uint64_t>(high) << ((size - sizeof(high)) * 8));
+  return low | (static_cast<uint64_t>(high) << 32);
 }
 
 inline auto HashState::Read8To16(const std::byte* data, ssize_t size)
@@ -330,26 +326,29 @@ inline auto HashState::Read8To16(const std::byte* data, ssize_t size)
   return {low, high};
 }
 
-inline auto HashState::FoldedMultiply(uint64_t lhs, uint64_t rhs) -> uint64_t {
+inline auto HashState::Mix(uint64_t lhs, uint64_t rhs) -> uint64_t {
   // Use the C23 extended integer support that Clang provides as a general
   // language extension.
   using U128 = unsigned _BitInt(128);
   U128 result = static_cast<U128>(lhs) * static_cast<U128>(rhs);
-  return static_cast<uint64_t>(result) ^ static_cast<uint64_t>(result >> 64);
+  return static_cast<uint64_t>(result & ~static_cast<uint64_t>(0)) ^
+         static_cast<uint64_t>(result >> 64);
 }
 
 inline auto HashState::HashOne(HashState hash, uint64_t data) -> HashState {
-  hash.buffer = FoldedMultiply(data ^ hash.buffer, MulConstant);
+  hash.buffer = Mix(data ^ hash.buffer, MulConstant);
   return hash;
 }
 
 inline auto HashState::HashTwoImpl(HashState hash, uint64_t data0, uint64_t data1,
                                            llvm::ArrayRef<uint64_t> keys)
     -> HashState {
-  uint64_t combined = FoldedMultiply(data0 ^ keys[2], data1 ^ keys[3]);
-  // Uses `shld` with LLVM which is frustratingly slow. Is the rotation needed?
-  hash.buffer = llvm::rotl((hash.buffer + keys[1]) ^ combined, RotConstant);
-  //buffer = (buffer + keys[1]) ^ combined;
+  uint64_t combined = Mix(data0 ^ keys[1], data1 ^ keys[3]);
+  // Note that AHash applies a rotation to this. Instead, we defer that rotation
+  // to a separate `MixState` step for use in the places that require it.
+  // This improves the latency of applications of this routine where the rotate
+  // adds little value.
+  hash.buffer = (hash.buffer + keys[2]) ^ combined;
   return hash;
 }
 
@@ -359,17 +358,58 @@ inline auto HashState::HashTwo(HashState hash, uint64_t data0, uint64_t data1)
   return hash;
 }
 
-  // We have special knowledge of sizes of in-memory allocations we are hashing:
-  // the high 32-bits are largely unimportant. Buffers over 4GB in size are rare
-  // to begin with, and also so slow to hash and hash so much data that the
-  // mixture of size isn't important. That means the only important sizes to
-  // effectively mix into the hash are small ones, and we can do that more
-  // cheaply than the full folded multiply by just using the low 64-bits of the
-  // result.
-inline auto HashState::HashSize(HashState hash, size_t size) -> HashState {
-  hash.buffer ^= (size + RandomData[2]) * MulConstant;
-  // buffer *= MulConstant;
+inline auto HashState::MixState(HashState hash) -> HashState {
+  // Rotating the buffer helps repeated hashing mix more of the state, but is
+  // especially cheap (and harmless) in single applications as it pipelines well
+  // with memory accesses and the multiply of new data. The rotation amount of
+  // `53` is arbitrarily chosen to match the amount found useful in ML-based
+  // experiments on Abseil's hash function.
+  hash.buffer = llvm::rotr(hash.buffer, 53);
   return hash;
+}
+
+inline auto HashState::HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> bytes)
+    -> HashState {
+  const std::byte* data_ptr = bytes.data();
+  const ssize_t size = bytes.size();
+
+  // First handle short sequences under 8 bytes.
+  if (size <= 8) {
+    uint64_t data0 = 0;
+    if (size >= 4) {
+      data0 = Read4To8(data_ptr, size);
+    } else if (size > 0) {
+      data0 = Read1To3(data_ptr, size);
+    }
+    // We optimize for latency on short strings by hashing both the data and
+    // size in a single multiply here. This results in a *statistically* weak
+    // hash function. It would be improved by doing two rounds of multiplicative
+    // hashing which is what many other modern multiplicative hashes do,
+    // including Abseil and others:
+    //
+    // ```cpp
+    // hash = HashOne(std::move(hash), data0);
+    // hash = HashOne(std::move(hash), size);
+    // ```
+    //
+    // We opt to make the same tradeoff here for small sized strings that both
+    // this library and Abseil make for *fixed* size integers by using a weaker
+    // single round of multiplicative hashing.
+    hash = HashTwo(std::move(hash), data0, size << 32);
+    //hash = HashOne(std::move(hash), data0);
+    //hash = HashOne(std::move(hash), size);
+    return hash;
+  }
+
+  if (LLVM_LIKELY(size <= 16)) {
+    auto data = Read8To16(data_ptr, size);
+    hash = HashTwo(std::move(hash), data.first, data.second);
+    hash = MixState(std::move(hash));
+    hash = HashOne(std::move(hash), size);
+    return hash;
+  }
+
+  return HashSizedBytesLarge(std::move(hash), bytes);
 }
 
 template <typename T, typename /*enable_if*/>
