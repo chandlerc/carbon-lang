@@ -149,8 +149,6 @@ public:
   static auto HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> bytes)
       -> HashState;
 
-  static auto MixState(HashState hash) -> HashState;
-
   template <typename T, typename = std::enable_if_t<
                             std::has_unique_object_representations_v<T>>>
   static auto Hash(HashState hash, const T& value) -> HashState;
@@ -194,8 +192,7 @@ public:
 
   static auto ComputeRandomData() -> std::array<uint64_t, 8>;
 
-  inline static auto HashTwoImpl(HashState hash, uint64_t data0, uint64_t data1,
-                                 llvm::ArrayRef<uint64_t> keys) -> HashState;
+  static auto RotState(HashState hash) -> HashState;
 
   static auto HashSizedBytesLarge(HashState hash, llvm::ArrayRef<std::byte> bytes)
       -> HashState;
@@ -340,25 +337,28 @@ inline auto HashState::HashOne(HashState hash, uint64_t data) -> HashState {
   return hash;
 }
 
-inline auto HashState::HashTwoImpl(HashState hash, uint64_t data0, uint64_t data1,
-                                           llvm::ArrayRef<uint64_t> keys)
-    -> HashState {
-  uint64_t combined = Mix(data0 ^ keys[1], data1 ^ keys[3]);
-  // Note that AHash applies a rotation to this. Instead, we defer that rotation
-  // to a separate `MixState` step for use in the places that require it.
-  // This improves the latency of applications of this routine where the rotate
-  // adds little value.
-  hash.buffer = (hash.buffer + keys[2]) ^ combined;
-  return hash;
-}
-
 inline auto HashState::HashTwo(HashState hash, uint64_t data0, uint64_t data1)
     -> HashState {
-  hash = HashTwoImpl(std::move(hash), data0, data1, RandomData);
+  // When hashing two chunks of data at the same time, we mask it with two
+  // unstable keys to avoid any crafted inputs from creating collisions. This
+  // isn't as strong as masking with the current buffer but still provides some
+  // resistance to crafted inputs and matches what AHash uses. However, we don't
+  // use *consecutive* keys to avoid a common compiler "optimization" of loading
+  // both 64-bit chunks into a 128-bit vector and doing the XOR in the vector
+  // unit. The latency of extracting the data afterward eclipses any benefit.
+  // Callers will routinely have two consecutive data values here, but using
+  // non-consecutive keys avoids any vectorization being tempting.
+  uint64_t combined = Mix(data0 ^ RandomData[1], data1 ^ RandomData[3]);
+  // Note that AHash applies a rotation to this. Instead, we defer that rotation
+  // to a separate `MixState` step for use in the very few places that seem to
+  // benefit from it. This improves the latency of applications of this routine
+  // where the rotate adds little value.
+  //hash.buffer = (hash.buffer + RandomData[2]) ^ combined;
+  hash.buffer ^= combined;
   return hash;
 }
 
-inline auto HashState::MixState(HashState hash) -> HashState {
+inline auto HashState::RotState(HashState hash) -> HashState {
   // Rotating the buffer helps repeated hashing mix more of the state, but is
   // especially cheap (and harmless) in single applications as it pipelines well
   // with memory accesses and the multiply of new data. The rotation amount of
@@ -374,12 +374,16 @@ inline auto HashState::HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> 
   const ssize_t size = bytes.size();
 
   // First handle short sequences under 8 bytes.
+  if (LLVM_UNLIKELY(size == 0)) {
+    hash = HashOne(std::move(hash), 0);
+    return hash;
+  }
   if (size <= 8) {
-    uint64_t data0 = 0;
+    uint64_t data;
     if (size >= 4) {
-      data0 = Read4To8(data_ptr, size);
-    } else if (size > 0) {
-      data0 = Read1To3(data_ptr, size);
+      data = Read4To8(data_ptr, size);
+    } else {
+      data = Read1To3(data_ptr, size);
     }
     // We optimize for latency on short strings by hashing both the data and
     // size in a single multiply here. This results in a *statistically* weak
@@ -395,17 +399,25 @@ inline auto HashState::HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> 
     // We opt to make the same tradeoff here for small sized strings that both
     // this library and Abseil make for *fixed* size integers by using a weaker
     // single round of multiplicative hashing.
-    hash = HashTwo(std::move(hash), data0, size << 32);
-    //hash = HashOne(std::move(hash), data0);
-    //hash = HashOne(std::move(hash), size);
+    __asm volatile("# LLVM-MCA-BEGIN 8b-sized-hash":::"memory");
+    hash.buffer = Mix(data ^ hash.buffer, RandomData[size - 1]);
+    __asm volatile("# LLVM-MCA-END":::"memory");
     return hash;
   }
 
   if (LLVM_LIKELY(size <= 16)) {
     auto data = Read8To16(data_ptr, size);
-    hash = HashTwo(std::move(hash), data.first, data.second);
-    hash = MixState(std::move(hash));
-    hash = HashOne(std::move(hash), size);
+    __asm volatile("# LLVM-MCA-BEGIN 16b-sized-hash":::"memory");
+    #if 0
+    uint64_t combined =
+        Mix(data.first ^ RandomData[1], data.second ^ RandomData[3]);
+    hash.buffer = Mix(combined, size ^ hash.buffer);
+    #else
+    uint64_t combined = Mix(data.first ^ RandomData[(size - 1) >> 1],
+                            data.second ^ RandomData[(size - 1) & 0b11]);
+    hash.buffer ^= combined;
+    #endif
+    __asm volatile("# LLVM-MCA-END":::"memory");
     return hash;
   }
 
@@ -441,19 +453,25 @@ inline auto HashState::Hash(HashState hash, const T& value) -> HashState {
   // function of the type and we're hashing to distinguish different values of
   // the same type. So we just dispatch to the fastest path for the specific size in question.
   if constexpr (sizeof(T) <= 8) {
-    return HashOne(std::move(hash), ReadSmall(value));
+    //__asm volatile("# LLVM-MCA-BEGIN 8b-hash":::"memory");
+    hash = HashOne(std::move(hash), ReadSmall(value));
+    //__asm volatile("# LLVM-MCA-END":::"memory");
+    return hash;
   }
   
   const auto* storage = reinterpret_cast<const std::byte*>(&value);
   if constexpr (8 < sizeof(T) && sizeof(T) <= 16) {
+    //__asm volatile("# LLVM-MCA-BEGIN 16b-hash":::"memory");
     auto values = Read8To16(storage, sizeof(T));
-    return HashTwo(std::move(hash), values.first, values.second);
+    hash = HashTwo(std::move(hash), values.first, values.second);
+    //__asm volatile("# LLVM-MCA-END":::"memory");
+    return hash;
   }
 
   // Hashing the size isn't relevant here, but is harmless, so fall back to a
   // common code path.
-  return HashSizedBytes(std::move(hash),
-                        llvm::ArrayRef<std::byte>(storage, sizeof(T)));
+  return HashSizedBytesLarge(std::move(hash),
+                             llvm::ArrayRef<std::byte>(storage, sizeof(T)));
 }
 
 template <typename T, typename U, typename /*enable_if*/>

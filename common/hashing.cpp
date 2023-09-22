@@ -14,14 +14,14 @@ namespace Carbon {
 
 // Random data taken from the hexadecimal digits of Pi's fractional component,
 // written in lexical order for convenience of reading. The resulting
-// byte-stream will be different due to little-endian integers. This can be
-// generated with the following shell script:
+// byte-stream will be different due to little-endian integers. The initializers
+// here can be generated with the following shell script:
 //
 // ```sh
 // echo 'obase=16; scale=154; 4*a(1)' | env BC_LINE_LENGTH=132 bc -l \
-  //  | cut -c 3- | tr '[:upper:]' '[:lower:]' \
-  //  | sed -e "s/.\{4\}/&'/g" \
-  //  | sed -e "s/\(.\{4\}'.\{4\}'.\{4\}'.\{4\}\)'/0x\1,\n/g"
+//  | cut -c 3- | tr '[:upper:]' '[:lower:]' \
+//  | sed -e "s/.\{4\}/&'/g" \
+//  | sed -e "s/\(.\{4\}'.\{4\}'.\{4\}'.\{4\}\)'/0x\1,\n/g"
 // ```
 static constexpr std::array<uint64_t, 8> StaticRandomData = {
     0x243f'6a88'85a3'08d3, 0x1319'8a2e'0370'7344, 0xa409'3822'299f'31d0,
@@ -56,30 +56,23 @@ auto HashState::ComputeRandomData() -> std::array<uint64_t, 8> {
   HashState::global_variable = 1;
   local_variable = 2;
 
+  // Compute hashes to provide a rough RNG seeded by the ASLR entropy above.
+  // This code manually mixes the initial state buffer with statically computed
+  // data. We can then use the `HashOne` routine that doesn't depend on this
+  // random data.
   HashState seed_hash;
-  seed_hash.buffer = StaticRandomData[0];
-
-  // Compute hashes to provide a rough RNG seeded by the ASLR above.
-  seed_hash = HashTwoImpl(std::move(seed_hash), global_address,
-                               local_address, StaticRandomData);
+  seed_hash.buffer = Mix(global_address ^ StaticRandomData[0],
+                                local_address ^ StaticRandomData[2]);
   // Each round of hashing past this should mix the bits more completely, and
-  // the most important one is the first entry that we use as the initial seed
-  // so initialize the data in reverse order.
-  data[7] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
-  seed_hash = HashOne(std::move(seed_hash), global_address);
-  data[6] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
-  seed_hash = HashOne(std::move(seed_hash), local_address);
-  data[5] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
-  seed_hash = HashOne(std::move(seed_hash), global_address);
-  data[4] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
-  seed_hash = HashOne(std::move(seed_hash), local_address);
-  data[3] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
-  seed_hash = HashOne(std::move(seed_hash), global_address);
-  data[2] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
-  seed_hash = HashOne(std::move(seed_hash), local_address);
-  data[1] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
-  seed_hash = HashOne(std::move(seed_hash), global_address);
-  data[0] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  // the most important one is at index 0 as we use that as the initial seed so
+  // initialize the data in reverse order.
+  for (int i : llvm::reverse(llvm::seq(data.size()))) {
+    seed_hash = RotState(std::move(seed_hash));
+    seed_hash = HashOne(
+        std::move(seed_hash),
+        ((i & 1) ? global_address : local_address) ^ StaticRandomData[i]);
+    data[i] = static_cast<uint64_t>(static_cast<HashCode>(seed_hash));
+  }
 
   return data;
 }
@@ -89,10 +82,9 @@ auto HashState::HashSizedBytesLarge(HashState hash, llvm::ArrayRef<std::byte> by
   const std::byte* data_ptr = bytes.data();
   const ssize_t size = bytes.size();
   CARBON_DCHECK(size > 16);
-
-  __builtin_prefetch(data_ptr, 0, 0);
-#if 1
   const std::byte* tail_ptr = data_ptr + (size - 16);
+  
+  __builtin_prefetch(data_ptr, 0, 0);
 
   if (size > 64) {
     // If we have more than 64 bytes, we're going to handle chunks of 64 bytes
@@ -105,9 +97,8 @@ auto HashState::HashSizedBytesLarge(HashState hash, llvm::ArrayRef<std::byte> by
     uint64_t buffer1 = hash.buffer;
     const std::byte* end_ptr = data_ptr + (size - 64);
     do {
-      // Always prefetch the next cacheline.
+      // Prefetch the next cacheline.
       __builtin_prefetch(data_ptr + 64, 0, 0);
-      //PrefetchToLocalCache(ptr + ABSL_CACHELINE_SIZE);
 
       uint64_t a = Read8(data_ptr);
       uint64_t b = Read8(data_ptr + 8);
@@ -129,83 +120,16 @@ auto HashState::HashSizedBytesLarge(HashState hash, llvm::ArrayRef<std::byte> by
     } while (data_ptr < end_ptr);
 
     hash.buffer = buffer0 ^ buffer1;
-    hash = MixState(std::move(hash));
   }
 
   while (data_ptr < tail_ptr) {
     hash = HashTwo(std::move(hash), Read8(data_ptr), Read8(data_ptr + 8));
-    hash = MixState(std::move(hash));
+    hash = RotState(std::move(hash));
     data_ptr += 16;
   }
   hash = HashTwo(std::move(hash), Read8(tail_ptr), Read8(tail_ptr + 8));
-  hash = MixState(std::move(hash));
+  hash = RotState(std::move(hash));
   hash = HashOne(std::move(hash), size);
-#else
-  hash.buffer ^= RandomData[0];
-
-  if (bytes.size() > 64) {
-    // If we have more than 64 bytes, we're going to handle chunks of 64
-    // bytes at a time. We're going to build up two separate hash states
-    // which we will then hash together.
-    uint64_t duplicated_state = hash.buffer;
-
-    do {
-      // Always prefetch the next cacheline.
-      __builtin_prefetch(bytes.data() + 64, 0, 0);
-      //PrefetchToLocalCache(ptr + ABSL_CACHELINE_SIZE);
-
-      uint64_t a = Read8(bytes.data());
-      uint64_t b = Read8(bytes.data() + 8);
-      uint64_t c = Read8(bytes.data() + 16);
-      uint64_t d = Read8(bytes.data() + 24);
-      uint64_t e = Read8(bytes.data() + 32);
-      uint64_t f = Read8(bytes.data() + 40);
-      uint64_t g = Read8(bytes.data() + 48);
-      uint64_t h = Read8(bytes.data() + 56);
-
-      uint64_t cs0 = Mix(a ^ RandomData[1], b ^ hash.buffer);
-      uint64_t cs1 = Mix(c ^ RandomData[2], d ^ hash.buffer);
-      hash.buffer = (cs0 ^ cs1);
-
-      uint64_t ds0 = Mix(e ^ RandomData[3], f ^ duplicated_state);
-      uint64_t ds1 = Mix(g ^ RandomData[4], h ^ duplicated_state);
-      duplicated_state = (ds0 ^ ds1);
-
-      bytes = bytes.drop_front(64);
-    } while (bytes.size() > 64);
-
-    hash.buffer ^= duplicated_state;
-  }
-
-  // We now have a data `ptr` with at most 64 bytes and the current state
-  // of the hashing state machine stored in current_state.
-  while (bytes.size() > 16) {
-    uint64_t a = Read8(bytes.data());
-    uint64_t b = Read8(bytes.data() + 8);
-
-    hash.buffer = Mix(a ^ RandomData[1], b ^ hash.buffer);
-    bytes = bytes.drop_front(16);
-  }
-
-  // We now have a data `ptr` with at most 16 bytes.
-  uint64_t a = 0;
-  uint64_t b = 0;
-  if (bytes.size() > 8) {
-    std::tie(a, b) = Read8To16(bytes.data(), bytes.size());
-  } else if (bytes.size() > 3) {
-    a = Read4To8(bytes.data(), bytes.size());
-  } else if (bytes.size() > 0) {
-    a = Read1To3(bytes.data(), bytes.size());
-    b = 0;
-  } else {
-    a = 0;
-    b = 0;
-  }
-
-  uint64_t w = Mix(a ^ RandomData[5], b ^ hash.buffer);
-  uint64_t z = RandomData[6] ^ size;
-  hash.buffer = Mix(w, z);
-#endif
   return hash;
 }
 
