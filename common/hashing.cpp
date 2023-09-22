@@ -48,7 +48,8 @@ auto HashState::ComputeRandomData() -> std::array<uint64_t, 8> {
   //
   // We use the address of a global variable with linkage, as well as the
   // address of a stack variable to find ASLR entropy.
-  auto global_address = reinterpret_cast<uintptr_t>(&HashState::global_variable);
+  auto global_address =
+      reinterpret_cast<uintptr_t>(&HashState::global_variable);
   volatile char local_variable;
   auto local_address = reinterpret_cast<uintptr_t>(&local_variable);
 
@@ -62,7 +63,7 @@ auto HashState::ComputeRandomData() -> std::array<uint64_t, 8> {
   // random data.
   HashState seed_hash;
   seed_hash.buffer = Mix(global_address ^ StaticRandomData[0],
-                                local_address ^ StaticRandomData[2]);
+                         local_address ^ StaticRandomData[2]);
   // Each round of hashing past this should mix the bits more completely, and
   // the most important one is at index 0 as we use that as the initial seed so
   // initialize the data in reverse order.
@@ -77,13 +78,14 @@ auto HashState::ComputeRandomData() -> std::array<uint64_t, 8> {
   return data;
 }
 
-auto HashState::HashSizedBytesLarge(HashState hash, llvm::ArrayRef<std::byte> bytes)
+auto HashState::HashSizedBytesLarge(HashState hash,
+                                    llvm::ArrayRef<std::byte> bytes)
     -> HashState {
   const std::byte* data_ptr = bytes.data();
   const ssize_t size = bytes.size();
   CARBON_DCHECK(size > 16);
   const std::byte* tail_ptr = data_ptr + (size - 16);
-  
+
   __builtin_prefetch(data_ptr, 0, 0);
 
   if (size > 64) {

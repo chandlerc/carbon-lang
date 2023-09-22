@@ -126,7 +126,7 @@ inline auto HashValue(const T& value, HashCode seed) -> HashCode;
 namespace SMHasher {
 auto HashTest(const void* key, int len, uint32_t seed, void* out) -> void;
 auto SizedHashTest(const void* key, int len, uint32_t seed, void* out) -> void;
-}
+}  // namespace SMHasher
 
 // Accumulator for hash state that eventually produces a hash code.
 //
@@ -138,7 +138,7 @@ auto SizedHashTest(const void* key, int len, uint32_t seed, void* out) -> void;
 // instantiate a state object. Customization points should simply use methods to
 // update it.
 class HashState {
-public:
+ public:
   HashState(HashState&& arg) = default;
   HashState(const HashState& arg) = delete;
   auto operator=(HashState&& rhs) -> HashState& = default;
@@ -172,8 +172,10 @@ public:
   template <typename T>
   friend auto HashValue(const T& value) -> HashCode;
   friend auto HashValue(llvm::StringRef s, HashCode seed) -> HashCode;
-  friend auto SMHasher::HashTest(const void* key, int len, uint32_t seed, void* out) -> void;
-  friend auto SMHasher::SizedHashTest(const void* key, int len, uint32_t seed, void* out) -> void;
+  friend auto SMHasher::HashTest(const void* key, int len, uint32_t seed,
+                                 void* out) -> void;
+  friend auto SMHasher::SizedHashTest(const void* key, int len, uint32_t seed,
+                                      void* out) -> void;
 
   static auto Read1(const std::byte* data) -> uint64_t;
   static auto Read2(const std::byte* data) -> uint64_t;
@@ -194,11 +196,10 @@ public:
 
   static auto RotState(HashState hash) -> HashState;
 
-  static auto HashSizedBytesLarge(HashState hash, llvm::ArrayRef<std::byte> bytes)
-      -> HashState;
+  static auto HashSizedBytesLarge(HashState hash,
+                                  llvm::ArrayRef<std::byte> bytes) -> HashState;
 
-  explicit HashState(HashCode seed)
-      : buffer(static_cast<uint64_t>(seed)) {}
+  explicit HashState(HashCode seed) : buffer(static_cast<uint64_t>(seed)) {}
 
   HashState() = default;
 
@@ -221,16 +222,17 @@ public:
 
 namespace Detail {
 
-inline auto CarbonHash(HashState hash, llvm::ArrayRef<std::byte> bytes) -> HashState {
-  //hash.UpdateSize(bytes.size());
+inline auto CarbonHash(HashState hash, llvm::ArrayRef<std::byte> bytes)
+    -> HashState {
   hash = HashState::HashSizedBytes(std::move(hash), bytes);
   return hash;
 }
 
 inline auto CarbonHash(HashState hash, llvm::StringRef value) -> HashState {
-  return CarbonHash(std::move(hash), llvm::ArrayRef<std::byte>(
-                              reinterpret_cast<const std::byte*>(value.data()),
-                              value.size()));
+  return CarbonHash(
+      std::move(hash),
+      llvm::ArrayRef<std::byte>(
+          reinterpret_cast<const std::byte*>(value.data()), value.size()));
 }
 
 template <typename T, typename U,
@@ -250,8 +252,7 @@ static_assert(std::has_unique_object_representations_v<int64_t>);
 
 template <typename T, typename = std::enable_if_t<
                           std::has_unique_object_representations_v<T>>>
-inline auto CarbonHash(HashState hash, const T& value)
-    -> HashState {
+inline auto CarbonHash(HashState hash, const T& value) -> HashState {
   return HashState::Hash(std::move(hash), value);
 }
 
@@ -273,31 +274,32 @@ inline auto HashValue(const T& value) -> HashCode {
   return HashValue(value, HashCode(HashState::RandomData[0]));
 }
 
-inline auto HashState::Read1(const std::byte *data) -> uint64_t {
+inline auto HashState::Read1(const std::byte* data) -> uint64_t {
   uint8_t result;
   std::memcpy(&result, data, sizeof(result));
   return result;
 }
 
-inline auto HashState::Read2(const std::byte *data) -> uint64_t {
+inline auto HashState::Read2(const std::byte* data) -> uint64_t {
   uint16_t result;
   std::memcpy(&result, data, sizeof(result));
   return result;
 }
 
-inline auto HashState::Read4(const std::byte *data) -> uint64_t {
+inline auto HashState::Read4(const std::byte* data) -> uint64_t {
   uint32_t result;
   std::memcpy(&result, data, sizeof(result));
   return result;
 }
 
-inline auto HashState::Read8(const std::byte *data) -> uint64_t {
+inline auto HashState::Read8(const std::byte* data) -> uint64_t {
   uint64_t result;
   std::memcpy(&result, data, sizeof(result));
   return result;
 }
 
-inline auto HashState::Read1To3(const std::byte *data, ssize_t size) -> uint64_t {
+inline auto HashState::Read1To3(const std::byte* data, ssize_t size)
+    -> uint64_t {
   // Use carefully crafted indexing to avoid branches on the exact size while
   // reading.
   uint64_t byte0 = static_cast<uint8_t>(data[0]);
@@ -306,7 +308,8 @@ inline auto HashState::Read1To3(const std::byte *data, ssize_t size) -> uint64_t
   return byte0 | (byte1 << 16) | (byte2 << 8);
 }
 
-inline auto HashState::Read4To8(const std::byte *data, ssize_t size) -> uint64_t {
+inline auto HashState::Read4To8(const std::byte* data, ssize_t size)
+    -> uint64_t {
   uint32_t low;
   std::memcpy(&low, data, sizeof(low));
   uint32_t high;
@@ -349,11 +352,12 @@ inline auto HashState::HashTwo(HashState hash, uint64_t data0, uint64_t data1)
   // Callers will routinely have two consecutive data values here, but using
   // non-consecutive keys avoids any vectorization being tempting.
   uint64_t combined = Mix(data0 ^ RandomData[1], data1 ^ RandomData[3]);
-  // Note that AHash applies a rotation to this. Instead, we defer that rotation
-  // to a separate `MixState` step for use in the very few places that seem to
-  // benefit from it. This improves the latency of applications of this routine
-  // where the rotate adds little value.
-  //hash.buffer = (hash.buffer + RandomData[2]) ^ combined;
+  // Note that AHash adds more random data to the incoming buffer and applies a
+  // rotation at the end. The addition doesn't seem to improve things much. The
+  // rotation is very impactful in long chains of hashing, but for short ones
+  // doesn't matter. This code separates the rotation out and lets chained code
+  // insert the rotation where needed. This improves the latency of applications
+  // of this routine where the rotate adds little value.
   hash.buffer ^= combined;
   return hash;
 }
@@ -368,7 +372,8 @@ inline auto HashState::RotState(HashState hash) -> HashState {
   return hash;
 }
 
-inline auto HashState::HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> bytes)
+inline auto HashState::HashSizedBytes(HashState hash,
+                                      llvm::ArrayRef<std::byte> bytes)
     -> HashState {
   const std::byte* data_ptr = bytes.data();
   const ssize_t size = bytes.size();
@@ -399,25 +404,25 @@ inline auto HashState::HashSizedBytes(HashState hash, llvm::ArrayRef<std::byte> 
     // We opt to make the same tradeoff here for small sized strings that both
     // this library and Abseil make for *fixed* size integers by using a weaker
     // single round of multiplicative hashing.
-    __asm volatile("# LLVM-MCA-BEGIN 8b-sized-hash":::"memory");
+    __asm volatile("# LLVM-MCA-BEGIN 8b-sized-hash" ::: "memory");
     hash.buffer = Mix(data ^ hash.buffer, RandomData[size - 1]);
-    __asm volatile("# LLVM-MCA-END":::"memory");
+    __asm volatile("# LLVM-MCA-END" ::: "memory");
     return hash;
   }
 
   if (LLVM_LIKELY(size <= 16)) {
     auto data = Read8To16(data_ptr, size);
-    __asm volatile("# LLVM-MCA-BEGIN 16b-sized-hash":::"memory");
-    #if 0
+    __asm volatile("# LLVM-MCA-BEGIN 16b-sized-hash" ::: "memory");
+#if 0
     uint64_t combined =
         Mix(data.first ^ RandomData[1], data.second ^ RandomData[3]);
     hash.buffer = Mix(combined, size ^ hash.buffer);
-    #else
+#else
     uint64_t combined = Mix(data.first ^ RandomData[(size - 1) >> 1],
                             data.second ^ RandomData[(size - 1) & 0b11]);
     hash.buffer ^= combined;
-    #endif
-    __asm volatile("# LLVM-MCA-END":::"memory");
+#endif
+    __asm volatile("# LLVM-MCA-END" ::: "memory");
     return hash;
   }
 
@@ -430,18 +435,18 @@ inline auto HashState::ReadSmall(const T& value) -> uint64_t {
   if constexpr (sizeof(T) == 1) {
     return Read1(storage);
   } else if constexpr (sizeof(T) == 2) {
-    return  Read2(storage);
+    return Read2(storage);
   } else if constexpr (sizeof(T) == 3) {
     return Read2(storage) | (Read1(&storage[2]) << 16);
   } else if constexpr (sizeof(T) == 4) {
-    return  Read4(storage);
+    return Read4(storage);
   } else if constexpr (sizeof(T) == 5) {
-    return  Read4(storage) | (Read1(&storage[4]) << 32);
+    return Read4(storage) | (Read1(&storage[4]) << 32);
   } else if constexpr (sizeof(T) == 6 || sizeof(T) == 7) {
     // Use overlapping 4-byte reads for 6 and 7 bytes.
-    return  Read4(storage) | (Read4(&storage[sizeof(T) - 4]) << 32);
+    return Read4(storage) | (Read4(&storage[sizeof(T) - 4]) << 32);
   } else if constexpr (sizeof(T) == 8) {
-    return  Read8(storage);
+    return Read8(storage);
   } else {
     static_assert(sizeof(T) <= 8);
   }
@@ -451,14 +456,15 @@ template <typename T, typename /*enable_if*/>
 inline auto HashState::Hash(HashState hash, const T& value) -> HashState {
   // We don't need the size to be part of the hash, as the size here is just a
   // function of the type and we're hashing to distinguish different values of
-  // the same type. So we just dispatch to the fastest path for the specific size in question.
+  // the same type. So we just dispatch to the fastest path for the specific
+  // size in question.
   if constexpr (sizeof(T) <= 8) {
     //__asm volatile("# LLVM-MCA-BEGIN 8b-hash":::"memory");
     hash = HashOne(std::move(hash), ReadSmall(value));
     //__asm volatile("# LLVM-MCA-END":::"memory");
     return hash;
   }
-  
+
   const auto* storage = reinterpret_cast<const std::byte*>(&value);
   if constexpr (8 < sizeof(T) && sizeof(T) <= 16) {
     //__asm volatile("# LLVM-MCA-BEGIN 16b-hash":::"memory");
@@ -478,10 +484,11 @@ template <typename T, typename U, typename /*enable_if*/>
 inline auto HashState::Hash(HashState hash, const std::pair<T, U>& value)
     -> HashState {
   if constexpr (sizeof(T) <= 8 && sizeof(U) <= 8) {
-    return HashTwo(std::move(hash), ReadSmall(value.first), ReadSmall(value.second));
+    return HashTwo(std::move(hash), ReadSmall(value.first),
+                   ReadSmall(value.second));
   } else {
     const auto* storage0 = reinterpret_cast<const std::byte*>(&value.first);
-    const auto* storage1 = reinterpret_cast<const std::byte*>(&value.second); 
+    const auto* storage1 = reinterpret_cast<const std::byte*>(&value.second);
     return HashSizedBytes(
         HashSizedBytes(std::move(hash),
                        llvm::ArrayRef<std::byte>(storage0, sizeof(T))),
@@ -493,7 +500,7 @@ inline auto HashState::Hash(HashState hash, const std::pair<T, U>& value)
 template <typename... Ts, typename /*enable_if*/>
 inline auto HashState::Hash(HashState hash, const std::tuple<Ts...>& value)
     -> HashState {
-  
+
 }
 #endif
 
