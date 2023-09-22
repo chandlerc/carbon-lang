@@ -7,18 +7,18 @@
 #include <algorithm>
 #include <cstddef>
 
+#include "absl/hash/hash.h"
 #include "absl/random/random.h"
+#include "common/check.h"
 #include "common/hashing.h"
 #include "llvm/ADT/Hashing.h"
-#include "absl/hash/hash.h"
-#include "common/check.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/StringExtras.h"
 
 namespace Carbon::Testing {
 namespace {
 
-// We want the benchmark working set ot fit in the L1 cache where possible so
+// We want the benchmark working set to fit in the L1 cache where possible so
 // that the benchmark focuses on the CPU-execution costs and not memory latency.
 // For most CPUs we're going to care about, 16k will fit easily, and 32k will
 // probably fit. But we also need to include sizes for string benchmarks. This
@@ -111,8 +111,7 @@ struct RandStrings {
 
 struct CarbonHasher {
   template <typename T>
-  __attribute__((noinline))
-  auto operator()(const T& value) -> uint64_t {
+  __attribute__((noinline)) auto operator()(const T& value) -> uint64_t {
     auto result = static_cast<uint64_t>(HashValue(value));
     return result;
   }
