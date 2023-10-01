@@ -78,6 +78,13 @@ auto HashState::ComputeRandomData() -> std::array<uint64_t, 8> {
   return data;
 }
 
+auto HashState::DumpRandomData() -> void {
+  llvm::errs() << "Random hashing state for this process:\n";
+  for (auto x : RandomData) {
+    llvm::errs() << "  " << llvm::formatv("{0:xd}", x) << "\n";
+  }
+}
+
 auto HashState::HashSizedBytesLarge(HashState hash,
                                     llvm::ArrayRef<std::byte> bytes)
     -> HashState {

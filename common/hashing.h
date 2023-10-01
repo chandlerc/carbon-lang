@@ -49,7 +49,7 @@ class HashCode : public Printable<HashCode> {
   friend auto HashValue(HashCode code) -> HashCode { return code; }
 
   auto Print(llvm::raw_ostream& out) const -> void {
-    out << llvm::formatv("{0:x}", value_);
+    out << llvm::formatv("{0:x16}", value_);
   }
 
  private:
@@ -166,6 +166,8 @@ class HashState {
 
   explicit operator HashCode() const { return HashCode(buffer); }
 
+  static auto DumpRandomData() -> void;
+
  private:
   template <typename T>
   friend auto HashValue(const T& value, HashCode seed) -> HashCode;
@@ -207,6 +209,12 @@ class HashState {
   // much as possible from execution to execution, but should be stable when
   // debugging or using ptrace (anything that fully stabilizes ASLR).
   static const std::array<uint64_t, 8> RandomData;
+
+  static constexpr std::array<uint64_t, 8> Primes = {
+      0xa2cc'5728'5aa3'6f15, 0xac34'2eed'8454'fc11, 0x8c09'ddc3'5ac4'a3eb,
+      0xcc61'97d7'3e83'dddf, 0xc68f'1314'293f'5b77, 0xadd3'daca'21f8'8fb5,
+      0x979a'170c'93b4'd209, 0x8446'a70c'9065'1a0f,
+  };
 
   // An empty global variable with linkage whose address is used.
   static volatile char global_variable;
@@ -405,7 +413,13 @@ inline auto HashState::HashSizedBytes(HashState hash,
     // this library and Abseil make for *fixed* size integers by using a weaker
     // single round of multiplicative hashing.
     __asm volatile("# LLVM-MCA-BEGIN 8b-sized-hash" ::: "memory");
-    hash.buffer = Mix(data ^ hash.buffer, RandomData[size - 1]);
+    #if 0
+    hash.buffer = Mix(data ^ hash.buffer, Primes[size - 1]);
+    #elif 1
+    hash.buffer ^= Mix(data ^ RandomData[size - 1], MulConstant);
+    #else
+    hash.buffer = Mix(data ^ hash.buffer, MulConstant) ^ RandomData[size - 1];
+    #endif
     __asm volatile("# LLVM-MCA-END" ::: "memory");
     return hash;
   }
@@ -416,7 +430,7 @@ inline auto HashState::HashSizedBytes(HashState hash,
 #if 0
     uint64_t combined =
         Mix(data.first ^ RandomData[1], data.second ^ RandomData[3]);
-    hash.buffer = Mix(combined, size ^ hash.buffer);
+    hash.buffer ^= Mix(combined ^ size, MulConstant);
 #else
     uint64_t combined = Mix(data.first ^ RandomData[(size - 1) >> 1],
                             data.second ^ RandomData[(size - 1) & 0b11]);
