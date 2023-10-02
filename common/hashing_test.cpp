@@ -6,6 +6,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
 #include <cstddef>
 #include <type_traits>
 
@@ -16,8 +17,8 @@ namespace Carbon::Testing {
 namespace {
 
 using ::testing::Eq;
-using ::testing::Ne;
 using ::testing::Le;
+using ::testing::Ne;
 
 class HashingTestEnvironment : public ::testing::Environment {
  public:
@@ -84,7 +85,8 @@ auto PrintFullWidthHex(llvm::raw_ostream& os, T value) {
 }
 
 template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
-auto operator<<(llvm::raw_ostream& os, HashedValue<T> hv) -> llvm::raw_ostream& {
+auto operator<<(llvm::raw_ostream& os, HashedValue<T> hv)
+    -> llvm::raw_ostream& {
   os << "hash " << hv.hash << " for value ";
   PrintFullWidthHex(os, hv.v);
   return os;
@@ -93,7 +95,8 @@ auto operator<<(llvm::raw_ostream& os, HashedValue<T> hv) -> llvm::raw_ostream& 
 template <typename T, typename U,
           typename = std::enable_if_t<std::is_integral_v<T>>,
           typename = std::enable_if_t<std::is_integral_v<U>>>
-auto operator<<(llvm::raw_ostream& os, HashedValue<std::pair<T, U>> hv) -> llvm::raw_ostream& {
+auto operator<<(llvm::raw_ostream& os, HashedValue<std::pair<T, U>> hv)
+    -> llvm::raw_ostream& {
   os << "hash " << hv.hash << " for pair of ";
   PrintFullWidthHex(os, hv.v.first);
   os << " and ";
@@ -108,7 +111,8 @@ struct Collisions {
 };
 
 template <int BitBegin, int BitEnd, typename T>
-auto FindBitRangeCollisions(llvm::ArrayRef<HashedValue<T>> hashes) -> Collisions {
+auto FindBitRangeCollisions(llvm::ArrayRef<HashedValue<T>> hashes)
+    -> Collisions {
   static_assert(BitBegin < BitEnd);
   constexpr int BitCount = BitEnd - BitBegin;
   static_assert(BitCount <= 32);
@@ -137,7 +141,8 @@ auto FindBitRangeCollisions(llvm::ArrayRef<HashedValue<T>> hashes) -> Collisions
   bool in_collision = false;
   int total = 0;
   int distinct_collisions = 0;
-  for (const auto& [hash_bits, hash_index] : llvm::ArrayRef(bits_and_indices).slice(1)) {
+  for (const auto& [hash_bits, hash_index] :
+       llvm::ArrayRef(bits_and_indices).slice(1)) {
     if (hash_bits != prev_hash_bits) {
       prev_hash_bits = hash_bits;
       prev_index = hash_index;
@@ -170,7 +175,8 @@ auto FindBitRangeCollisions(llvm::ArrayRef<HashedValue<T>> hashes) -> Collisions
                      collision_counts[collision_map[rhs.second]];
             });
 
-  int median = collision_counts[collision_map[bits_and_indices[bits_and_indices.size()/2].second]];
+  int median = collision_counts
+      [collision_map[bits_and_indices[bits_and_indices.size() / 2].second]];
   int max = collision_counts.back();
   return {.total = total, .median_per_hash = median, .max_per_hash = max};
 }
@@ -290,7 +296,8 @@ TEST(HashingTest, Collisions2ByteSized) {
 // Generate and hash all strings of of [BeginByteCount, EndByteCount) bytes,
 // with [BeginSetBitCount, EndSetBitCount) contiguous bits set to one and all
 // other bits set to zero.
-template <int BeginByteCount, int EndByteCount, int BeginSetBitCount, int EndSetBitCount>
+template <int BeginByteCount, int EndByteCount, int BeginSetBitCount,
+          int EndSetBitCount>
 struct SparseHashTestParamRanges {
   static_assert(BeginByteCount >= 0);
   static_assert(BeginByteCount < EndByteCount);
@@ -319,10 +326,11 @@ struct SparseHashTest : ::testing::Test {
     constexpr int SetBitCounts = SetBitCount::End - SetBitCount::Begin + 1;
     hashes.reserve(
         (static_cast<size_t>(ByteCounts * SetBitCounts * (ByteCounts * 8))));
-    for (int byte_count : llvm::seq_inclusive(ByteCount::Begin, ByteCount::End)) {
+    for (int byte_count :
+         llvm::seq_inclusive(ByteCount::Begin, ByteCount::End)) {
       int bits = byte_count * 8;
-      for (int set_bit_count :
-           llvm::seq_inclusive(SetBitCount::Begin, std::min(bits, SetBitCount::End))) {
+      for (int set_bit_count : llvm::seq_inclusive(
+               SetBitCount::Begin, std::min(bits, SetBitCount::End))) {
         if (set_bit_count == 0) {
           std::string s(byte_count, '\0');
           hashes.push_back({HashValue(s), std::move(s)});

@@ -413,13 +413,13 @@ inline auto HashState::HashSizedBytes(HashState hash,
     // this library and Abseil make for *fixed* size integers by using a weaker
     // single round of multiplicative hashing.
     __asm volatile("# LLVM-MCA-BEGIN 8b-sized-hash" ::: "memory");
-    #if 0
+#if 0
     hash.buffer = Mix(data ^ hash.buffer, Primes[size - 1]);
-    #elif 1
+#elif 1
     hash.buffer ^= Mix(data ^ RandomData[size - 1], MulConstant);
-    #else
+#else
     hash.buffer = Mix(data ^ hash.buffer, MulConstant) ^ RandomData[size - 1];
-    #endif
+#endif
     __asm volatile("# LLVM-MCA-END" ::: "memory");
     return hash;
   }
