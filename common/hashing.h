@@ -19,7 +19,6 @@
 #include "common/check.h"
 #include "common/ostream.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLForwardCompat.h"
@@ -35,18 +34,18 @@ class HashCode : public Printable<HashCode> {
  public:
   HashCode() = default;
 
-  explicit HashCode(uint64_t value) : value_(value) {}
+  constexpr explicit HashCode(uint64_t value) : value_(value) {}
 
-  explicit operator uint64_t() const { return value_; }
+  constexpr explicit operator uint64_t() const { return value_; }
 
-  friend auto operator==(HashCode lhs, HashCode rhs) -> bool {
+  friend constexpr auto operator==(HashCode lhs, HashCode rhs) -> bool {
     return lhs.value_ == rhs.value_;
   }
-  friend auto operator!=(HashCode lhs, HashCode rhs) -> bool {
+  friend constexpr auto operator!=(HashCode lhs, HashCode rhs) -> bool {
     return lhs.value_ != rhs.value_;
   }
 
-  friend auto HashValue(HashCode code) -> HashCode { return code; }
+  friend auto CarbonHashValue(HashCode code) -> HashCode { return code; }
 
   auto Print(llvm::raw_ostream& out) const -> void {
     out << llvm::formatv("{0:x16}", value_);
@@ -208,13 +207,8 @@ class HashState {
   // Random data that will be initialized on program start. This will vary as
   // much as possible from execution to execution, but should be stable when
   // debugging or using ptrace (anything that fully stabilizes ASLR).
+  static const std::array<uint64_t, 16> StaticRandomData;
   static const std::array<uint64_t, 8> RandomData;
-
-  static constexpr std::array<uint64_t, 8> Primes = {
-      0xa2cc'5728'5aa3'6f15, 0xac34'2eed'8454'fc11, 0x8c09'ddc3'5ac4'a3eb,
-      0xcc61'97d7'3e83'dddf, 0xc68f'1314'293f'5b77, 0xadd3'daca'21f8'8fb5,
-      0x979a'170c'93b4'd209, 0x8446'a70c'9065'1a0f,
-  };
 
   // An empty global variable with linkage whose address is used.
   static volatile char global_variable;
@@ -344,6 +338,9 @@ inline auto HashState::Mix(uint64_t lhs, uint64_t rhs) -> uint64_t {
 }
 
 inline auto HashState::HashOne(HashState hash, uint64_t data) -> HashState {
+  // When hashing exactly one 64-bit entity use the Phi-derived constant as this
+  // is just multiplicative hashing. The initial buffer is mixed on input to
+  // pipeline with materializing the constant.
   hash.buffer = Mix(data ^ hash.buffer, MulConstant);
   return hash;
 }
@@ -359,23 +356,30 @@ inline auto HashState::HashTwo(HashState hash, uint64_t data0, uint64_t data1)
   // unit. The latency of extracting the data afterward eclipses any benefit.
   // Callers will routinely have two consecutive data values here, but using
   // non-consecutive keys avoids any vectorization being tempting.
-  uint64_t combined = Mix(data0 ^ RandomData[1], data1 ^ RandomData[3]);
+  //
   // Note that AHash adds more random data to the incoming buffer and applies a
   // rotation at the end. The addition doesn't seem to improve things much. The
   // rotation is very impactful in long chains of hashing, but for short ones
   // doesn't matter. This code separates the rotation out and lets chained code
   // insert the rotation where needed. This improves the latency of applications
   // of this routine where the rotate adds little value.
-  hash.buffer ^= combined;
+  //
+  // We XOR both the incoming state and a random word over the first data. This
+  // is done to pipeline with materializing the constants and is observed to
+  // have better performance than XOR-ing after the mix.
+#if 1
+  hash.buffer = Mix(hash.buffer ^ data0 ^ StaticRandomData[1],
+                    data1 ^ StaticRandomData[3]);
+#else
+  hash.buffer ^= Mix(data0 ^ StaticRandomData[1], data1 ^ StaticRandomData[3]);
+#endif
   return hash;
 }
 
 inline auto HashState::RotState(HashState hash) -> HashState {
-  // Rotating the buffer helps repeated hashing mix more of the state, but is
-  // especially cheap (and harmless) in single applications as it pipelines well
-  // with memory accesses and the multiply of new data. The rotation amount of
-  // `53` is arbitrarily chosen to match the amount found useful in ML-based
-  // experiments on Abseil's hash function.
+  // Rotating the buffer helps repeated hashing mix more of the state. The
+  // rotation amount of `53` is arbitrarily chosen to match the amount found
+  // useful in ML-based experiments on Abseil's hash function.
   hash.buffer = llvm::rotr(hash.buffer, 53);
   return hash;
 }
@@ -413,10 +417,16 @@ inline auto HashState::HashSizedBytes(HashState hash,
     // this library and Abseil make for *fixed* size integers by using a weaker
     // single round of multiplicative hashing.
     __asm volatile("# LLVM-MCA-BEGIN 8b-sized-hash" ::: "memory");
-#if 0
-    hash.buffer = Mix(data ^ hash.buffer, Primes[size - 1]);
+#if 1
+    // The primary goal with short string hashing is *latency*, and this routine
+    // optimizes heavily for it over quality. The incoming buffer is XOR-ed on
+    // the data to overlap the latency of loading a size-dependent constant for
+    // the multiplication. Having 8 constants available and selecting them with
+    // the size helps incorporate the size in an extremely low-latency fashion
+    // without dramatic compromises of hash quality.
+    hash.buffer = Mix(data ^ hash.buffer, StaticRandomData[size - 1]);
 #elif 1
-    hash.buffer ^= Mix(data ^ RandomData[size - 1], MulConstant);
+    hash.buffer ^= Mix(data ^ StaticRandomData[size - 1], MulConstant);
 #else
     hash.buffer = Mix(data ^ hash.buffer, MulConstant) ^ RandomData[size - 1];
 #endif
@@ -424,17 +434,44 @@ inline auto HashState::HashSizedBytes(HashState hash,
     return hash;
   }
 
-  if (LLVM_LIKELY(size <= 16)) {
-    auto data = Read8To16(data_ptr, size);
+  if (size <= 16) {
     __asm volatile("# LLVM-MCA-BEGIN 16b-sized-hash" ::: "memory");
-#if 0
-    uint64_t combined =
-        Mix(data.first ^ RandomData[1], data.second ^ RandomData[3]);
-    hash.buffer ^= Mix(combined ^ size, MulConstant);
+    auto data = Read8To16(data_ptr, size);
+    // Similar to the above, we optimize primarily for latency here. One complex
+    // tradeoff is the working-set size. Above we only use a single cache line
+    // to encode the size, but here we pull from a 128-byte table. However it
+    // results in dramatically smaller code footprint and so may still be a net
+    // benefit compared to other approaches of incorporating both the size and
+    // 16-bytes of data into the result. A variation with larger code-size but
+    // only using a 64-byte table is included for benchmarking.
+#if 1
+    hash.buffer = Mix(hash.buffer ^ data.first,
+                      data.second ^ StaticRandomData[(size - 1)]);
 #else
-    uint64_t combined = Mix(data.first ^ RandomData[(size - 1) >> 1],
-                            data.second ^ RandomData[(size - 1) & 0b11]);
-    hash.buffer ^= combined;
+    hash.buffer =
+        Mix(hash.buffer ^ StaticRandomData[(size - 1) >> 1] ^ data.first,
+            data.second ^ StaticRandomData[(size - 1) & 0b11]);
+#endif
+    __asm volatile("# LLVM-MCA-END" ::: "memory");
+    return hash;
+  }
+
+  if (size <= 32) {
+    __asm volatile("# LLVM-MCA-BEGIN 32b-sized-hash" ::: "memory");
+#if 1
+    // Do two mixes of overlapping 16-byte ranges in parallel to minimize
+    // latency. The mix also needn't be *that* good as we'll do another round of
+    // mixing with the size.
+    const std::byte* tail_16b_ptr = data_ptr + (size - 16);
+    uint64_t m0 = Mix(Read8(data_ptr) ^ StaticRandomData[1],
+                      Read8(data_ptr + 8) ^ hash.buffer);
+    // Rotate one arm of the mix. See the comments in `RotState` for details,
+    // this is done manually to only one side to let it pipeline better.
+    m0 = llvm::rotr(m0, 53);
+    uint64_t m1 = Mix(Read8(tail_16b_ptr) ^ StaticRandomData[3],
+                      Read8(tail_16b_ptr + 8) ^ hash.buffer);
+    hash.buffer = m0 ^ m1;
+    hash = HashOne(std::move(hash), size);
 #endif
     __asm volatile("# LLVM-MCA-END" ::: "memory");
     return hash;
@@ -479,19 +516,34 @@ inline auto HashState::Hash(HashState hash, const T& value) -> HashState {
     return hash;
   }
 
-  const auto* storage = reinterpret_cast<const std::byte*>(&value);
+  const auto* data_ptr = reinterpret_cast<const std::byte*>(&value);
   if constexpr (8 < sizeof(T) && sizeof(T) <= 16) {
     //__asm volatile("# LLVM-MCA-BEGIN 16b-hash":::"memory");
-    auto values = Read8To16(storage, sizeof(T));
+    auto values = Read8To16(data_ptr, sizeof(T));
     hash = HashTwo(std::move(hash), values.first, values.second);
     //__asm volatile("# LLVM-MCA-END":::"memory");
+    return hash;
+  }
+
+  if constexpr (16 < sizeof(T) && sizeof(T) <= 32) {
+    // Do two mixes of overlapping 16-byte ranges in parallel to minimize
+    // latency.
+    const std::byte* tail_16b_ptr = data_ptr + (sizeof(T) - 16);
+    uint64_t m0 = Mix(Read8(data_ptr) ^ StaticRandomData[1],
+                      Read8(data_ptr + 8) ^ hash.buffer);
+    // Rotate one arm of the mix. See the comments in `RotState` for details,
+    // this is done manually to only one side to let it pipeline better.
+    m0 = llvm::rotr(m0, 53);
+    uint64_t m1 = Mix(Read8(tail_16b_ptr) ^ StaticRandomData[3],
+                      Read8(tail_16b_ptr + 8) ^ hash.buffer);
+    hash.buffer = m0 ^ m1;
     return hash;
   }
 
   // Hashing the size isn't relevant here, but is harmless, so fall back to a
   // common code path.
   return HashSizedBytesLarge(std::move(hash),
-                             llvm::ArrayRef<std::byte>(storage, sizeof(T)));
+                             llvm::ArrayRef<std::byte>(data_ptr, sizeof(T)));
 }
 
 template <typename T, typename U, typename /*enable_if*/>

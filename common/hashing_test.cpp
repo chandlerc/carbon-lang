@@ -20,16 +20,10 @@ using ::testing::Eq;
 using ::testing::Le;
 using ::testing::Ne;
 
-class HashingTestEnvironment : public ::testing::Environment {
- public:
-  void SetUp() override {
-    // Print the random data for this process once to aid in debugging failures.
-    HashState::DumpRandomData();
-  }
-};
-
-auto* register_environment =
-    ::testing::AddGlobalTestEnvironment(new HashingTestEnvironment);
+// The only significantly bad seed is zero, so pick a non-zero seed with a tiny
+// amount of entropy to make sure that none of the testing relies on the entropy
+// from this.
+constexpr HashCode test_seed = HashCode(42 * 1024);
 
 TEST(HashingTest, BasicStrings) {
   llvm::SmallVector<std::pair<std::string, HashCode>> hashes;
@@ -161,7 +155,7 @@ auto FindBitRangeCollisions(llvm::ArrayRef<HashedValue<T>> hashes)
     collision_counts.push_back(1);
 
     ++distinct_collisions;
-    if (distinct_collisions < 10) {
+    if (0 && distinct_collisions < 10) {
       llvm::errs() << "Hash mask " << llvm::formatv("{0:x16}", BitMask)
                    << " collision: " << hashes[prev_index] << " vs. "
                    << hashes[hash_index] << "\n";
@@ -193,7 +187,7 @@ auto AllByteStringsHashedAndSorted() {
       bytes[j] = (static_cast<uint64_t>(i) >> (8 * j)) & 0xff;
     }
     std::string s(std::begin(bytes), std::end(bytes));
-    hashes.push_back({HashValue(s), s});
+    hashes.push_back({HashValue(s, test_seed), s});
   }
 
   std::sort(hashes.begin(), hashes.end(),
@@ -333,7 +327,7 @@ struct SparseHashTest : ::testing::Test {
                SetBitCount::Begin, std::min(bits, SetBitCount::End))) {
         if (set_bit_count == 0) {
           std::string s(byte_count, '\0');
-          hashes.push_back({HashValue(s), std::move(s)});
+          hashes.push_back({HashValue(s, test_seed), std::move(s)});
           continue;
         }
         for (int begin_set_bit : llvm::seq(0, bits - set_bit_count)) {
@@ -378,7 +372,7 @@ struct SparseHashTest : ::testing::Test {
           if (has_end_byte_bits) {
             s[end_set_bit_byte_index] &= end_set_bit_byte;
           }
-          hashes.push_back({HashValue(s), std::move(s)});
+          hashes.push_back({HashValue(s, test_seed), std::move(s)});
         }
       }
     }

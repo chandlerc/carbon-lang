@@ -12,22 +12,33 @@
 
 namespace Carbon {
 
+#if 1
 // Random data taken from the hexadecimal digits of Pi's fractional component,
 // written in lexical order for convenience of reading. The resulting
 // byte-stream will be different due to little-endian integers. The initializers
 // here can be generated with the following shell script:
 //
 // ```sh
-// echo 'obase=16; scale=154; 4*a(1)' | env BC_LINE_LENGTH=132 bc -l \
+// echo 'obase=16; scale=308; 4*a(1)' | env BC_LINE_LENGTH=500 bc -l \
 //  | cut -c 3- | tr '[:upper:]' '[:lower:]' \
 //  | sed -e "s/.\{4\}/&'/g" \
 //  | sed -e "s/\(.\{4\}'.\{4\}'.\{4\}'.\{4\}\)'/0x\1,\n/g"
 // ```
-static constexpr std::array<uint64_t, 8> StaticRandomData = {
+constexpr std::array<uint64_t, 16> HashState::StaticRandomData = {
     0x243f'6a88'85a3'08d3, 0x1319'8a2e'0370'7344, 0xa409'3822'299f'31d0,
     0x082e'fa98'ec4e'6c89, 0x4528'21e6'38d0'1377, 0xbe54'66cf'34e9'0c6c,
-    0xc0ac'29b7'c97c'50dd, 0x3f84'd5b5'b547'0913,
+    0xc0ac'29b7'c97c'50dd, 0x3f84'd5b5'b547'0917, 0x9216'd5d9'8979'fb1b,
+    0xd131'0ba6'98df'b5ac, 0x2ffd'72db'd01a'dfb7, 0xb8e1'afed'6a26'7e96,
+    0xba7c'9045'f12c'7f99, 0x24a1'9947'b391'6cf7, 0x0801'f2e2'858e'fc16,
+    0x6369'20d8'7157'4e68,
 };
+#else
+constexpr std::array<uint64_t, 8> HashState::StaticRandomData = {
+      0xa2cc'5728'5aa3'6f15, 0xac34'2eed'8454'fc11, 0x8c09'ddc3'5ac4'a3eb,
+      0xcc61'97d7'3e83'dddf, 0xc68f'1314'293f'5b77, 0xadd3'daca'21f8'8fb5,
+      0x979a'170c'93b4'd209, 0x8446'a70c'9065'1a0f,
+  };
+#endif
 
 const std::array<uint64_t, 8> HashState::RandomData =
     HashState::ComputeRandomData();
@@ -90,53 +101,51 @@ auto HashState::HashSizedBytesLarge(HashState hash,
     -> HashState {
   const std::byte* data_ptr = bytes.data();
   const ssize_t size = bytes.size();
-  CARBON_DCHECK(size > 16);
-  const std::byte* tail_ptr = data_ptr + (size - 16);
+  CARBON_DCHECK(size > 32);
 
   __builtin_prefetch(data_ptr, 0, 0);
 
-  if (size > 64) {
-    // If we have more than 64 bytes, we're going to handle chunks of 64 bytes
-    // at a time using a simplified version of the main algorithm. This is based
-    // heavily on the corresponding 64-byte processing approach used by Abseil.
-    // The goal is to mix the 64-bytes of input data using as few multiplies (or
-    // other operations) as we can and with as much ILP as we can. The ILP comes
-    // largely from creating parallel structures to the operations.
-    uint64_t buffer0 = hash.buffer;
-    uint64_t buffer1 = hash.buffer;
-    const std::byte* end_ptr = data_ptr + (size - 64);
-    do {
-      // Prefetch the next cacheline.
-      __builtin_prefetch(data_ptr + 64, 0, 0);
+  // If we have more than 32 bytes, we're going to handle two 32-byte chunks
+  // at a time using a simplified version of the main algorithm. This is based
+  // heavily on the 64-byte and larger processing approach used by Abseil. The
+  // goal is to mix the input data using as few multiplies (or other
+  // operations) as we can and with as much ILP as we can. The ILP comes
+  // largely from creating parallel structures to the operations.
+  auto mix32 = [](const std::byte* data_ptr, uint64_t buffer, uint64_t random0,
+                  uint64_t random1) {
+    uint64_t a = Read8(data_ptr);
+    uint64_t b = Read8(data_ptr + 8);
+    uint64_t c = Read8(data_ptr + 16);
+    uint64_t d = Read8(data_ptr + 24);
+    uint64_t m0 = Mix(a ^ random0, b ^ buffer);
+    uint64_t m1 = Mix(c ^ random1, d ^ buffer);
+    return (m0 ^ m1);
+  };
 
-      uint64_t a = Read8(data_ptr);
-      uint64_t b = Read8(data_ptr + 8);
-      uint64_t c = Read8(data_ptr + 16);
-      uint64_t d = Read8(data_ptr + 24);
-      uint64_t cs0 = Mix(a ^ RandomData[4], b ^ buffer0);
-      uint64_t cs1 = Mix(c ^ RandomData[5], d ^ buffer0);
-      buffer0 = (cs0 ^ cs1);
+  uint64_t buffer0 = hash.buffer ^ StaticRandomData[0];
+  uint64_t buffer1 = hash.buffer ^ StaticRandomData[2];
+  const std::byte* tail_32b_ptr = data_ptr + (size - 32);
+  const std::byte* end_ptr = data_ptr + (size - 64);
+  while (data_ptr < end_ptr) {
+    // Prefetch the next cacheline.
+    __builtin_prefetch(data_ptr + 64, 0, 0);
 
-      uint64_t e = Read8(data_ptr + 32);
-      uint64_t f = Read8(data_ptr + 40);
-      uint64_t g = Read8(data_ptr + 48);
-      uint64_t h = Read8(data_ptr + 56);
-      uint64_t ds0 = Mix(e ^ RandomData[6], f ^ buffer1);
-      uint64_t ds1 = Mix(g ^ RandomData[7], h ^ buffer1);
-      buffer1 = (ds0 ^ ds1);
+    buffer0 =
+        mix32(data_ptr, buffer0, StaticRandomData[4], StaticRandomData[5]);
+    buffer1 =
+        mix32(data_ptr + 32, buffer1, StaticRandomData[6], StaticRandomData[7]);
 
-      data_ptr += 64;
-    } while (data_ptr < end_ptr);
-
-    hash.buffer = buffer0 ^ buffer1;
+    data_ptr += 64;
   }
 
-  while (data_ptr < tail_ptr) {
-    hash = HashTwo(std::move(hash), Read8(data_ptr), Read8(data_ptr + 8));
-    hash = RotState(std::move(hash));
-    data_ptr += 16;
+  if (data_ptr < tail_32b_ptr) {
+    buffer0 =
+        mix32(data_ptr, buffer0, StaticRandomData[4], StaticRandomData[5]);
   }
-  hash = HashTwo(std::move(hash), Read8(tail_ptr), Read8(tail_ptr + 8));
+  buffer1 =
+      mix32(tail_32b_ptr, buffer1, StaticRandomData[6], StaticRandomData[7]);
+
+  hash.buffer = buffer0 ^ buffer1;
   hash = RotState(std::move(hash));
   hash = HashOne(std::move(hash), size);
   return hash;
