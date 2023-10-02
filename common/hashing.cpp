@@ -34,10 +34,10 @@ constexpr std::array<uint64_t, 16> HashState::StaticRandomData = {
 };
 #else
 constexpr std::array<uint64_t, 8> HashState::StaticRandomData = {
-      0xa2cc'5728'5aa3'6f15, 0xac34'2eed'8454'fc11, 0x8c09'ddc3'5ac4'a3eb,
-      0xcc61'97d7'3e83'dddf, 0xc68f'1314'293f'5b77, 0xadd3'daca'21f8'8fb5,
-      0x979a'170c'93b4'd209, 0x8446'a70c'9065'1a0f,
-  };
+    0xa2cc'5728'5aa3'6f15, 0xac34'2eed'8454'fc11, 0x8c09'ddc3'5ac4'a3eb,
+    0xcc61'97d7'3e83'dddf, 0xc68f'1314'293f'5b77, 0xadd3'daca'21f8'8fb5,
+    0x979a'170c'93b4'd209, 0x8446'a70c'9065'1a0f,
+};
 #endif
 
 const std::array<uint64_t, 8> HashState::RandomData =

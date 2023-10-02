@@ -128,9 +128,7 @@ static auto ComputeBasicSeed() -> uint64_t {
 struct CarbonHasher {
   HashCode seed;
 
-  CarbonHasher() {
-    seed = HashCode(ComputeBasicSeed());
-  }
+  CarbonHasher() { seed = HashCode(ComputeBasicSeed()); }
 
   template <typename T>
   auto operator()(const T& value) -> uint64_t {
@@ -141,9 +139,7 @@ struct CarbonHasher {
 struct AbseilHasher {
   uint64_t seed;
 
-  AbseilHasher() {
-    seed = ComputeBasicSeed();
-  }
+  AbseilHasher() { seed = ComputeBasicSeed(); }
 
   template <typename T>
   auto operator()(const T& value) -> uint64_t {
@@ -154,9 +150,7 @@ struct AbseilHasher {
 struct LLVMHasher {
   uint64_t seed;
 
-  LLVMHasher() {
-    seed = ComputeBasicSeed();
-  }
+  LLVMHasher() { seed = ComputeBasicSeed(); }
 
   template <typename T>
   auto operator()(const T& value) -> uint64_t {
@@ -176,9 +170,9 @@ void BM_LatencyHash(benchmark::State& state) {
   state.SetBytesProcessed(v.bytes);
 }
 
-#define LATENCY_VALUE_BENCHMARKS(...)                                     \
+#define LATENCY_VALUE_BENCHMARKS(...)                               \
   BENCHMARK(BM_LatencyHash<RandValues<__VA_ARGS__>, CarbonHasher>); \
-  BENCHMARK(BM_LatencyHash<RandValues<__VA_ARGS__>, AbseilHasher>);   \
+  BENCHMARK(BM_LatencyHash<RandValues<__VA_ARGS__>, AbseilHasher>); \
   BENCHMARK(BM_LatencyHash<RandValues<__VA_ARGS__>, LLVMHasher>)
 LATENCY_VALUE_BENCHMARKS(uint8_t);
 LATENCY_VALUE_BENCHMARKS(uint16_t);
@@ -198,9 +192,11 @@ LATENCY_VALUE_BENCHMARKS(std::pair<int*, int*>);
 LATENCY_VALUE_BENCHMARKS(std::pair<uint64_t, int*>);
 LATENCY_VALUE_BENCHMARKS(std::pair<int*, uint64_t>);
 
-#define LATENCY_STRING_BENCHMARKS(MaxSize)                             \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/true, MaxSize>, CarbonHasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/true, MaxSize>, AbseilHasher>);   \
+#define LATENCY_STRING_BENCHMARKS(MaxSize)                                    \
+  BENCHMARK(                                                                  \
+      BM_LatencyHash<RandStrings</*RandSize=*/true, MaxSize>, CarbonHasher>); \
+  BENCHMARK(                                                                  \
+      BM_LatencyHash<RandStrings</*RandSize=*/true, MaxSize>, AbseilHasher>); \
   BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/true, MaxSize>, LLVMHasher>)
 
 LATENCY_STRING_BENCHMARKS(/*MaxSize=*/4);
@@ -216,40 +212,39 @@ LATENCY_STRING_BENCHMARKS(/*MaxSize=*/4096);
 LATENCY_STRING_BENCHMARKS(/*MaxSize=*/8192);
 
 #define LATENCY_STRING_SIZE_BENCHMARKS(Hasher)                             \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 1>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 2>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 3>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 4>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 5>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 6>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 7>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 8>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 9>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 15>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 16>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 17>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 23>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 24>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 25>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 31>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 32>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 33>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 47>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 48>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 49>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 63>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 64>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 65>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 91>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 92>, Hasher>); \
-  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 93>, Hasher>); \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 1>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 2>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 3>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 4>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 5>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 6>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 7>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 8>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 9>, Hasher>);   \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 15>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 16>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 17>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 23>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 24>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 25>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 31>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 32>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 33>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 47>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 48>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 49>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 63>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 64>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 65>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 91>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 92>, Hasher>);  \
+  BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 93>, Hasher>);  \
   BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 127>, Hasher>); \
   BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 128>, Hasher>); \
   BENCHMARK(BM_LatencyHash<RandStrings</*RandSize=*/false, 129>, Hasher>)
 
 LATENCY_STRING_SIZE_BENCHMARKS(CarbonHasher);
 LATENCY_STRING_SIZE_BENCHMARKS(AbseilHasher);
-
 
 }  // namespace
 }  // namespace Carbon::Testing
