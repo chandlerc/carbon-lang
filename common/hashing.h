@@ -468,7 +468,7 @@ inline auto HashState::HashSizedBytes(HashState hash,
     // Rotate one arm of the mix. See the comments in `RotState` for details,
     // this is done manually to only one side to let it pipeline better.
     m0 = llvm::rotr(m0, 53);
-    
+
     const std::byte* tail_16b_ptr = data_ptr + (size - 16);
     uint64_t m1 = Mix(Read8(tail_16b_ptr) ^ StaticRandomData[3],
                       Read8(tail_16b_ptr + 8) ^ hash.buffer);
