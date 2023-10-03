@@ -462,12 +462,14 @@ inline auto HashState::HashSizedBytes(HashState hash,
     // Do two mixes of overlapping 16-byte ranges in parallel to minimize
     // latency. The mix also needn't be *that* good as we'll do another round of
     // mixing with the size.
-    const std::byte* tail_16b_ptr = data_ptr + (size - 16);
+    hash.buffer ^= StaticRandomData[0];
     uint64_t m0 = Mix(Read8(data_ptr) ^ StaticRandomData[1],
                       Read8(data_ptr + 8) ^ hash.buffer);
     // Rotate one arm of the mix. See the comments in `RotState` for details,
     // this is done manually to only one side to let it pipeline better.
     m0 = llvm::rotr(m0, 53);
+    
+    const std::byte* tail_16b_ptr = data_ptr + (size - 16);
     uint64_t m1 = Mix(Read8(tail_16b_ptr) ^ StaticRandomData[3],
                       Read8(tail_16b_ptr + 8) ^ hash.buffer);
     hash.buffer = m0 ^ m1;
