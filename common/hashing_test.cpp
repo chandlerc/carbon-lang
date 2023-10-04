@@ -20,10 +20,160 @@ using ::testing::Eq;
 using ::testing::Le;
 using ::testing::Ne;
 
-// The only significantly bad seed is zero, so pick a non-zero seed with a tiny
-// amount of entropy to make sure that none of the testing relies on the entropy
-// from this.
-constexpr HashCode test_seed = HashCode(42 * 1024);
+TEST(HashingTest, Integers) {
+  HashCode hash_zero = HashValue(0);
+  // Hashes should be stable within the execution.
+  EXPECT_THAT(HashValue(0), Eq(hash_zero));
+
+  for (int i : {0, 1, 2, 3, 42}) {
+    SCOPED_TRACE(llvm::formatv("Hashing: {0}", i).str());
+    HashCode hash = HashValue(i);
+
+    // Zero should match, and other integers shouldn't collide trivially.
+    if (i == 0) {
+      EXPECT_THAT(hash, Eq(hash_zero));
+    } else {
+      EXPECT_THAT(hash, Ne(hash_zero));
+    }
+
+    // We shouldn't include the exact integer type used so that implicit
+    // conversions don't shift the hash for non-negative integers, making all of
+    // these match.
+    EXPECT_THAT(HashValue(static_cast<int8_t>(i)), Eq(hash));
+    EXPECT_THAT(HashValue(static_cast<uint8_t>(i)), Eq(hash));
+    EXPECT_THAT(HashValue(static_cast<int16_t>(i)), Eq(hash));
+    EXPECT_THAT(HashValue(static_cast<uint16_t>(i)), Eq(hash));
+    EXPECT_THAT(HashValue(static_cast<int32_t>(i)), Eq(hash));
+    EXPECT_THAT(HashValue(static_cast<uint32_t>(i)), Eq(hash));
+    EXPECT_THAT(HashValue(static_cast<int64_t>(i)), Eq(hash));
+    EXPECT_THAT(HashValue(static_cast<uint64_t>(i)), Eq(hash));
+  }
+
+  for (int i : {-1, -2, -3, -13}) {
+    SCOPED_TRACE(llvm::formatv("Hashing: {0}", i).str());
+
+    // Negative numbers can't be cheaply made to hash consistently regardless of
+    // size -- doing so would force sign extensions that are often expensive.
+    // Instead, we can check that the exact 2s compliment form at the bit-width
+    // of the signed integer is used.
+    EXPECT_THAT(HashValue(static_cast<int8_t>(i)),
+                Eq(HashValue(static_cast<uint8_t>(static_cast<int8_t>(i)))));
+    EXPECT_THAT(HashValue(static_cast<int16_t>(i)),
+                Eq(HashValue(static_cast<uint16_t>(static_cast<int16_t>(i)))));
+    EXPECT_THAT(HashValue(static_cast<int32_t>(i)),
+                Eq(HashValue(static_cast<uint32_t>(static_cast<int32_t>(i)))));
+    EXPECT_THAT(HashValue(static_cast<int64_t>(i)),
+                Eq(HashValue(static_cast<uint64_t>(static_cast<int64_t>(i)))));
+  }
+}
+
+TEST(HashingTest, Pointers) {
+  int object1 = 42;
+  std::string object2 = "Hello world!";
+
+  HashCode hash_null = HashValue(nullptr);
+  // Hashes should be stable.
+  EXPECT_THAT(HashValue(nullptr), Eq(hash_null));
+
+  // Hash other kinds of pointers without trivial collisions.
+  HashCode hash1 = HashValue(&object1);
+  HashCode hash2 = HashValue(&object2);
+  HashCode hash3 = HashValue(object2.data());
+  EXPECT_THAT(hash1, Ne(hash_null));
+  EXPECT_THAT(hash2, Ne(hash_null));
+  EXPECT_THAT(hash3, Ne(hash_null));
+  EXPECT_THAT(hash1, Ne(hash2));
+  EXPECT_THAT(hash1, Ne(hash3));
+  EXPECT_THAT(hash2, Ne(hash3));
+
+  // Hash values reflect the address and not the type.
+  EXPECT_THAT(HashValue(static_cast<void*>(nullptr)), Eq(hash_null));
+  EXPECT_THAT(HashValue(static_cast<int*>(nullptr)), Eq(hash_null));
+  EXPECT_THAT(HashValue(static_cast<std::string*>(nullptr)), Eq(hash_null));
+  EXPECT_THAT(HashValue(reinterpret_cast<void*>(&object1)), Eq(hash1));
+  EXPECT_THAT(HashValue(reinterpret_cast<int*>(&object2)), Eq(hash2));
+  EXPECT_THAT(HashValue(reinterpret_cast<std::string*>(object2.data())),
+              Eq(hash3));
+}
+
+TEST(HashingTest, PairsAndTuples) {
+  // Note that we can't compare hash codes across arity, or in general, compare
+  // hash codes for different types as the type isn't part of the hash.
+  HashCode hash_2zero = HashValue(std::pair(0, 0));
+  EXPECT_THAT(HashValue(std::pair(0, 1)), Ne(hash_2zero));
+  EXPECT_THAT(HashValue(std::pair(1, 0)), Ne(hash_2zero));
+
+  HashCode hash_3zero = HashValue(std::tuple(0, 0, 0));
+  EXPECT_THAT(HashValue(std::tuple(0, 0, 1)), Ne(hash_3zero));
+  EXPECT_THAT(HashValue(std::tuple(0, 1, 0)), Ne(hash_3zero));
+  EXPECT_THAT(HashValue(std::tuple(1, 0, 0)), Ne(hash_3zero));
+
+  // Hashing a 2-tuple and a pair should produce identical results though as we
+  // want to be able to have things like variadic tuple construction be
+  // indistinct from pairs.
+  EXPECT_THAT(HashValue(std::tuple(0, 0)), Eq(hash_2zero));
+  EXPECT_THAT(HashValue(std::tuple(0, 1)), Eq(HashValue(std::pair(0, 1))));
+  EXPECT_THAT(HashValue(std::tuple(1, 0)), Eq(HashValue(std::pair(1, 0))));
+
+  // Integers in tuples should work the same as outside of tuples w.r.t.
+  // converting between different integer types.
+  for (int i : {0, 1, 2, 3, 42}) {
+    SCOPED_TRACE(llvm::formatv("Hashing: ({0}, {0}, {0})", i).str());
+    std::tuple v = {i, i, i};
+    HashCode hash = HashValue(v);
+
+    // Zero should match, and other integers shouldn't collide trivially.
+    if (i == 0) {
+      EXPECT_THAT(hash, Eq(hash_3zero));
+    } else {
+      EXPECT_THAT(hash, Ne(hash_3zero));
+    }
+
+    // We shouldn't include the exact integer type used so that implicit
+    // conversions don't shift the hash for non-negative integers, making all of
+    // these match.
+    int8_t i_i8 = i;
+    EXPECT_THAT(HashValue(std::tuple(i_i8, i_i8, i_i8)), Eq(hash));
+    uint8_t i_u8 = i;
+    EXPECT_THAT(HashValue(std::tuple(i_u8, i_u8, i_u8)), Eq(hash));
+    int16_t i_i16 = i;
+    EXPECT_THAT(HashValue(std::tuple(i_i16, i_i16, i_i16)), Eq(hash));
+    uint16_t i_u16 = i;
+    EXPECT_THAT(HashValue(std::tuple(i_u16, i_u16, i_u16)), Eq(hash));
+    int32_t i_i32 = i;
+    EXPECT_THAT(HashValue(std::tuple(i_i32, i_i32, i_i32)), Eq(hash));
+    uint32_t i_u32 = i;
+    EXPECT_THAT(HashValue(std::tuple(i_u32, i_u32, i_u32)), Eq(hash));
+    int64_t i_i64 = i;
+    EXPECT_THAT(HashValue(std::tuple(i_i64, i_i64, i_i64)), Eq(hash));
+    uint64_t i_u64 = i;
+    EXPECT_THAT(HashValue(std::tuple(i_u64, i_u64, i_u64)), Eq(hash));
+
+    // Heterogenous integer types should also work.
+    EXPECT_THAT(HashValue(std::tuple(i_i8, i_u32, i_i16)), Eq(hash));
+    EXPECT_THAT(HashValue(std::tuple(i_u32, i_i16, i_u64)), Eq(hash));
+  }
+
+  // Pointers inside pairs and tuples should also work like pointers outside.
+  HashCode hash_2null = HashValue(std::pair(nullptr, nullptr));
+  EXPECT_THAT(HashValue(std::tuple(static_cast<int*>(nullptr),
+                                   static_cast<double*>(nullptr))),
+              Eq(hash_2null));
+
+  // Hash other kinds of pointers without trivial collisions.
+  int object1 = 42;
+  std::string object2 = "Hello world!";
+  HashCode hash_3ptr =
+      HashValue(std::tuple(&object1, &object2, object2.data()));
+  EXPECT_THAT(hash_3ptr, Ne(HashValue(std::tuple(nullptr, nullptr, nullptr))));
+
+  // Hash values reflect the address and not the type.
+  EXPECT_THAT(
+      HashValue(std::tuple(reinterpret_cast<void*>(&object1),
+                           reinterpret_cast<int*>(&object2),
+                           reinterpret_cast<std::string*>(object2.data()))),
+      Eq(hash_3ptr));
+}
 
 TEST(HashingTest, BasicStrings) {
   llvm::SmallVector<std::pair<std::string, HashCode>> hashes;
@@ -32,8 +182,13 @@ TEST(HashingTest, BasicStrings) {
     hashes.push_back({s, HashValue(s)});
   }
   for (const auto& [s1, hash1] : hashes) {
-    EXPECT_THAT(hash1, Eq(HashValue(s1)))
-        << "Inconsistent hashes for '" << s1 << "'";
+    EXPECT_THAT(HashValue(s1), Eq(hash1));
+    // Also check that we get the same hashes even when using string-wrapping
+    // types.
+    EXPECT_THAT(HashValue(std::string_view(s1)), Eq(hash1));
+    EXPECT_THAT(HashValue(llvm::StringRef(s1)), Eq(hash1));
+
+    // And some basic tests that simple things don't collide.
     for (const auto& [s2, hash2] : hashes) {
       if (s1 != s2) {
         EXPECT_THAT(hash1, Ne(hash2))
@@ -42,6 +197,11 @@ TEST(HashingTest, BasicStrings) {
     }
   }
 }
+
+// The only significantly bad seed is zero, so pick a non-zero seed with a tiny
+// amount of entropy to make sure that none of the testing relies on the entropy
+// from this.
+constexpr uint64_t TestSeed = 42ULL * 1024;
 
 auto ToHexBytes(llvm::StringRef s) -> std::string {
   std::string rendered;
@@ -187,7 +347,7 @@ auto AllByteStringsHashedAndSorted() {
       bytes[j] = (static_cast<uint64_t>(i) >> (8 * j)) & 0xff;
     }
     std::string s(std::begin(bytes), std::end(bytes));
-    hashes.push_back({HashValue(s, test_seed), s});
+    hashes.push_back({HashValue(s, TestSeed), s});
   }
 
   std::sort(hashes.begin(), hashes.end(),
@@ -327,7 +487,7 @@ struct SparseHashTest : ::testing::Test {
                SetBitCount::Begin, std::min(bits, SetBitCount::End))) {
         if (set_bit_count == 0) {
           std::string s(byte_count, '\0');
-          hashes.push_back({HashValue(s, test_seed), std::move(s)});
+          hashes.push_back({HashValue(s, TestSeed), std::move(s)});
           continue;
         }
         for (int begin_set_bit : llvm::seq(0, bits - set_bit_count)) {
@@ -372,7 +532,7 @@ struct SparseHashTest : ::testing::Test {
           if (has_end_byte_bits) {
             s[end_set_bit_byte_index] &= end_set_bit_byte;
           }
-          hashes.push_back({HashValue(s, test_seed), std::move(s)});
+          hashes.push_back({HashValue(s, TestSeed), std::move(s)});
         }
       }
     }

@@ -112,46 +112,38 @@ struct RandStrings {
   }
 };
 
-// The real-world use case we care about is in a hash table where we'll mix in
-// some seed state, likely some ASLR address. To simulate this for benchmarking,
-// compute a seed from the address of a stack local variable.
-static auto ComputeBasicSeed() -> uint64_t {
-  volatile char key;
-  key = 42;
-  // Rinse this through a volatile variable as well so returning it isn't
-  // flagged. The whole point is to escape the address of something on the
-  // stack.
-  volatile uint64_t key_addr = reinterpret_cast<uint64_t>(&key);
-  return key_addr;
-}
+struct HasherBase {
+  uint64_t seed;
 
-struct CarbonHasher {
-  HashCode seed;
+  HasherBase() {
+    // The real-world use case we care about is in a hash table where we'll mix
+    // in some seed state, likely some ASLR address. To simulate this for
+    // benchmarking, compute a seed from the address of a stack local variable.
+    volatile char key;
+    key = 42;
+    // Rinse this through a volatile variable as well so returning it isn't
+    // flagged. The whole point is to escape the address of something on the
+    // stack.
+    volatile auto key_addr = reinterpret_cast<uint64_t>(&key);
+    seed = key_addr;
+  }
+};
 
-  CarbonHasher() { seed = HashCode(ComputeBasicSeed()); }
-
+struct CarbonHasher : HasherBase {
   template <typename T>
   auto operator()(const T& value) -> uint64_t {
     return static_cast<uint64_t>(HashValue(value, seed));
   }
 };
 
-struct AbseilHasher {
-  uint64_t seed;
-
-  AbseilHasher() { seed = ComputeBasicSeed(); }
-
+struct AbseilHasher : HasherBase {
   template <typename T>
   auto operator()(const T& value) -> uint64_t {
     return absl::HashOf(value) ^ seed;
   }
 };
 
-struct LLVMHasher {
-  uint64_t seed;
-
-  LLVMHasher() { seed = ComputeBasicSeed(); }
-
+struct LLVMHasher : HasherBase {
   template <typename T>
   auto operator()(const T& value) -> uint64_t {
     return llvm::hash_value(value) ^ seed;
