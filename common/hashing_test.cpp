@@ -149,7 +149,7 @@ TEST(HashingTest, PairsAndTuples) {
     uint64_t i_u64 = i;
     EXPECT_THAT(HashValue(std::tuple(i_u64, i_u64, i_u64)), Eq(hash));
 
-    // Heterogenous integer types should also work.
+    // Heterogeneous integer types should also work.
     EXPECT_THAT(HashValue(std::tuple(i_i8, i_u32, i_i16)), Eq(hash));
     EXPECT_THAT(HashValue(std::tuple(i_u32, i_i16, i_u64)), Eq(hash));
   }
