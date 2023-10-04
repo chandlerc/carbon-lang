@@ -91,17 +91,19 @@ inline auto AbslHashValue(H h, const Bytes& bytes) -> H {
   return H::combine_contiguous(std::move(h), bytes.data, bytes.size);
 }
 
-inline void LLVMHashTest(const void* key, int len, uint32_t  /*seed*/, void* out) {
+inline void LLVMHashTest(const void* key, int len, uint32_t /*seed*/,
+                         void* out) {
   *static_cast<uint64_t*>(out) = llvm::hash_value(
       llvm::ArrayRef(reinterpret_cast<const std::byte*>(key), len));
 }
 
-inline void AbseilHashTest(const void* key, int len, uint32_t  /*seed*/, void* out) {
+inline void AbseilHashTest(const void* key, int len, uint32_t /*seed*/,
+                           void* out) {
   Bytes bytes = {reinterpret_cast<const unsigned char*>(key), len};
   *static_cast<uint64_t*>(out) = absl::HashOf(bytes);
 }
 
-inline void AbseilSizedHashTest(const void* key, int len, uint32_t  /*seed*/,
+inline void AbseilSizedHashTest(const void* key, int len, uint32_t /*seed*/,
                                 void* out) {
   std::string_view s(reinterpret_cast<const char*>(key), len);
   *static_cast<uint64_t*>(out) = absl::HashOf(s);

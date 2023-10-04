@@ -70,10 +70,10 @@ class HashCode : public Printable<HashCode> {
 // seed that varies from execution to execution to avoid depending on specific
 // values produced.
 //
-// The algorithm used is most heavily based on Abseil's hashing algorithm[1], with
-// some additional ideas and inspiration from the fallback hashing algorithm in
-// Rust's AHash[2]. However, there are also *significant* changes introduced
-// here and several are novel.
+// The algorithm used is most heavily based on Abseil's hashing algorithm[1],
+// with some additional ideas and inspiration from the fallback hashing
+// algorithm in Rust's AHash[2]. However, there are also *significant* changes
+// introduced here and several are novel.
 //
 // [1]: https://github.com/abseil/abseil-cpp/tree/master/absl/hash/internal
 // [2]: https://github.com/tkaitchuck/aHash/wiki/AHash-fallback-algorithm
@@ -178,7 +178,7 @@ class HashState {
   // Convenience method to hash an object by its object representation when that
   // is known to be valid. This is primarily useful for builtin and primitive
   // types.
-  // 
+  //
   // This can be directly used for simple users combining some aggregation of
   // objects. However, when possible, prefer the tuple version below for
   // aggregating several primitive types into a hash.
@@ -186,9 +186,9 @@ class HashState {
                             std::has_unique_object_representations_v<T>>>
   static auto Hash(HashState hash, const T& value) -> HashState;
 
-  // Convenience method to hash a variable number of objects whose object representation
-  // when that is known to be valid. This is primarily useful for for builtin
-  // and primitive type objects.
+  // Convenience method to hash a variable number of objects whose object
+  // representation when that is known to be valid. This is primarily useful for
+  // for builtin and primitive type objects.
   //
   // There is no guaranteed correspondence between the behavior of a single call
   // with multiple parameters and multiple calls. This routine is also optimized
@@ -213,7 +213,7 @@ class HashState {
   friend auto HashValue(const T& value, uint64_t seed) -> HashCode;
   template <typename T>
   friend auto HashValue(const T& value) -> HashCode;
-  
+
   friend auto SMHasher::HashTest(const void* key, int len, uint32_t seed,
                                  void* out) -> void;
   friend auto SMHasher::SizedHashTest(const void* key, int len, uint32_t seed,
@@ -318,10 +318,12 @@ static_assert(std::has_unique_object_representations_v<void*>);
 // this was the least horrible assemblage of hacks I could come up with to
 // locally make this odd case of C++ go away, but if there are better ways,
 // please send patches.
-template <typename T> struct MapNullPtrTToVoidPtrImpl {
+template <typename T>
+struct MapNullPtrTToVoidPtrImpl {
   using Type = T;
 };
-template <> struct MapNullPtrTToVoidPtrImpl<std::nullptr_t> {
+template <>
+struct MapNullPtrTToVoidPtrImpl<std::nullptr_t> {
   using Type = const void*;
 };
 template <typename T>
@@ -695,8 +697,8 @@ inline auto HashState::Hash(HashState hash, const Ts&... value) -> HashState {
 
   // For larger objects, hash each one down to a hash code and then hash those
   // as a buffer.
-  const uint64_t data[] = {
-      static_cast<uint64_t>(static_cast<HashCode>(Hash(HashState(hash.buffer), value)))...};
+  const uint64_t data[] = {static_cast<uint64_t>(
+      static_cast<HashCode>(Hash(HashState(hash.buffer), value)))...};
   return Hash(std::move(hash), data);
 }
 
