@@ -542,11 +542,10 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
       CARBON_DIAGNOSTIC(UnterminatedString, Error,
                         "String is missing a terminator.");
       emitter_.Emit(literal->text().begin(), UnterminatedString);
-      buffer_.AddToken(
-          {.kind = TokenKind::Error,
-           .token_line = string_line,
-           .column = string_column,
-           .error_length = static_cast<int32_t>(literal_size)});
+      buffer_.AddToken({.kind = TokenKind::Error,
+                        .token_line = string_line,
+                        .column = string_column,
+                        .error_length = static_cast<int32_t>(literal_size)});
       return position;
     }
   }
@@ -569,7 +568,8 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
 
   auto LexOpeningSymbolToken(llvm::StringRef source_text, TokenKind kind,
                              ssize_t position) -> ssize_t {
-    auto [new_position, token] = LexOneCharSymbolToken(source_text, kind, position);
+    auto [new_position, token] =
+        LexOneCharSymbolToken(source_text, kind, position);
     open_groups_.push_back(token);
     return new_position;
   }
@@ -582,9 +582,9 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
           "Closing symbol without a corresponding opening symbol.");
       emitter_.Emit(source_text.begin() + position, UnmatchedClosing);
       buffer_.AddToken({.kind = TokenKind::Error,
-                                      .token_line = current_line(),
-                                      .column = ComputeColumn(position),
-                                      .error_length = 1});
+                        .token_line = current_line(),
+                        .column = ComputeColumn(position),
+                        .error_length = 1});
       return position + 1;
     };
 
@@ -609,7 +609,8 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
     open_groups_.pop_back();
 
     // Now that the groups are all matched up, lex the actual token.
-    auto [new_position, token] = LexOneCharSymbolToken(source_text, kind, position);
+    auto [new_position, token] =
+        LexOneCharSymbolToken(source_text, kind, position);
 
     // Note that it is important to get fresh token infos here as lexing the
     // open token would invalidate any pointers.
@@ -643,8 +644,7 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
 
   // Given a word that has already been lexed, determine whether it is a type
   // literal and if so form the corresponding token.
-  auto LexWordAsTypeLiteralToken(llvm::StringRef word, int column)
-      -> bool {
+  auto LexWordAsTypeLiteralToken(llvm::StringRef word, int column) -> bool {
     if (word.size() < 2) {
       // Too short to form one of these tokens.
       return false;
@@ -671,11 +671,10 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
 
     llvm::StringRef suffix = word.substr(1);
     if (!CanLexInteger(emitter_, suffix)) {
-      buffer_.AddToken(
-          {.kind = TokenKind::Error,
-           .token_line = current_line(),
-           .column = column,
-           .error_length = static_cast<int32_t>(word.size())});
+      buffer_.AddToken({.kind = TokenKind::Error,
+                        .token_line = current_line(),
+                        .column = column,
+                        .error_length = static_cast<int32_t>(word.size())});
       return true;
     }
     llvm::APInt suffix_value;
@@ -807,11 +806,10 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
       error_text = source_text.substr(position, 1);
     }
 
-    buffer_.AddToken(
-        {.kind = TokenKind::Error,
-         .token_line = current_line(),
-         .column = ComputeColumn(position),
-         .error_length = static_cast<int32_t>(error_text.size())});
+    buffer_.AddToken({.kind = TokenKind::Error,
+                      .token_line = current_line(),
+                      .column = ComputeColumn(position),
+                      .error_length = static_cast<int32_t>(error_text.size())});
     CARBON_DIAGNOSTIC(UnrecognizedCharacters, Error,
                       "Encountered unrecognized characters while parsing.");
     emitter_.Emit(error_text.begin(), UnrecognizedCharacters);
@@ -819,7 +817,8 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
     return position + error_text.size();
   }
 
-  auto LexStartOfFile(llvm::StringRef source_text, ssize_t position) -> ssize_t {
+  auto LexStartOfFile(llvm::StringRef source_text, ssize_t position)
+      -> ssize_t {
     // Before lexing any source text, add the start-of-file token so that code
     // can assume a non-empty token buffer for the rest of lexing. Note that the
     // start-of-file always has trailing space because it *is* whitespace.
@@ -899,7 +898,7 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
   static auto Dispatch##LexMethod(Lexer& lexer, llvm::StringRef source_text, \
                                   ssize_t position)                          \
       ->void {                                                               \
-    position = lexer.LexMethod(source_text, position);               \
+    position = lexer.LexMethod(source_text, position);                       \
     [[clang::musttail]] return DispatchNext(lexer, source_text, position);   \
   }
   CARBON_DISPATCH_LEX_TOKEN(LexError)
@@ -913,7 +912,7 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
   static auto Dispatch##LexMethod##SymbolToken(                               \
       Lexer& lexer, llvm::StringRef source_text, ssize_t position)            \
       ->void {                                                                \
-    position = lexer.LexMethod##SymbolToken(                          \
+    position = lexer.LexMethod##SymbolToken(                                  \
         source_text, OneCharTokenKindTable[source_text[position]], position); \
     [[clang::musttail]] return DispatchNext(lexer, source_text, position);    \
   }
@@ -934,7 +933,7 @@ class [[clang::internal_linkage]] TokenizedBuffer::Lexer {
   static auto Dispatch##LexMethod(Lexer& lexer, llvm::StringRef source_text, \
                                   ssize_t position)                          \
       ->void {                                                               \
-    position = lexer.LexMethod(source_text, position);                                  \
+    position = lexer.LexMethod(source_text, position);                       \
     [[clang::musttail]] return DispatchNext(lexer, source_text, position);   \
   }
   CARBON_DISPATCH_LEX_NON_TOKEN(LexHorizontalWhitespace)
