@@ -163,7 +163,8 @@ struct HashBenchBase {
 struct CarbonHashBench : HashBenchBase {
   template <typename T>
   auto operator()(const T& value) -> uint64_t {
-    return static_cast<uint64_t>(HashValue(value, seed));
+    // return static_cast<uint64_t>(HashValue(value, seed));
+    return absl::HashOf(value) ^ seed;
   }
 };
 
