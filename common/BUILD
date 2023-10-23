@@ -192,6 +192,37 @@ cc_library(
 )
 
 cc_library(
+    name = "map",
+    hdrs = ["map.h"],
+    deps = [
+        ":check",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_test(
+    name = "map_test",
+    srcs = ["map_test.cpp"],
+    deps = [
+        ":gtest_main",
+        ":map",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_binary(
+    name = "map_benchmark",
+    testonly = 1,
+    srcs = ["map_benchmark.cpp"],
+    deps = [
+        ":map",
+        "@com_github_google_benchmark//:benchmark_main",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
     name = "ostream",
     hdrs = ["ostream.h"],
     deps = [
