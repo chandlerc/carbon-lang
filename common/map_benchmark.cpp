@@ -24,7 +24,7 @@ namespace {
 // slightly more comparable benchmark results. It's not perfect, but seems more
 // useful than the alternatives.
 #ifdef __aarch64__
-#define CARBON_ARM64_NOINLINE [[clang::noinline]]
+#define CARBON_ARM64_NOINLINE [[gnu::noinline]]
 #else
 #define CARBON_ARM64_NOINLINE
 #endif
@@ -165,14 +165,6 @@ struct MapWrapper<llvm::SmallDenseMap<KT, VT, SmallSize, HasherT>> {
   auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 
-struct LLVMHash {
-  template <typename T>
-  auto operator()(const T& arg) const -> size_t {
-    using llvm::hash_value;
-    return hash_value(arg);
-  }
-};
-
 struct LLVMHashingDenseMapInfo {
   // The following should hold, but it would require int to be complete:
   // static_assert(alignof(int) <= (1 << Log2MaxAlign),
@@ -248,26 +240,26 @@ constexpr ssize_t NumShuffledKeys = 1024LL * 64;
 
 static void OneOpSizeArgs(benchmark::internal::Benchmark* b) {
   b->DenseRange(1, 8, 1);
-  b->DenseRange(10, 16, 2);
+  b->DenseRange(12, 16, 4);
   b->DenseRange(24, 64, 8);
   b->Range(1 << 7, 1 << 20);
 }
 
+using BigType = std::array<int, 64>;
+
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, SIZE)                                 \
-  BENCHMARK(NAME<Map<int*, std::array<int, SIZE>>>)->Apply(OneOpSizeArgs);    \
-  BENCHMARK(NAME<absl::flat_hash_map<int*, std::array<int, SIZE>, LLVMHash>>) \
-      ->Apply(OneOpSizeArgs);                                                 \
-  BENCHMARK(NAME<llvm::DenseMap<int*, std::array<int, SIZE>,                  \
-                                LLVMHashingDenseMapInfo>>)                    \
+#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, VT)                             \
+  BENCHMARK(NAME<Map<int*, VT>>)->Apply(OneOpSizeArgs);                 \
+  BENCHMARK(NAME<absl::flat_hash_map<int*, VT>>)->Apply(OneOpSizeArgs); \
+  BENCHMARK(NAME<llvm::DenseMap<int*, VT, LLVMHashingDenseMapInfo>>)    \
       ->Apply(OneOpSizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_ONE_OP(NAME)    \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, 1); \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, 2); \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, 4); \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, 64)
+#define MAP_BENCHMARK_ONE_OP(NAME)                  \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, int);             \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, int64_t);         \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, llvm::StringRef); \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, BigType)
 
 template <typename MapT>
 static void BM_MapLookupHitPtr(benchmark::State& s) {
@@ -405,20 +397,18 @@ static void OpSeqSizeArgs(benchmark::internal::Benchmark* b) {
 }
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, SIZE)                                 \
-  BENCHMARK(NAME<Map<int*, std::array<int, SIZE>>>)->Apply(OpSeqSizeArgs);    \
-  BENCHMARK(NAME<absl::flat_hash_map<int*, std::array<int, SIZE>, LLVMHash>>) \
-      ->Apply(OpSeqSizeArgs);                                                 \
-  BENCHMARK(NAME<llvm::DenseMap<int*, std::array<int, SIZE>,                  \
-                                LLVMHashingDenseMapInfo>>)                    \
+#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, VT)                             \
+  BENCHMARK(NAME<Map<int*, VT>>)->Apply(OpSeqSizeArgs);                 \
+  BENCHMARK(NAME<absl::flat_hash_map<int*, VT>>)->Apply(OpSeqSizeArgs); \
+  BENCHMARK(NAME<llvm::DenseMap<int*, VT, LLVMHashingDenseMapInfo>>)    \
       ->Apply(OpSeqSizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_OP_SEQ(NAME)    \
-  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 1); \
-  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 2); \
-  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 4); \
-  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, 64)
+#define MAP_BENCHMARK_OP_SEQ(NAME)                  \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int);             \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int64_t);         \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, llvm::StringRef); \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, BigType)
 
 template <typename MapT>
 static void BM_MapInsertPtrSeq(benchmark::State& s) {

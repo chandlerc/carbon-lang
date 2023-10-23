@@ -18,9 +18,9 @@
 #include <utility>
 
 #include "common/check.h"
+#include "common/hashing.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
@@ -473,6 +473,7 @@ struct SmallSizeStorage;
 
 template <typename KeyT, typename ValueT>
 struct SmallSizeStorage<KeyT, ValueT, true, 0> : Storage {
+  SmallSizeStorage() {}
   union {
     KeyT keys[0];
   };
@@ -483,6 +484,7 @@ struct SmallSizeStorage<KeyT, ValueT, true, 0> : Storage {
 
 template <typename KeyT, typename ValueT>
 struct SmallSizeStorage<KeyT, ValueT, false, 0> : Storage {
+  SmallSizeStorage() {}
   union {
     KeyT keys[0];
   };
@@ -493,6 +495,7 @@ struct SmallSizeStorage<KeyT, ValueT, false, 0> : Storage {
 
 template <typename KeyT, typename ValueT, ssize_t SmallSize>
 struct SmallSizeStorage<KeyT, ValueT, true, SmallSize> : Storage {
+  SmallSizeStorage() {}
   union {
     KeyT keys[SmallSize];
   };
@@ -504,6 +507,8 @@ struct SmallSizeStorage<KeyT, ValueT, true, SmallSize> : Storage {
 template <typename KeyT, typename ValueT, ssize_t SmallSize>
 struct alignas(StorageAlignment<KeyT, ValueT>)
     SmallSizeStorage<KeyT, ValueT, false, SmallSize> : Storage {
+  SmallSizeStorage() {}
+
   // FIXME: One interesting question is whether the small size should be a
   // minimum here or an exact figure.
   static_assert(llvm::isPowerOf2_64(SmallSize),
@@ -984,7 +989,7 @@ template <typename KeyT, typename LookupKeyT>
 [[clang::noinline]] auto LookupIndexHashed(LookupKeyT lookup_key, ssize_t size,
                                            Storage* storage) -> ssize_t {
   uint8_t* groups = reinterpret_cast<uint8_t*>(storage);
-  size_t hash = llvm::hash_value(lookup_key);
+  size_t hash = static_cast<uint64_t>(HashValue(lookup_key));
   uint8_t control_byte = ComputeControlByte(hash);
   ssize_t hash_index = ComputeHashIndex(hash, groups);
 
@@ -1156,7 +1161,7 @@ template <typename LookupKeyT>
     LookupKeyT lookup_key) -> std::pair<uint32_t, ssize_t> {
   uint8_t* groups = groups_ptr();
 
-  size_t hash = llvm::hash_value(lookup_key);
+  size_t hash = static_cast<uint64_t>(HashValue(lookup_key));
   uint8_t control_byte = MapInternal::ComputeControlByte(hash);
   ssize_t hash_index = MapInternal::ComputeHashIndex(hash, groups);
 
@@ -1232,7 +1237,7 @@ template <typename KT, typename VT>
 template <typename LookupKeyT>
 [[clang::noinline]] auto MapBase<KT, VT>::InsertIntoEmptyIndex(
     LookupKeyT lookup_key) -> ssize_t {
-  size_t hash = llvm::hash_value(lookup_key);
+  size_t hash = static_cast<uint64_t>(HashValue(lookup_key));
   uint8_t control_byte = MapInternal::ComputeControlByte(hash);
   uint8_t* groups = groups_ptr();
   ssize_t hash_index = MapInternal::ComputeHashIndex(hash, groups);

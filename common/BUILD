@@ -196,6 +196,7 @@ cc_library(
     hdrs = ["map.h"],
     deps = [
         ":check",
+        ":hashing",
         "@llvm-project//llvm:Support",
     ],
 )
@@ -204,8 +205,9 @@ cc_test(
     name = "map_test",
     srcs = ["map_test.cpp"],
     deps = [
-        ":gtest_main",
         ":map",
+        "//testing/base:gtest_main",
+        "//testing/base:test_raw_ostream",
         "@com_google_googletest//:gtest",
     ],
 )
