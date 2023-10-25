@@ -233,6 +233,27 @@ cc_library(
 )
 
 cc_library(
+    name = "set",
+    hdrs = ["set.h"],
+    deps = [
+        ":check",
+        ":hashing",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_test(
+    name = "set_test",
+    srcs = ["set_test.cpp"],
+    deps = [
+        ":set",
+        "//testing/base:gtest_main",
+        "//testing/base:test_raw_ostream",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
     name = "string_helpers",
     srcs = ["string_helpers.cpp"],
     hdrs = ["string_helpers.h"],
