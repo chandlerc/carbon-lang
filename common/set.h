@@ -6,32 +6,22 @@
 #define CARBON_COMMON_SET_H_
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <initializer_list>
 #include <iterator>
 #include <new>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 
 #include "common/check.h"
 #include "common/hashing.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/PointerIntPair.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/bit.h"
-#include "llvm/Support/AlignOf.h"
-#include "llvm/Support/Alignment.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/ReverseIteration.h"
-#include "llvm/Support/type_traits.h"
 
 // Detect whether we can use SIMD accelerated implementations of the control
 // groups.
