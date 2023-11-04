@@ -915,25 +915,25 @@ inline auto ComputeProbeMaskFromSize(ssize_t size) -> size_t {
   return (size - 1) & ~GroupMask;
 }
 
-/// This class handles building a sequence of probe indices from a given
-/// starting point, including both the quadratic growth and masking the index
-/// to stay within the bucket array size. The starting point doesn't need to be
-/// clamped to the size ahead of time (or even by positive), we will do it
-/// internally.
-///
-/// We compute the quadratic probe index incrementally, but we can also compute
-/// it mathematically and will check that the incremental result matches our
-/// mathematical expectation. We use the quadratic probing formula of:
-///
-///   p(x,s) = (x + (s + s^2)/2) mod (Size / GroupSize)
-///
-/// This particular quadratic sequence will visit every value modulo the
-/// provided size divided by the group size.
-///
-/// However, we compute it scaled to the group size constant G and have it visit
-/// each G multiple modulo the size using the scaled formula:
-///
-///   p(x,s) = (x + (s + (s * s * G)/(G * G))/2) mod Size
+// This class handles building a sequence of probe indices from a given
+// starting point, including both the quadratic growth and masking the index
+// to stay within the bucket array size. The starting point doesn't need to be
+// clamped to the size ahead of time (or even by positive), we will do it
+// internally.
+//
+// We compute the quadratic probe index incrementally, but we can also compute
+// it mathematically and will check that the incremental result matches our
+// mathematical expectation. We use the quadratic probing formula of:
+//
+//   p(x,s) = (x + (s + s^2)/2) mod (Size / GroupSize)
+//
+// This particular quadratic sequence will visit every value modulo the
+// provided size divided by the group size.
+//
+// However, we compute it scaled to the group size constant G and have it visit
+// each G multiple modulo the size using the scaled formula:
+//
+//   p(x,s) = (x + (s + (s * s * G)/(G * G))/2) mod Size
 class ProbeSequence {
   ssize_t Step = 0;
   size_t Mask;

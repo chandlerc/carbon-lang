@@ -253,6 +253,18 @@ cc_test(
     ],
 )
 
+cc_binary(
+    name = "set_benchmark",
+    testonly = 1,
+    srcs = ["set_benchmark.cpp"],
+    deps = [
+        ":set",
+        "@com_github_google_benchmark//:benchmark_main",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
 cc_library(
     name = "string_helpers",
     srcs = ["string_helpers.cpp"],

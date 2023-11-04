@@ -419,9 +419,9 @@ constexpr auto DefaultMinSmallSize() -> ssize_t {
 }
 
 template <typename KeyT>
-constexpr auto ShouldUseLinearLookup(int small_size) -> bool {
-  // return false;
-  return small_size >= 0 && small_size <= NumKeysInCacheline<KeyT>();
+constexpr auto ShouldUseLinearLookup(int /*small_size*/) -> bool {
+  return false;
+  //return small_size >= 0 && small_size <= NumKeysInCacheline<KeyT>();
 }
 
 template <typename KeyT, ssize_t MinSmallSize>
@@ -753,25 +753,25 @@ inline auto ComputeProbeMaskFromSize(ssize_t size) -> size_t {
   return (size - 1) & ~GroupMask;
 }
 
-/// This class handles building a sequence of probe indices from a given
-/// starting point, including both the quadratic growth and masking the index
-/// to stay within the bucket array size. The starting point doesn't need to be
-/// clamped to the size ahead of time (or even by positive), we will do it
-/// internally.
-///
-/// We compute the quadratic probe index incrementally, but we can also compute
-/// it mathematically and will check that the incremental result matches our
-/// mathematical expectation. We use the quadratic probing formula of:
-///
-///   p(x,s) = (x + (s + s^2)/2) mod (Size / GroupSize)
-///
-/// This particular quadratic sequence will visit every value modulo the
-/// provided size divided by the group size.
-///
-/// However, we compute it scaled to the group size constant G and have it visit
-/// each G multiple modulo the size using the scaled formula:
-///
-///   p(x,s) = (x + (s + (s * s * G)/(G * G))/2) mod Size
+// This class handles building a sequence of probe indices from a given
+// starting point, including both the quadratic growth and masking the index
+// to stay within the bucket array size. The starting point doesn't need to be
+// clamped to the size ahead of time (or even by positive), we will do it
+// internally.
+//
+// We compute the quadratic probe index incrementally, but we can also compute
+// it mathematically and will check that the incremental result matches our
+// mathematical expectation. We use the quadratic probing formula of:
+//
+//   p(x,s) = (x + (s + s^2)/2) mod (Size / GroupSize)
+//
+// This particular quadratic sequence will visit every value modulo the
+// provided size divided by the group size.
+//
+// However, we compute it scaled to the group size constant G and have it visit
+// each G multiple modulo the size using the scaled formula:
+//
+//   p(x,s) = (x + (s + (s * s * G)/(G * G))/2) mod Size
 class ProbeSequence {
   ssize_t Step = 0;
   size_t Mask;
@@ -807,23 +807,22 @@ class ProbeSequence {
   auto getIndex() const -> ssize_t { return i; }
 };
 
-inline auto ComputeControlByte(size_t hash) -> uint8_t {
+inline auto ComputeControlByte(size_t tag) -> uint8_t {
   // Mask one over the high bit so that engaged control bytes are easily
   // identified.
-  return (hash >> (sizeof(hash) * 8 - 7)) | 0b10000000;
-}
-
-inline auto ComputeHashIndex(size_t hash, const void* ptr) -> ssize_t {
-  return hash ^ reinterpret_cast<uintptr_t>(ptr);
+  return tag | 0b10000000;
 }
 
 template <typename KeyT, typename LookupKeyT>
-[[clang::noinline]] auto LookupIndexHashed(LookupKeyT lookup_key, ssize_t size,
+//[[clang::noinline]]
+auto LookupIndexHashed(LookupKeyT lookup_key, ssize_t size,
                                            Storage* storage) -> ssize_t {
   uint8_t* groups = reinterpret_cast<uint8_t*>(storage);
-  size_t hash = static_cast<uint64_t>(HashValue(lookup_key));
-  uint8_t control_byte = ComputeControlByte(hash);
-  ssize_t hash_index = ComputeHashIndex(hash, groups);
+  auto seed = reinterpret_cast<uint64_t>(groups);
+  HashCode hash = HashValue(lookup_key, seed);
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size);
+  uint8_t control_byte = ComputeControlByte(tag);
+  //ssize_t hash_index = ComputeHashIndex(hash, groups);
 
   KeyT* keys =
       reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(storage) + size);
@@ -898,7 +897,7 @@ template <typename KT>
 template <typename LookupKeyT>
 auto SetView<KT>::Contains(LookupKeyT lookup_key) const -> bool {
   SetInternal::Prefetch(storage_);
-  if (is_linear()) {
+  if (0 && is_linear()) {
     return SetInternal::ContainsSmallLinear<KeyT>(lookup_key, size(),
                                                   linear_keys());
   }
@@ -981,9 +980,10 @@ template <typename LookupKeyT>
     -> std::pair<uint32_t, ssize_t> {
   uint8_t* groups = groups_ptr();
 
-  size_t hash = static_cast<uint64_t>(HashValue(lookup_key));
-  uint8_t control_byte = SetInternal::ComputeControlByte(hash);
-  ssize_t hash_index = SetInternal::ComputeHashIndex(hash, groups);
+  auto seed = reinterpret_cast<uint64_t>(groups);
+  HashCode hash = HashValue(lookup_key, seed);
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size());
+  uint8_t control_byte = SetInternal::ComputeControlByte(tag);
 
   ssize_t group_with_deleted_index = -1;
   SetInternal::Group::MatchedRange deleted_matched_range;
@@ -1057,10 +1057,11 @@ template <typename KT>
 template <typename LookupKeyT>
 [[clang::noinline]] auto SetBase<KT>::InsertIntoEmptyIndex(
     LookupKeyT lookup_key) -> ssize_t {
-  size_t hash = static_cast<uint64_t>(HashValue(lookup_key));
-  uint8_t control_byte = SetInternal::ComputeControlByte(hash);
   uint8_t* groups = groups_ptr();
-  ssize_t hash_index = SetInternal::ComputeHashIndex(hash, groups);
+  auto seed = reinterpret_cast<uint64_t>(groups);
+  HashCode hash = HashValue(lookup_key, seed);
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size());
+  uint8_t control_byte = SetInternal::ComputeControlByte(tag);
 
   for (SetInternal::ProbeSequence s(hash_index, size());; s.step()) {
     ssize_t group_index = s.getIndex();
