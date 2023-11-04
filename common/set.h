@@ -58,7 +58,7 @@ template <typename KeyT>
 class LookupResult {
  public:
   LookupResult() = default;
-  LookupResult(KeyT* key) : key_(key) {}
+  explicit LookupResult(KeyT* key) : key_(key) {}
 
   explicit operator bool() const { return key_ != nullptr; }
 
@@ -72,7 +72,7 @@ template <typename KeyT>
 class InsertResult {
  public:
   InsertResult() = default;
-  InsertResult(bool inserted, KeyT& key)
+  explicit InsertResult(bool inserted, KeyT& key)
       : key_and_inserted_(&key, inserted) {}
 
   auto is_inserted() const -> bool { return key_and_inserted_.getInt(); }
@@ -886,12 +886,12 @@ inline auto SetView<KT>::LookupSmallLinear(LookupKeyT lookup_key) const
   KeyT* key_end = &key[size()];
   do {
     if (*key == lookup_key) {
-      return {key};
+      return LookupResultT(key);
     }
     ++key;
   } while (key < key_end);
 
-  return {nullptr};
+  return LookupResultT();
 }
 
 template <typename KT>
@@ -901,10 +901,10 @@ inline auto SetView<KT>::LookupHashed(LookupKeyT lookup_key) const
   ssize_t index =
       SetInternal::LookupIndexHashed<KeyT>(lookup_key, size(), storage_);
   if (index < 0) {
-    return {nullptr};
+    return LookupResultT();
   }
 
-  return {&keys_ptr()[index]};
+  return LookupResultT(&keys_ptr()[index]);
 }
 
 template <typename KT>
@@ -1212,7 +1212,7 @@ auto SetBase<KeyT>::InsertHashed(
     if (LLVM_LIKELY(!needs_insertion)) {
       assert(index >= 0 &&
              "Must have a valid group when we find an existing entry.");
-      return {false, keys_ptr()[index]};
+      return InsertResultT(false, keys_ptr()[index]);
     }
   }
 
@@ -1230,7 +1230,7 @@ auto SetBase<KeyT>::InsertHashed(
   assert(index >= 0 && "Should have a group to insert into now.");
 
   KeyT* k = insert_cb(lookup_key, &keys_ptr()[index]);
-  return {true, *k};
+  return InsertResultT(true, *k);
 }
 
 template <typename KeyT>
@@ -1243,7 +1243,7 @@ auto SetBase<KeyT>::InsertSmallLinear(
   KeyT* keys = linear_keys();
   for (ssize_t i : llvm::seq<ssize_t>(0, size())) {
     if (keys[i] == lookup_key) {
-      return {false, keys[i]};
+      return InsertResultT(false, keys[i]);
     }
   }
 
@@ -1261,7 +1261,7 @@ auto SetBase<KeyT>::InsertSmallLinear(
     keys = keys_ptr();
   }
   KeyT* k = insert_cb(lookup_key, &keys[index]);
-  return {true, *k};
+  return InsertResultT(true, *k);
 }
 
 template <typename KT>
