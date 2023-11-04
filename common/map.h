@@ -19,6 +19,7 @@
 
 #include "common/check.h"
 #include "common/hashing.h"
+#include "common/set.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/PointerIntPair.h"
@@ -55,35 +56,28 @@ class Map;
 namespace MapInternal {
 
 template <typename KeyT, typename ValueT>
-class LookupKVResult {
+class LookupKVResult : public SetInternal::LookupResult<KeyT> {
  public:
   LookupKVResult() = default;
-  LookupKVResult(KeyT* key, ValueT* value) : key_(key), value_(value) {}
+  LookupKVResult(KeyT* key, ValueT* value)
+      : SetInternal::LookupResult<KeyT>(key), value_(value) {}
 
-  explicit operator bool() const { return key_ != nullptr; }
-
-  auto key() const -> KeyT& { return *key_; }
   auto value() const -> ValueT& { return *value_; }
 
  private:
-  KeyT* key_ = nullptr;
   ValueT* value_ = nullptr;
 };
 
 template <typename KeyT, typename ValueT>
-class InsertKVResult {
+class InsertKVResult : public SetInternal::InsertResult<KeyT> {
  public:
   InsertKVResult() = default;
   InsertKVResult(bool inserted, KeyT& key, ValueT& value)
-      : key_and_inserted_(&key, inserted), value_(&value) {}
+      : SetInternal::InsertResult<KeyT>(inserted, key), value_(&value) {}
 
-  auto is_inserted() const -> bool { return key_and_inserted_.getInt(); }
-
-  auto key() const -> KeyT& { return *key_and_inserted_.getPointer(); }
   auto value() const -> ValueT& { return *value_; }
 
  private:
-  llvm::PointerIntPair<KeyT*, 1, bool> key_and_inserted_;
   ValueT* value_ = nullptr;
 };
 
