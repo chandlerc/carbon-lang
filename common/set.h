@@ -439,8 +439,7 @@ constexpr auto ComputeSmallSize() -> ssize_t {
   constexpr ssize_t LinearSizeInPointer = sizeof(void*) / sizeof(KeyT);
   constexpr ssize_t SmallSizeFloor =
       MinSmallSize < LinearSizeInPointer ? LinearSizeInPointer : MinSmallSize;
-  constexpr bool UseLinearLookup =
-      ShouldUseLinearLookup<KeyT>(SmallSizeFloor);
+  constexpr bool UseLinearLookup = ShouldUseLinearLookup<KeyT>(SmallSizeFloor);
 
   return UseLinearLookup ? SmallSizeFloor
                          : llvm::alignTo<GroupSize>(SmallSizeFloor);
@@ -679,8 +678,7 @@ class SetBase {
 };
 
 template <typename InputKeyT,
-          ssize_t MinSmallSize =
-              SetInternal::DefaultMinSmallSize<InputKeyT>()>
+          ssize_t MinSmallSize = SetInternal::DefaultMinSmallSize<InputKeyT>()>
 class Set : public SetBase<InputKeyT> {
  public:
   using KeyT = InputKeyT;
@@ -872,8 +870,7 @@ template <typename KeyT, typename LookupKeyT>
 
 template <typename KT>
 template <typename LookupKeyT>
-inline auto SetView<KT>::ContainsHashed(LookupKeyT lookup_key) const
-    -> bool {
+inline auto SetView<KT>::ContainsHashed(LookupKeyT lookup_key) const -> bool {
   return SetInternal::LookupIndexHashed<KeyT>(lookup_key, size(), storage_) >=
          0;
 }
@@ -990,8 +987,8 @@ void SetView<KT>::ForEach(CallbackT callback) {
 // that seems to result in good code.
 template <typename KT>
 template <typename LookupKeyT>
-[[clang::noinline]] auto SetBase<KT>::InsertIndexHashed(
-    LookupKeyT lookup_key) -> std::pair<uint32_t, ssize_t> {
+[[clang::noinline]] auto SetBase<KT>::InsertIndexHashed(LookupKeyT lookup_key)
+    -> std::pair<uint32_t, ssize_t> {
   uint8_t* groups = groups_ptr();
 
   size_t hash = static_cast<uint64_t>(HashValue(lookup_key));
@@ -1103,14 +1100,13 @@ template <typename KeyT>
 inline void DeallocateStorage(Storage* storage, ssize_t size) {
 #if __cpp_sized_deallocation
   ssize_t allocated_size = computeStorageSize<KeyT>(size);
-  return __builtin_operator_delete(
-      storage, allocated_size,
-      std::align_val_t(StorageAlignment<KeyT>));
+  return __builtin_operator_delete(storage, allocated_size,
+                                   std::align_val_t(StorageAlignment<KeyT>));
 #else
   // Ensure `size` is used even in the fallback non-sized deallocation case.
   (void)size;
-  return __builtin_operator_delete(
-      storage, std::align_val_t(StorageAlignment<KeyT>));
+  return __builtin_operator_delete(storage,
+                                   std::align_val_t(StorageAlignment<KeyT>));
 #endif
 }
 
@@ -1237,8 +1233,7 @@ template <typename KeyT>
 template <typename LookupKeyT>
 auto SetBase<KeyT>::InsertSmallLinear(
     LookupKeyT lookup_key,
-    llvm::function_ref<auto(
-        LookupKeyT lookup_key, void* key_storage)->KeyT*>
+    llvm::function_ref<auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>
         insert_cb) -> InsertResultT {
   KeyT* keys = linear_keys();
   for (ssize_t i : llvm::seq<ssize_t>(0, size())) {
@@ -1380,9 +1375,7 @@ SetBase<KeyT>::~SetBase() {
   }
 
   // Destroy all the keys and values.
-  ForEach([](KeyT& k) {
-    k.~KeyT();
-  });
+  ForEach([](KeyT& k) { k.~KeyT(); });
 
   // If small, nothing to deallocate.
   if (is_small()) {
@@ -1396,7 +1389,7 @@ SetBase<KeyT>::~SetBase() {
 
 template <typename KeyT>
 void SetBase<KeyT>::Init(int small_size_arg,
-                                 SetInternal::Storage* small_storage) {
+                         SetInternal::Storage* small_storage) {
   storage() = small_storage;
   small_size_ = small_size_arg;
 
@@ -1439,9 +1432,7 @@ void Set<KeyT, MinSmallSize>::Reset() {
   }
 
   // Otherwise do the first part of the clear to destroy all the elements.
-  this->ForEach([](KeyT& k) {
-    k.~KeyT();
-  });
+  this->ForEach([](KeyT& k) { k.~KeyT(); });
 
   // Deallocate the buffer.
   SetInternal::DeallocateStorage<KeyT>(this->storage(), this->size());

@@ -20,9 +20,7 @@ void ExpectSetElementsAre(SetT&& s, MatcherRangeT element_matchers) {
   // Now collect the elements into a container.
   using KeyT = typename std::remove_reference<SetT>::type::KeyT;
   std::vector<KeyT> entries;
-  s.ForEach([&entries](KeyT& k) {
-    entries.push_back(k);
-  });
+  s.ForEach([&entries](KeyT& k) { entries.push_back(k); });
 
   // Use the GoogleMock unordered container matcher to validate and show errors
   // on wrong elements.
@@ -31,14 +29,14 @@ void ExpectSetElementsAre(SetT&& s, MatcherRangeT element_matchers) {
 
 // Allow directly using an initializer list.
 template <typename SetT, typename MatcherT>
-void ExpectSetElementsAre(
-    SetT&& s, std::initializer_list<MatcherT> element_matchers) {
+void ExpectSetElementsAre(SetT&& s,
+                          std::initializer_list<MatcherT> element_matchers) {
   std::vector<MatcherT> element_matchers_storage = element_matchers;
   ExpectSetElementsAre(s, element_matchers_storage);
 }
 
-template <typename RangeT, typename ...RangeTs>
-auto MakeElements(RangeT&& range, RangeTs&& ...ranges) {
+template <typename RangeT, typename... RangeTs>
+auto MakeElements(RangeT&& range, RangeTs&&... ranges) {
   std::vector<typename RangeT::value_type> elements;
   auto add_range = [&elements](RangeT&& r) {
     for (const auto&& e : r) {
@@ -191,8 +189,8 @@ TEST(SetTest, Basic) {
   }
   EXPECT_TRUE(s.Insert(73).is_inserted());
   EXPECT_TRUE(s.Contains(73));
-  ExpectSetElementsAre(
-      s, MakeElements(llvm::seq(50, 102), llvm::seq(136, 150)));
+  ExpectSetElementsAre(s,
+                       MakeElements(llvm::seq(50, 102), llvm::seq(136, 150)));
 
   // Reset back to empty and small.
   s.Reset();
@@ -236,8 +234,8 @@ TEST(SetTest, Basic) {
   }
   EXPECT_TRUE(s.Insert(93).is_inserted());
   EXPECT_TRUE(s.Contains(93));
-  ExpectSetElementsAre(
-      ViewT(s), MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
+  ExpectSetElementsAre(ViewT(s),
+                       MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
 }
 
 TEST(SetTest, FactoryAPI) {
@@ -381,10 +379,10 @@ TEST(SetTest, BasicRef) {
   }
   EXPECT_TRUE(s.Insert(93).is_inserted());
   EXPECT_TRUE(s.Contains(93));
-  ExpectSetElementsAre(
-      ViewT(s), MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
-  ExpectSetElementsAre(
-      ViewT(real_s), MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
+  ExpectSetElementsAre(ViewT(s),
+                       MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
+  ExpectSetElementsAre(ViewT(real_s),
+                       MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
 }
 
 }  // namespace
