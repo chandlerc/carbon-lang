@@ -196,8 +196,7 @@ cc_library(
     hdrs = ["map.h"],
     deps = [
         ":check",
-        ":hashing",
-        ":set",
+        ":raw_hashtable",
         "@llvm-project//llvm:Support",
     ],
 )

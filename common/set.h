@@ -63,12 +63,6 @@ class SetView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
   SetView(BaseT base) : BaseT(base) {}
   SetView(ssize_t size, RawHashtable::Storage* storage)
       : BaseT(size, storage) {}
-
-  template <typename LookupKeyT>
-  inline auto LookupHashed(LookupKeyT lookup_key) const -> LookupResult;
-
-  template <typename KeyCallbackT, typename GroupCallbackT>
-  void ForEachHashed(KeyCallbackT key_callback, GroupCallbackT group_callback);
 };
 
 template <typename InputKeyT>
@@ -233,8 +227,8 @@ class Set : public SetBase<InputKeyT> {
 
 template <typename KT>
 template <typename LookupKeyT>
-inline auto SetView<KT>::LookupHashed(LookupKeyT lookup_key) const
-    -> LookupResult {
+auto SetView<KT>::Lookup(LookupKeyT lookup_key) const -> LookupResult {
+  RawHashtable::Prefetch(this->storage_);
   ssize_t index = RawHashtable::LookupIndexHashed<KeyT>(
       lookup_key, this->size(), this->storage_);
   if (index < 0) {
@@ -242,13 +236,6 @@ inline auto SetView<KT>::LookupHashed(LookupKeyT lookup_key) const
   }
 
   return LookupResult(&this->keys_ptr()[index]);
-}
-
-template <typename KT>
-template <typename LookupKeyT>
-auto SetView<KT>::Lookup(LookupKeyT lookup_key) const -> LookupResult {
-  RawHashtable::Prefetch(this->storage_);
-  return this->LookupHashed(lookup_key);
 }
 
 template <typename KT>
