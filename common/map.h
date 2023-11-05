@@ -64,7 +64,8 @@ template <typename KeyT, typename ValueT, ssize_t SmallSize>
 struct SmallSizeStorage;
 
 template <typename KeyT, typename ValueT>
-struct SmallSizeStorage<KeyT, ValueT, 0> : RawHashtable::SmallSizeStorage<KeyT, 0> {
+struct SmallSizeStorage<KeyT, ValueT, 0>
+    : RawHashtable::SmallSizeStorage<KeyT, 0> {
   SmallSizeStorage() {}
   union {
     ValueT values[0];
@@ -92,7 +93,8 @@ class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
   class LookupKVResult {
    public:
     LookupKVResult() = default;
-    explicit LookupKVResult(KeyT* key, ValueT* value) : key_(key), value_(value) {}
+    explicit LookupKVResult(KeyT* key, ValueT* value)
+        : key_(key), value_(value) {}
 
     explicit operator bool() const { return key_ != nullptr; }
 
@@ -125,8 +127,7 @@ class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
   // NOLINTNEXTLINE(google-explicit-constructor): Implicit by design.
   MapView(BaseT base) : BaseT(base) {}
   MapView(ssize_t size, RawHashtable::Storage* storage)
-      : BaseT(size, storage) {
-  }
+      : BaseT(size, storage) {}
 
   auto values_ptr() const -> ValueT* {
     return reinterpret_cast<ValueT*>(
@@ -291,7 +292,7 @@ class MapBase : public RawHashtable::RawHashtableBase<InputKeyT> {
   explicit MapBase(ssize_t arg_size);
 
   ~MapBase();
-  
+
   auto values_ptr() -> ValueT* { return ViewT(*this).values_ptr(); }
 
   template <typename LookupKeyT>
@@ -348,8 +349,9 @@ class Map : public MapBase<InputKeyT, InputValueT> {
   // and the dynamically computed storage layout. We need to do this after both
   // are complete but in the context of a specific key type, value type, and
   // small size, so here is the best place.
-  static_assert(SmallSize == 0 || alignof(SmallSizeStorageT) ==
-                                   MapInternal::StorageAlignment<KeyT, ValueT>,
+  static_assert(SmallSize == 0 ||
+                    alignof(SmallSizeStorageT) ==
+                        MapInternal::StorageAlignment<KeyT, ValueT>,
                 "Small size buffer must have the same alignment as a heap "
                 "allocated buffer.");
   static_assert(
@@ -436,8 +438,9 @@ MapBase<KeyT, ValueT>::~MapBase() {
 
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-[[clang::noinline]] auto MapBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
-    LookupKeyT lookup_key) -> ssize_t {
+[[clang::noinline]] auto
+MapBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(LookupKeyT lookup_key)
+    -> ssize_t {
   // We grow into a new `MapBase` so that both the new and old maps are
   // fully functional until all the entries are moved over. However, we directly
   // manipulate the internals to short circuit many aspects of the growth.
