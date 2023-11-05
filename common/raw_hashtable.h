@@ -393,16 +393,6 @@ class RawHashtableViewBase {
                                    size());
   }
 
-  template <typename LookupKeyT>
-  inline auto ContainsHashed(LookupKeyT lookup_key) const -> bool;
-#if 0
-  template <typename LookupKeyT>
-  inline auto LookupHashed(LookupKeyT lookup_key) const -> LookupResultT;
-
-  template <typename KeyCallbackT, typename GroupCallbackT>
-  void ForEachHashed(KeyCallbackT key_callback, GroupCallbackT group_callback);
-#endif
-
   template <typename IndexCallbackT, typename GroupCallbackT>
   void ForEachIndex(IndexCallbackT index_callback, GroupCallbackT group_callback);
 
@@ -421,33 +411,6 @@ class RawHashtableBase {
   template <typename LookupKeyT>
   auto Contains(LookupKeyT lookup_key) const -> bool {
     return ViewBaseT(*this).Contains(lookup_key);
-  }
-
-#if 0
-  template <typename LookupKeyT>
-  auto Lookup(LookupKeyT lookup_key) const -> LookupResultT {
-    return ViewT(*this).Lookup(lookup_key);
-  }
-
-  template <typename CallbackT>
-  void ForEach(CallbackT callback) {
-    return ViewT(*this).ForEach(callback);
-  }
-#endif
-
-#if 0
-  template <typename LookupKeyT>
-  auto Insert(LookupKeyT lookup_key,
-              typename std::__type_identity<llvm::function_ref<
-                  auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>>::type
-                  insert_cb) -> InsertResultT;
-
-  template <typename LookupKeyT>
-  auto Insert(LookupKeyT lookup_key) -> InsertResultT {
-    return Insert(lookup_key,
-                  [](LookupKeyT lookup_key, void* key_storage) -> KeyT* {
-                    return new (key_storage) KeyT(lookup_key);
-                  });
   }
 
   template <typename LookupKeyT>
@@ -491,13 +454,6 @@ class RawHashtableBase {
   auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<uint32_t, ssize_t>;
   template <typename LookupKeyT>
   auto InsertIntoEmptyIndex(LookupKeyT lookup_key) -> ssize_t;
-#if 0
-  template <typename LookupKeyT>
-  auto InsertHashed(
-      LookupKeyT lookup_key,
-      llvm::function_ref<auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>
-          insert_cb) -> InsertResultT;
-#endif
 
   template <typename LookupKeyT>
   auto EraseKey(LookupKeyT lookup_key) -> ssize_t;
@@ -623,17 +579,11 @@ auto LookupIndexHashed(LookupKeyT lookup_key, ssize_t size,
 
 template <typename InputKeyT>
 template <typename LookupKeyT>
-inline auto RawHashtableViewBase<InputKeyT>::ContainsHashed(LookupKeyT lookup_key) const -> bool {
-  return SetInternal::LookupIndexHashed<KeyT>(lookup_key, size(), storage_) >=
-         0;
-}
-
-template <typename InputKeyT>
-template <typename LookupKeyT>
 auto RawHashtableViewBase<InputKeyT>::Contains(LookupKeyT lookup_key) const
     -> bool {
   SetInternal::Prefetch(storage_);
-  return ContainsHashed(lookup_key);
+  return SetInternal::LookupIndexHashed<KeyT>(lookup_key, size(), storage_) >=
+         0;
 }
 
 template <typename InputKeyT>

@@ -205,15 +205,6 @@ class SetBase : public SetInternal::RawHashtableBase<InputKeyT> {
 
   template <typename LookupKeyT>
   auto GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> ssize_t;
-
-  template <typename LookupKeyT>
-  auto InsertHashed(
-      LookupKeyT lookup_key,
-      llvm::function_ref<auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>
-          insert_cb) -> InsertResultT;
-
-  template <typename LookupKeyT>
-  auto EraseHashed(LookupKeyT lookup_key) -> bool;
 };
 
 template <typename InputKeyT,
@@ -395,12 +386,13 @@ template <typename LookupKeyT>
   return this->InsertIntoEmptyIndex(lookup_key);
 }
 
-template <typename KeyT>
+template <typename KT>
 template <typename LookupKeyT>
-auto SetBase<KeyT>::InsertHashed(
+auto SetBase<KT>::Insert(
     LookupKeyT lookup_key,
-    llvm::function_ref<auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>
-        insert_cb) -> InsertResultT {
+    typename std::__type_identity<llvm::function_ref<
+        auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>>::type insert_cb)
+    -> InsertResultT {
   ssize_t index = -1;
   // Try inserting if we have storage at all.
   if (this->size() > 0) {
@@ -428,18 +420,6 @@ auto SetBase<KeyT>::InsertHashed(
 
   KeyT* k = insert_cb(lookup_key, &this->keys_ptr()[index]);
   return InsertResultT(true, *k);
-}
-
-template <typename KT>
-template <typename LookupKeyT>
-auto SetBase<KT>::Insert(
-    LookupKeyT lookup_key,
-    typename std::__type_identity<llvm::function_ref<
-        auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>>::type insert_cb)
-    -> InsertResultT {
-  // Otherwise we dispatch to the hashed routine which is the same for small
-  // and large.
-  return InsertHashed(lookup_key, insert_cb);
 }
 
 template <typename KeyT>
