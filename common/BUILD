@@ -197,6 +197,7 @@ cc_library(
     deps = [
         ":check",
         ":hashing",
+        ":set",
         "@llvm-project//llvm:Support",
     ],
 )
@@ -233,11 +234,21 @@ cc_library(
 )
 
 cc_library(
+    name = "raw_hashtable",
+    hdrs = ["raw_hashtable.h"],
+    deps = [
+        ":check",
+        ":hashing",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
     name = "set",
     hdrs = ["set.h"],
     deps = [
         ":check",
-        ":hashing",
+        ":raw_hashtable",
         "@llvm-project//llvm:Support",
     ],
 )
