@@ -29,8 +29,7 @@
 #define CARBON_USE_NEON_SIMD_CONTROL_GROUP 1
 #endif
 
-namespace Carbon {
-namespace SetInternal {
+namespace Carbon::RawHashtable {
 
 template <typename MaskT, int Shift = 0, MaskT ZeroMask = 0>
 class BitIndexRange {
@@ -360,6 +359,45 @@ constexpr auto ComputeKeyStorageOffset(ssize_t size) -> ssize_t {
   return llvm::alignTo<alignof(KeyT)>(size);
 }
 
+template <ssize_t MinSmallSize>
+constexpr auto ComputeSmallSize() -> ssize_t {
+  return llvm::alignTo<GroupSize>(MinSmallSize);
+}
+
+template <typename KeyT, ssize_t SmallSize>
+struct SmallSizeStorage;
+
+template <typename KeyT>
+struct SmallSizeStorage<KeyT, 0> : Storage {
+  SmallSizeStorage() {}
+  union {
+    KeyT keys[0];
+  };
+};
+
+template <typename KeyT, ssize_t SmallSize>
+struct alignas(StorageAlignment<KeyT>) SmallSizeStorage : Storage {
+  SmallSizeStorage() {}
+
+  // FIXME: One interesting question is whether the small size should be a
+  // minimum here or an exact figure.
+  static_assert(llvm::isPowerOf2_64(SmallSize),
+                "SmallSize must be a power of two for a hashed buffer!");
+  static_assert(SmallSize >= GroupSize,
+                "SmallSize must be at least the size of one group!");
+  static_assert((SmallSize % GroupSize) == 0,
+                "SmallSize must be a multiple of the group size!");
+  static constexpr ssize_t SmallNumGroups = SmallSize / GroupSize;
+  static_assert(llvm::isPowerOf2_64(SmallNumGroups),
+                "The number of groups must be a power of two when hashing!");
+
+  Group groups[SmallNumGroups];
+
+  union {
+    KeyT keys[SmallSize];
+  };
+};
+
 template <typename KeyT>
 class RawHashtableBase;
 
@@ -375,7 +413,7 @@ class RawHashtableViewBase {
   friend class RawHashtableBase<KeyT>;
 
   RawHashtableViewBase() = default;
-  RawHashtableViewBase(ssize_t size, SetInternal::Storage* storage)
+  RawHashtableViewBase(ssize_t size, Storage* storage)
       : size_(size), storage_(storage) {}
 
   auto size() const -> ssize_t { return size_; }
@@ -386,7 +424,7 @@ class RawHashtableViewBase {
   auto keys_ptr() const -> KeyT* {
     CARBON_DCHECK(llvm::isPowerOf2_64(size()))
         << "Size must be a power of two for a hashed buffer!";
-    CARBON_DCHECK(size() == SetInternal::ComputeKeyStorageOffset<KeyT>(size()))
+    CARBON_DCHECK(size() == ComputeKeyStorageOffset<KeyT>(size()))
         << "Cannot be more aligned than a power of two.";
     return reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(storage_) +
                                    size());
@@ -397,7 +435,7 @@ class RawHashtableViewBase {
                     GroupCallbackT group_callback);
 
   ssize_t size_;
-  SetInternal::Storage* storage_;
+  Storage* storage_;
 };
 
 template <typename InputKeyT>
@@ -414,7 +452,7 @@ class RawHashtableBase {
   }
 
  protected:
-  RawHashtableBase(int small_size, SetInternal::Storage* small_storage) {
+  RawHashtableBase(int small_size, Storage* small_storage) {
     Init(small_size, small_storage);
     small_size_ = small_size;
   }
@@ -430,8 +468,8 @@ class RawHashtableBase {
 
   auto size() const -> ssize_t { return impl_view_.size_; }
   auto size() -> ssize_t& { return impl_view_.size_; }
-  auto storage() const -> SetInternal::Storage* { return impl_view_.storage_; }
-  auto storage() -> SetInternal::Storage*& { return impl_view_.storage_; }
+  auto storage() const -> Storage* { return impl_view_.storage_; }
+  auto storage() -> Storage*& { return impl_view_.storage_; }
 
   auto groups_ptr() -> uint8_t* { return impl_view_.groups_ptr(); }
   auto keys_ptr() -> KeyT* { return impl_view_.keys_ptr(); }
@@ -574,9 +612,8 @@ template <typename InputKeyT>
 template <typename LookupKeyT>
 auto RawHashtableViewBase<InputKeyT>::Contains(LookupKeyT lookup_key) const
     -> bool {
-  SetInternal::Prefetch(storage_);
-  return SetInternal::LookupIndexHashed<KeyT>(lookup_key, size(), storage_) >=
-         0;
+  Prefetch(storage_);
+  return LookupIndexHashed<KeyT>(lookup_key, size(), storage_) >= 0;
 }
 
 template <typename InputKeyT>
@@ -588,8 +625,8 @@ template <typename IndexCallbackT, typename GroupCallbackT>
 
   ssize_t local_size = this->size();
   for (ssize_t group_index = 0; group_index < local_size;
-       group_index += SetInternal::GroupSize) {
-    auto g = SetInternal::Group::Load(groups, group_index);
+       group_index += GroupSize) {
+    auto g = Group::Load(groups, group_index);
     auto present_matched_range = g.MatchPresent();
     if (!present_matched_range) {
       continue;
@@ -624,7 +661,7 @@ template <typename LookupKeyT>
   uint8_t control_byte = ComputeControlByte(tag);
 
   ssize_t group_with_deleted_index = -1;
-  SetInternal::Group::MatchedRange deleted_matched_range;
+  Group::MatchedRange deleted_matched_range;
 
   auto return_insert_at_index = [&](ssize_t index) -> std::pair<bool, ssize_t> {
     // We'll need to insert at this index so set the control group byte to the
@@ -635,7 +672,7 @@ template <typename LookupKeyT>
 
   for (ProbeSequence s(hash_index, size());; s.step()) {
     ssize_t group_index = s.getIndex();
-    auto g = SetInternal::Group::Load(groups, group_index);
+    auto g = Group::Load(groups, group_index);
 
     auto control_byte_matched_range = g.Match(control_byte);
     if (control_byte_matched_range) {
@@ -699,11 +736,11 @@ template <typename LookupKeyT>
   auto seed = reinterpret_cast<uint64_t>(groups);
   HashCode hash = HashValue(lookup_key, seed);
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size());
-  uint8_t control_byte = SetInternal::ComputeControlByte(tag);
+  uint8_t control_byte = ComputeControlByte(tag);
 
-  for (SetInternal::ProbeSequence s(hash_index, size());; s.step()) {
+  for (ProbeSequence s(hash_index, size());; s.step()) {
     ssize_t group_index = s.getIndex();
-    auto g = SetInternal::Group::Load(groups, group_index);
+    auto g = Group::Load(groups, group_index);
 
     if (auto empty_matched_range = g.MatchEmpty()) {
       ssize_t index = group_index + *empty_matched_range.begin();
@@ -760,14 +797,14 @@ auto RawHashtableBase<InputKeyT>::EraseKey(LookupKeyT lookup_key) -> ssize_t {
   // If we mark the slot as empty, we'll also need to increase the growth
   // budget.
   uint8_t* groups = this->groups_ptr();
-  ssize_t group_index = index & ~SetInternal::GroupMask;
-  auto g = SetInternal::Group::Load(groups, group_index);
+  ssize_t group_index = index & ~GroupMask;
+  auto g = Group::Load(groups, group_index);
   auto empty_matched_range = g.MatchEmpty();
   if (empty_matched_range) {
-    groups[index] = SetInternal::Group::Empty;
+    groups[index] = Group::Empty;
     ++this->growth_budget_;
   } else {
-    groups[index] = SetInternal::Group::Deleted;
+    groups[index] = Group::Deleted;
   }
 
   // Also destroy the key while we're here.
@@ -785,14 +822,13 @@ void RawHashtableBase<InputKeyT>::ClearImpl(IndexCallback index_callback) {
   this->impl_view_.ForEachIndex(
       index_callback, [](uint8_t* groups, ssize_t group_index) {
         // Clear the group.
-        std::memset(groups + group_index, 0, SetInternal::GroupSize);
+        std::memset(groups + group_index, 0, GroupSize);
       });
 
   // And reset the growth budget.
-  this->growth_budget_ = SetInternal::GrowthThresholdForSize(size());
+  this->growth_budget_ = GrowthThresholdForSize(size());
 }
 
-}  // namespace SetInternal
-}  // namespace Carbon
+}  // namespace Carbon::RawHashtable
 
 #endif  // CARBON_COMMON_RAW_HASHTABLE_H_
