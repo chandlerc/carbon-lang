@@ -6,7 +6,6 @@
 #define CARBON_COMMON_RAW_HASHTABLE_H_
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <iterator>
@@ -385,10 +384,10 @@ class RawHashtableViewBase {
     return reinterpret_cast<uint8_t*>(storage_);
   }
   auto keys_ptr() const -> KeyT* {
-    assert(llvm::isPowerOf2_64(size()) &&
-           "Size must be a power of two for a hashed buffer!");
-    assert(size() == SetInternal::ComputeKeyStorageOffset<KeyT>(size()) &&
-           "Cannot be more aligned than a power of two.");
+    CARBON_DCHECK(llvm::isPowerOf2_64(size()))
+        << "Size must be a power of two for a hashed buffer!";
+    CARBON_DCHECK(size() == SetInternal::ComputeKeyStorageOffset<KeyT>(size()))
+        << "Cannot be more aligned than a power of two.";
     return reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(storage_) +
                                    size());
   }
@@ -461,8 +460,8 @@ class RawHashtableBase {
 };
 
 inline auto ComputeProbeMaskFromSize(ssize_t size) -> size_t {
-  assert(llvm::isPowerOf2_64(size) &&
-         "Size must be a power of two for a hashed buffer!");
+  CARBON_DCHECK(llvm::isPowerOf2_64(size))
+      << "Size must be a power of two for a hashed buffer!";
   // The probe mask needs to mask down to keep the index within
   // `groups_size`. Since `groups_size` is a power of two, this is equivalent to
   // `groups_size - 1`.
@@ -510,14 +509,14 @@ class ProbeSequence {
   void step() {
     Step += GroupSize;
     i = (i + Step) & Mask;
-    assert(i == ((Start + ((Step + (Step * Step * GroupSize) /
-                                       (GroupSize * GroupSize)) /
-                           2)) %
-                 Size) &&
-           "Index in probe sequence does not match the expected formula.");
-    assert(Step < Size &&
-           "We necessarily visit all groups, so we can't have "
-           "more probe steps than groups.");
+    CARBON_DCHECK(
+        i ==
+        ((Start +
+          ((Step + (Step * Step * GroupSize) / (GroupSize * GroupSize)) / 2)) %
+         Size))
+        << "Index in probe sequence does not match the expected formula.";
+    CARBON_DCHECK(Step < Size) << "We necessarily visit all groups, so we "
+                                  "can't have more probe steps than groups.";
   }
 
   auto getIndex() const -> ssize_t { return i; }
@@ -725,8 +724,8 @@ inline auto ComputeNewSize(ssize_t old_size) -> ssize_t {
   // Otherwise, we want the next power of two. This should always be a power of
   // two coming in, and so we just verify that. Also verify that this doesn't
   // overflow.
-  assert(old_size == (ssize_t)llvm::PowerOf2Ceil(old_size) &&
-         "Expected a power of two!");
+  CARBON_DCHECK(old_size == (ssize_t)llvm::PowerOf2Ceil(old_size))
+      << "Expected a power of two!";
   return old_size * 2;
 }
 

@@ -6,7 +6,6 @@
 #define CARBON_COMMON_SET_H_
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #include <new>
 #include <tuple>
@@ -15,9 +14,7 @@
 #include "common/check.h"
 #include "common/raw_hashtable.h"
 #include "llvm/ADT/PointerIntPair.h"
-#include "llvm/ADT/Sequence.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
 
 namespace Carbon {
@@ -361,8 +358,8 @@ template <typename LookupKeyT>
       },
       [](auto...) {});
   new_map.growth_budget_ -= insert_count;
-  assert(new_map.growth_budget_ >= 0 &&
-          "Must still have a growth budget after rehash!");
+  CARBON_DCHECK(new_map.growth_budget_ >= 0 &&
+                "Must still have a growth budget after rehash!");
 
   if (LLVM_LIKELY(!this->is_small())) {
     // Old isn't a small buffer, so we need to deallocate it.
@@ -399,24 +396,25 @@ auto SetBase<KT>::Insert(
     bool needs_insertion;
     std::tie(needs_insertion, index) = this->InsertIndexHashed(lookup_key);
     if (LLVM_LIKELY(!needs_insertion)) {
-      assert(index >= 0 &&
-             "Must have a valid group when we find an existing entry.");
+      CARBON_DCHECK(index >= 0)
+          << "Must have a valid group when we find an existing entry.";
       return InsertResultT(false, this->keys_ptr()[index]);
     }
   }
 
   if (index < 0) {
-    assert(
-        this->growth_budget_ == 0 &&
-        "Shouldn't need to grow the table until we exhaust our growth budget!");
+    CARBON_DCHECK(this->growth_budget_ == 0)
+        << "Shouldn't need to grow the table until we exhaust our growth "
+           "budget!";
 
     index = this->GrowRehashAndInsertIndex(lookup_key);
   } else {
-    assert(this->growth_budget_ >= 0 && "Cannot insert with zero budget!");
+    CARBON_DCHECK(this->growth_budget_ >= 0)
+        << "Cannot insert with zero budget!";
     --this->growth_budget_;
   }
 
-  assert(index >= 0 && "Should have a group to insert into now.");
+  CARBON_DCHECK(index >= 0) << "Should have a group to insert into now.";
 
   KeyT* k = insert_cb(lookup_key, &this->keys_ptr()[index]);
   return InsertResultT(true, *k);
@@ -457,7 +455,7 @@ void Set<KeyT, MinSmallSize>::Reset() {
   SetInternal::DeallocateStorage<KeyT>(this->storage(), this->size());
 
   // Re-initialize the whole thing.
-  assert(this->small_size() == SmallSize);
+  CARBON_DCHECK(this->small_size() == SmallSize);
   this->Init(SmallSize, small_storage());
 }
 
