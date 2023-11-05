@@ -361,7 +361,8 @@ constexpr auto ComputeKeyStorageOffset(ssize_t size) -> ssize_t {
   return llvm::alignTo<alignof(KeyT)>(size);
 }
 
-template <typename KeyT> class RawHashtableBase;
+template <typename KeyT>
+class RawHashtableBase;
 
 template <typename InputKeyT>
 class RawHashtableViewBase {
@@ -376,8 +377,7 @@ class RawHashtableViewBase {
 
   RawHashtableViewBase() = default;
   RawHashtableViewBase(ssize_t size, SetInternal::Storage* storage)
-      : size_(size), storage_(storage) {
-  }
+      : size_(size), storage_(storage) {}
 
   auto size() const -> ssize_t { return size_; }
 
@@ -394,7 +394,8 @@ class RawHashtableViewBase {
   }
 
   template <typename IndexCallbackT, typename GroupCallbackT>
-  void ForEachIndex(IndexCallbackT index_callback, GroupCallbackT group_callback);
+  void ForEachIndex(IndexCallbackT index_callback,
+                    GroupCallbackT group_callback);
 
   ssize_t size_;
   SetInternal::Storage* storage_;
@@ -405,19 +406,13 @@ class RawHashtableBase {
  public:
   using KeyT = InputKeyT;
   using ViewBaseT = RawHashtableViewBase<KeyT>;
-  //using LookupResultT = SetInternal::LookupResult<KeyT>;
-  //using InsertResultT = SetInternal::InsertResult<KeyT>;
+  // using LookupResultT = SetInternal::LookupResult<KeyT>;
+  // using InsertResultT = SetInternal::InsertResult<KeyT>;
 
   template <typename LookupKeyT>
   auto Contains(LookupKeyT lookup_key) const -> bool {
     return ViewBaseT(*this).Contains(lookup_key);
   }
-
-  template <typename LookupKeyT>
-  auto Erase(LookupKeyT lookup_key) -> bool;
-
-  void Clear();
-#endif
 
  protected:
   RawHashtableBase(int small_size, SetInternal::Storage* small_storage) {
@@ -441,7 +436,6 @@ class RawHashtableBase {
 
   auto groups_ptr() -> uint8_t* { return impl_view_.groups_ptr(); }
   auto keys_ptr() -> KeyT* { return impl_view_.keys_ptr(); }
-
 
   auto is_small() const -> bool { return size() <= small_size(); }
   auto small_size() const -> ssize_t {
@@ -537,14 +531,14 @@ inline auto ComputeControlByte(size_t tag) -> uint8_t {
 
 template <typename KeyT, typename LookupKeyT>
 //[[clang::noinline]]
-auto LookupIndexHashed(LookupKeyT lookup_key, ssize_t size,
-                                           Storage* storage) -> ssize_t {
+auto LookupIndexHashed(LookupKeyT lookup_key, ssize_t size, Storage* storage)
+    -> ssize_t {
   uint8_t* groups = reinterpret_cast<uint8_t*>(storage);
   auto seed = reinterpret_cast<uint64_t>(groups);
   HashCode hash = HashValue(lookup_key, seed);
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size);
   uint8_t control_byte = ComputeControlByte(tag);
-  //ssize_t hash_index = ComputeHashIndex(hash, groups);
+  // ssize_t hash_index = ComputeHashIndex(hash, groups);
 
   KeyT* keys =
       reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(storage) + size);
@@ -742,7 +736,8 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
 }
 
 template <typename InputKeyT>
-void RawHashtableBase<InputKeyT>::Init(ssize_t init_size, Storage* init_storage) {
+void RawHashtableBase<InputKeyT>::Init(ssize_t init_size,
+                                       Storage* init_storage) {
   size() = init_size;
   storage() = init_storage;
   std::memset(groups_ptr(), 0, init_size);
