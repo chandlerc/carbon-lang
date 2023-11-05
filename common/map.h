@@ -6,7 +6,6 @@
 #define CARBON_COMMON_MAP_H_
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #include <new>
 #include <tuple>
@@ -502,25 +501,26 @@ auto MapBase<KT, VT>::Insert(
     bool needs_insertion;
     std::tie(needs_insertion, index) = this->InsertIndexHashed(lookup_key);
     if (LLVM_LIKELY(!needs_insertion)) {
-      assert(index >= 0 &&
-             "Must have a valid group when we find an existing entry.");
+      CARBON_DCHECK(index >= 0)
+          << "Must have a valid group when we find an existing entry.";
       return InsertKVResult(false, this->keys_ptr()[index],
                             values_ptr()[index]);
     }
   }
 
   if (index < 0) {
-    assert(
-        this->growth_budget_ == 0 &&
-        "Shouldn't need to grow the table until we exhaust our growth budget!");
+    CARBON_DCHECK(this->growth_budget_ == 0)
+        << "Shouldn't need to grow the table until we exhaust our growth "
+           "budget!";
 
     index = GrowRehashAndInsertIndex(lookup_key);
   } else {
-    assert(this->growth_budget_ >= 0 && "Cannot insert with zero budget!");
+    CARBON_DCHECK(this->growth_budget_ >= 0)
+        << "Cannot insert with zero budget!";
     --this->growth_budget_;
   }
 
-  assert(index >= 0 && "Should have a group to insert into now.");
+  CARBON_DCHECK(index >= 0) << "Should have a group to insert into now.";
 
   KeyT* k;
   ValueT* v;
@@ -548,8 +548,8 @@ auto MapBase<KT, VT>::Update(
     keys = this->keys_ptr();
     values = values_ptr();
     if (LLVM_LIKELY(!needs_insertion)) {
-      assert(index >= 0 &&
-             "Must have a valid group when we find an existing entry.");
+      CARBON_DCHECK(index >= 0)
+          << "Must have a valid group when we find an existing entry.";
       KeyT& k = keys[index];
       ValueT& v = update_cb(k, values[index]);
       return InsertKVResult(false, k, v);
