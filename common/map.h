@@ -355,18 +355,27 @@ MapBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(LookupKeyT lookup_key)
   ValueT* old_values = values_ptr();
 
   ssize_t insert_count = 0;
+  KeyT* new_keys = new_map.keys_ptr();
+  ValueT* new_values = new_map.values_ptr();
   ViewT(*this).ForEachIndex(
       [&](KeyT* old_keys, ssize_t old_index) {
         ++insert_count;
-        KeyT& old_key = old_keys[old_index];
-        ValueT& old_value = old_values[old_index];
+
+        // We optimize for small keys that are likely to fit into a register and
+        // move twice to avoid loading the key twice from the old table -- first
+        // to hash it and a second time prior to storing it into the new table.
+        KeyT& old_key_ref = old_keys[old_index];
+        KeyT old_key = std::move(old_key_ref);
+        old_key_ref.~KeyT();
+
         ssize_t new_index = new_map.InsertIntoEmptyIndex(old_key);
-        KeyT* new_keys = new_map.keys_ptr();
-        ValueT* new_values = new_map.values_ptr();
         new (&new_keys[new_index]) KeyT(std::move(old_key));
         old_key.~KeyT();
-        new (&new_values[new_index]) ValueT(std::move(old_value));
-        old_value.~ValueT();
+
+        // Move directly from the old value to the new one.
+        ValueT& old_value_ref = old_values[old_index];
+        new (&new_values[new_index]) ValueT(std::move(old_value_ref));
+        old_value_ref.~ValueT();
       },
       [](auto...) {});
   new_map.growth_budget_ -= insert_count;

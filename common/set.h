@@ -246,7 +246,14 @@ template <typename LookupKeyT>
   ViewT(*this).ForEachIndex(
       [&](KeyT* old_keys, ssize_t old_index) {
         ++insert_count;
-        KeyT old_key = std::move(old_keys[old_index]);
+
+        // We optimize for small keys that are likely to fit into a register and
+        // move twice to avoid loading the key twice from the old table -- first
+        // to hash it and a second time prior to storing it into the new table.
+        KeyT& old_key_ref = old_keys[old_index];
+        KeyT old_key = std::move(old_key_ref);
+        old_key_ref.~KeyT();
+        
         ssize_t new_index = new_map.InsertIntoEmptyIndex(old_key);
         new (&new_keys[new_index]) KeyT(std::move(old_key));
       },
