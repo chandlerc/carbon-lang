@@ -29,7 +29,37 @@
 #define CARBON_USE_NEON_SIMD_CONTROL_GROUP 1
 #endif
 
+// A namespace collecting a set of low-level utilities for building hashtable
+// data structures. These should only be used as implementation details of
+// higher-level data structure APIs.
+//
+// For example, see `set.h` for a hashtable-based set data structure, and
+// `map.h` for a hashtable-based map data structure.
+//
+// The utilities in this namespace fall into a few categories:
+//
+// - Primitives to manage "groups" of hashtable entries that have densely packed
+//   control bytes we can scan rapidly as a group, often using SIMD facilities to
+//   process the entire group at once.
+//
+// - Tools to manipulate and work with the storage of offsets needed to
+//   represent both key and key-value hashtables using these groups to organize
+//   their entries.
+//
+// - Abstractions around efficiently probing across the hashtable consisting of
+//   these "groups" of entries, and scanning within them to implement traditional
+//   open-hashing hashtable operations.
+//
+// - Base classes to provide as much of the implementation of the user-facing
+//   APIs as possible in a common way. This includes the most performance
+//   sensitive code paths for the implementation of the data structures.
 namespace Carbon::RawHashtable {
+
+// We define a constant max group size. The particular group size used in
+// practice may vary, but we want to have some upper bound that can be reliably
+// used when allocating memory to ensure we don't create fractional groups and
+// memory allocation is done consistently across the architectures.
+constexpr ssize_t MaxGroupSize = 16;
 
 template <typename MaskT, int Shift = 0, MaskT ZeroMask = 0>
 class BitIndexRange {
@@ -331,6 +361,8 @@ using Group = PortableGroup;
 #endif
 
 constexpr ssize_t GroupSize = sizeof(Group);
+static_assert(GroupSize <= MaxGroupSize);
+static_assert(MaxGroupSize % GroupSize == 0);
 static_assert(llvm::isPowerOf2_64(GroupSize),
               "The group size must be a constant power of two so dividing by "
               "it is a simple shift.");
@@ -349,52 +381,131 @@ constexpr ssize_t GroupMask = GroupSize - 1;
 // This also lets us define statically allocated storage as subclasses.
 struct Storage {};
 
-template <typename KeyT>
+template <typename ...Ts>
 constexpr ssize_t StorageAlignment =
-    std::max<ssize_t>({GroupSize, alignof(Group), alignof(KeyT)});
+    std::max<ssize_t>({GroupSize, alignof(Group), alignof(Ts)...});
 
+// Utility function to compute the offset from the storage pointer to the key
+// array.
 template <typename KeyT>
 constexpr auto ComputeKeyStorageOffset(ssize_t size) -> ssize_t {
   // There are `size` control bytes plus any alignment needed for the key type.
   return llvm::alignTo<alignof(KeyT)>(size);
 }
 
-template <ssize_t MinSmallSize>
-constexpr auto ComputeSmallSize() -> ssize_t {
-  return llvm::alignTo<GroupSize>(MinSmallSize);
+// Utility function to compute the offset from the storage pointer to the value
+// array (assuming one exists). This is only valid to use in map-oriented
+// derivations of the raw hashtables where we have both key and value storage.
+template <typename KeyT, typename ValueT>
+constexpr auto ComputeValueStorageOffset(ssize_t size) -> ssize_t {
+  // Skip the keys themselves.
+  ssize_t offset = sizeof(KeyT) * size;
+
+  // If the value type alignment is smaller than the key's, we're done.
+  if constexpr (alignof(ValueT) <= alignof(KeyT)) {
+    return offset;
+  }
+
+  // Otherwise, skip the alignment for the value type.
+  return llvm::alignTo<alignof(ValueT)>(offset);
 }
 
+template <typename KeyT>
+constexpr static auto ComputeKeyStorageSize(ssize_t size) -> ssize_t {
+  return ComputeKeyStorageOffset<KeyT>(size) + sizeof(KeyT) * size;
+}
+
+template <typename KeyT, typename ValueT>
+constexpr static auto ComputeKeyValueStorageSize(ssize_t size) -> ssize_t {
+  return ComputeKeyStorageOffset<KeyT>(size) +
+         ComputeValueStorageOffset<KeyT, ValueT>(size) + sizeof(ValueT) * size;
+}
+
+// Template classes to form helper classes of small-size storage buffers with
+// the correct layout. These can be used by either set-oriented hash tables or
+// map-oriented to provide inline storage.
 template <typename KeyT, ssize_t SmallSize>
-struct SmallSizeStorage;
+struct SmallSizeKeyStorage;
+template <typename KeyT, typename ValueT, ssize_t SmallSize>
+struct SmallSizeKeyValueStorage;
 
 template <typename KeyT>
-struct SmallSizeStorage<KeyT, 0> : Storage {
-  SmallSizeStorage() {}
+struct SmallSizeKeyStorage<KeyT, 0> : Storage {
+  SmallSizeKeyStorage() {}
   union {
     KeyT keys[0];
   };
 };
+template <typename KeyT, typename ValueT>
+struct SmallSizeKeyValueStorage<KeyT, ValueT, 0> : SmallSizeKeyStorage<KeyT, 0> {
+  SmallSizeKeyValueStorage() {}
+  union {
+    ValueT values[0];
+  };
+};
 
 template <typename KeyT, ssize_t SmallSize>
-struct alignas(StorageAlignment<KeyT>) SmallSizeStorage : Storage {
-  SmallSizeStorage() {}
-
-  // FIXME: One interesting question is whether the small size should be a
-  // minimum here or an exact figure.
+struct alignas(StorageAlignment<KeyT>) SmallSizeKeyStorage : Storage {
+  // Do early validation of the small size here.
   static_assert(llvm::isPowerOf2_64(SmallSize),
                 "SmallSize must be a power of two for a hashed buffer!");
-  static_assert(SmallSize >= GroupSize,
-                "SmallSize must be at least the size of one group!");
-  static_assert((SmallSize % GroupSize) == 0,
-                "SmallSize must be a multiple of the group size!");
+  static_assert(SmallSize >= MaxGroupSize,
+                "We require all small sizes to multiples of the largest group "
+                "size supported to ensure it can be used portably.  ");
+  static_assert((SmallSize % MaxGroupSize) == 0,
+                "Small size must be a multiple of the max group size supported "
+                "so that we can allocate a whole number of groups.");
+  // Implied by the max asserts above.
+  static_assert(SmallSize >= GroupSize);
+  static_assert((SmallSize % GroupSize) == 0);
+
   static constexpr ssize_t SmallNumGroups = SmallSize / GroupSize;
   static_assert(llvm::isPowerOf2_64(SmallNumGroups),
                 "The number of groups must be a power of two when hashing!");
+
+  SmallSizeKeyStorage() {
+    // Validate a collection of invariants between the small size storage layout
+    // and the dynamically computed storage layout. We need the key type to be
+    // complete so we do this in the constructor body.
+    static_assert(SmallSize == 0 || alignof(SmallSizeKeyStorage) ==
+                                        StorageAlignment<KeyT>,
+                  "Small size buffer must have the same alignment as a heap "
+                  "allocated buffer.");
+    static_assert(
+        SmallSize == 0 || (offsetof(SmallSizeKeyStorage, keys) ==
+                           ComputeKeyStorageOffset<KeyT>(SmallSize)),
+        "Offset to keys in small size storage doesn't match computed offset!");
+    static_assert(SmallSize == 0 || sizeof(SmallSizeKeyStorage) ==
+                                        ComputeKeyStorageSize<KeyT>(SmallSize),
+                  "The small size storage needs to match the dynamically "
+                  "computed storage size.");
+  }
 
   Group groups[SmallNumGroups];
 
   union {
     KeyT keys[SmallSize];
+  };
+};
+template <typename KeyT, typename ValueT, ssize_t SmallSize>
+struct alignas(StorageAlignment<KeyT, ValueT>) SmallSizeKeyValueStorage
+    : RawHashtable::SmallSizeKeyStorage<KeyT, SmallSize> {
+  SmallSizeKeyValueStorage() {
+    static_assert(SmallSize == 0 ||
+                      offsetof(SmallSizeKeyValueStorage, values) ==
+                          (ComputeKeyStorageOffset<KeyT>(SmallSize) +
+                           ComputeValueStorageOffset<KeyT, ValueT>(SmallSize)),
+                  "Offset from keys to values in small size storage doesn't "
+                  "match computed offset!");
+    static_assert(SmallSize == 0 ||
+                      sizeof(SmallSizeKeyValueStorage) ==
+                          ComputeKeyValueStorageSize<KeyT, ValueT>(SmallSize),
+                  "The small size storage needs to match the dynamically "
+                  "computed storage size.");
+  }
+
+  union {
+    ValueT values[SmallSize];
   };
 };
 
@@ -547,6 +658,7 @@ class ProbeSequence {
   void step() {
     Step += GroupSize;
     i = (i + Step) & Mask;
+#ifndef NDEBUG
     CARBON_DCHECK(
         i ==
         ((Start +
@@ -555,6 +667,7 @@ class ProbeSequence {
         << "Index in probe sequence does not match the expected formula.";
     CARBON_DCHECK(Step < Size) << "We necessarily visit all groups, so we "
                                   "can't have more probe steps than groups.";
+#endif
   }
 
   auto getIndex() const -> ssize_t { return i; }
@@ -675,6 +788,7 @@ template <typename LookupKeyT>
     auto g = Group::Load(groups, group_index);
 
     auto control_byte_matched_range = g.Match(control_byte);
+    auto empty_matched_range = g.MatchEmpty();
     if (control_byte_matched_range) {
       auto byte_it = control_byte_matched_range.begin();
       auto byte_end = control_byte_matched_range.end();
@@ -697,7 +811,6 @@ template <typename LookupKeyT>
 
     // We failed to find a matching entry in this bucket, so check if there are
     // no empty slots. In that case, we'll continue probing.
-    auto empty_matched_range = g.MatchEmpty();
     if (LLVM_LIKELY(!empty_matched_range)) {
       continue;
     }
@@ -753,9 +866,11 @@ template <typename LookupKeyT>
 }
 
 inline auto ComputeNewSize(ssize_t old_size) -> ssize_t {
-  if (old_size < (4 * GroupSize)) {
-    // If we're going to heap allocate, get at least four groups.
-    return 4 * GroupSize;
+  // If we're going to heap allocate, allocate enough to fill a 64-byte
+  // cacheline with the control bytes or one group, whichever is larger.
+  constexpr ssize_t MinSize = std::max<ssize_t>(64, MaxGroupSize);
+  if (old_size < MinSize) {
+    return MinSize;
   }
 
   // Otherwise, we want the next power of two. This should always be a power of
@@ -817,15 +932,11 @@ auto RawHashtableBase<InputKeyT>::EraseKey(LookupKeyT lookup_key) -> ssize_t {
 template <typename InputKeyT>
 template <typename IndexCallback>
 void RawHashtableBase<InputKeyT>::ClearImpl(IndexCallback index_callback) {
-  // Otherwise walk the non-empty slots in the control group destroying each
-  // one and clearing out the group.
   this->impl_view_.ForEachIndex(
       index_callback, [](uint8_t* groups, ssize_t group_index) {
         // Clear the group.
         std::memset(groups + group_index, 0, GroupSize);
       });
-
-  // And reset the growth budget.
   this->growth_budget_ = GrowthThresholdForSize(size());
 }
 

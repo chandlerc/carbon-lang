@@ -50,18 +50,12 @@ auto MakeElements(RangeT&& range, RangeTs&&... ranges) {
 }
 
 TEST(SetTest, Basic) {
-  Set<int, 4> s;
-  using BaseT = SetBase<int>;
-  using ViewT = SetView<int>;
+  Set<int, 16> s;
 
   EXPECT_FALSE(s.Contains(42));
   EXPECT_TRUE(s.Insert(1).is_inserted());
   EXPECT_TRUE(s.Contains(1));
-  EXPECT_TRUE(static_cast<ViewT>(s).Contains(1));
   auto result = s.Lookup(1);
-  EXPECT_TRUE(result);
-  EXPECT_EQ(1, result.key());
-  result = static_cast<ViewT>(s).Lookup(1);
   EXPECT_TRUE(result);
   EXPECT_EQ(1, result.key());
   auto i_result = s.Insert(1);
@@ -79,15 +73,12 @@ TEST(SetTest, Basic) {
   for (int i : llvm::seq(1, 5)) {
     SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
     EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
     EXPECT_FALSE(s.Insert(i).is_inserted());
   }
   EXPECT_FALSE(s.Contains(5));
 
   // Verify all the elements.
   ExpectSetElementsAre(s, {1, 2, 3, 4});
-  ExpectSetElementsAre(static_cast<BaseT&>(s), {1, 2, 3, 4});
-  ExpectSetElementsAre(static_cast<ViewT>(s), {1, 2, 3, 4});
 
   // Erase some entries from the small buffer.
   EXPECT_FALSE(s.Erase(42));
@@ -123,7 +114,6 @@ TEST(SetTest, Basic) {
   for (int i : llvm::seq(1, 14)) {
     SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
     EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
     EXPECT_FALSE(s.Insert(i).is_inserted());
     EXPECT_TRUE(s.Contains(i));
   }
@@ -140,7 +130,6 @@ TEST(SetTest, Basic) {
   for (int i : llvm::seq(1, 100)) {
     SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
     EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
     EXPECT_FALSE(s.Insert(i).is_inserted());
     EXPECT_TRUE(s.Contains(i));
   }
@@ -159,7 +148,6 @@ TEST(SetTest, Basic) {
   for (int i : llvm::seq(50, 150)) {
     SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
     EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
     EXPECT_FALSE(s.Insert(i).is_inserted());
     EXPECT_TRUE(s.Contains(i));
   }
@@ -183,7 +171,6 @@ TEST(SetTest, Basic) {
       continue;
     }
     EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
     EXPECT_FALSE(s.Insert(i).is_inserted());
     EXPECT_TRUE(s.Contains(i));
   }
@@ -205,13 +192,12 @@ TEST(SetTest, Basic) {
   for (int i : llvm::seq(75, 175)) {
     SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
     EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
     EXPECT_FALSE(s.Insert(i).is_inserted());
     EXPECT_TRUE(s.Contains(i));
   }
   EXPECT_FALSE(s.Contains(42));
   EXPECT_FALSE(s.Contains(420));
-  ExpectSetElementsAre(static_cast<ViewT>(s), MakeElements(llvm::seq(75, 175)));
+  ExpectSetElementsAre(s, MakeElements(llvm::seq(75, 175)));
 
   EXPECT_FALSE(s.Erase(42));
   EXPECT_TRUE(s.Contains(93));
@@ -228,18 +214,17 @@ TEST(SetTest, Basic) {
       continue;
     }
     EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
     EXPECT_FALSE(s.Insert(i).is_inserted());
     EXPECT_TRUE(s.Contains(i));
   }
   EXPECT_TRUE(s.Insert(93).is_inserted());
   EXPECT_TRUE(s.Contains(93));
-  ExpectSetElementsAre(static_cast<ViewT>(s),
+  ExpectSetElementsAre(s,
                        MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
 }
 
 TEST(SetTest, FactoryAPI) {
-  Set<int, 4> s;
+  Set<int, 16> s;
   EXPECT_TRUE(s.Insert(1, [](int k, void* key_storage) {
                  return new (key_storage) int(k);
                }).is_inserted());
@@ -248,141 +233,6 @@ TEST(SetTest, FactoryAPI) {
   EXPECT_FALSE(s.Insert(1, [](int, void*) -> int* {
                   llvm_unreachable("Should never be called!");
                 }).is_inserted());
-}
-
-TEST(SetTest, BasicRef) {
-  Set<int, 4> real_s;
-  using ViewT = SetView<int>;
-  using BaseT = SetBase<int>;
-
-  BaseT& s = real_s;
-
-  EXPECT_FALSE(s.Contains(42));
-  EXPECT_TRUE(s.Insert(1).is_inserted());
-  EXPECT_TRUE(s.Contains(1));
-  EXPECT_TRUE(static_cast<ViewT>(s).Contains(1));
-  auto result = s.Lookup(1);
-  EXPECT_TRUE(result);
-  EXPECT_EQ(1, result.key());
-  result = static_cast<ViewT>(s).Lookup(1);
-  EXPECT_TRUE(result);
-  EXPECT_EQ(1, result.key());
-  auto i_result = s.Insert(1);
-  EXPECT_FALSE(i_result.is_inserted());
-  EXPECT_TRUE(s.Contains(1));
-
-  // Now fill it up.
-  for (int i : llvm::seq(2, 100)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_TRUE(s.Insert(i).is_inserted());
-  }
-  for (int i : llvm::seq(1, 100)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
-    EXPECT_FALSE(s.Insert(i).is_inserted());
-
-    // Also check that the real set observed all of these changes.
-    EXPECT_TRUE(real_s.Contains(i));
-  }
-  EXPECT_FALSE(s.Contains(420));
-
-  // Clear back to empty.
-  s.Clear();
-  EXPECT_FALSE(s.Contains(42));
-
-  // Refill but with both overlapping and different values.
-  for (int i : llvm::seq(50, 150)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_TRUE(s.Insert(i).is_inserted());
-  }
-  for (int i : llvm::seq(50, 150)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
-    EXPECT_FALSE(s.Insert(i).is_inserted());
-
-    // Also check that the real set observed all of these changes.
-    EXPECT_TRUE(real_s.Contains(i));
-  }
-  EXPECT_FALSE(s.Contains(42));
-  EXPECT_FALSE(s.Contains(420));
-
-  EXPECT_FALSE(s.Erase(42));
-  EXPECT_TRUE(s.Contains(73));
-  EXPECT_TRUE(s.Erase(73));
-  EXPECT_FALSE(s.Contains(73));
-  for (int i : llvm::seq(102, 136)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(s.Erase(i));
-    EXPECT_FALSE(s.Contains(i));
-  }
-  for (int i : llvm::seq(50, 150)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    if (i == 73 || (i >= 102 && i < 136)) {
-      continue;
-    }
-    EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
-    EXPECT_FALSE(s.Insert(i).is_inserted());
-
-    // Also check that the real set observed all of these changes.
-    EXPECT_TRUE(real_s.Contains(i));
-  }
-  EXPECT_TRUE(s.Insert(73).is_inserted());
-  EXPECT_TRUE(s.Contains(73));
-
-  // Reset back to empty and small with the real map.
-  real_s.Reset();
-  EXPECT_FALSE(s.Contains(42));
-
-  // Refill but with both overlapping and different values, now triggering
-  // growth too.
-  for (int i : llvm::seq(75, 175)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_TRUE(s.Insert(i).is_inserted());
-  }
-  for (int i : llvm::seq(75, 175)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
-    EXPECT_FALSE(s.Insert(i).is_inserted());
-
-    // Also check that the real set observed all of these changes.
-    EXPECT_TRUE(real_s.Contains(i));
-  }
-  EXPECT_FALSE(s.Contains(42));
-  EXPECT_FALSE(s.Contains(420));
-
-  EXPECT_FALSE(s.Erase(42));
-  EXPECT_TRUE(s.Contains(93));
-  EXPECT_TRUE(s.Erase(93));
-  EXPECT_FALSE(s.Contains(93));
-  for (int i : llvm::seq(102, 136)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(s.Erase(i));
-    EXPECT_FALSE(s.Contains(i));
-  }
-  for (int i : llvm::seq(75, 175)) {
-    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    if (i == 93 || (i >= 102 && i < 136)) {
-      continue;
-    }
-    EXPECT_TRUE(s.Contains(i));
-    EXPECT_TRUE(static_cast<ViewT>(s).Contains(i));
-    EXPECT_FALSE(s.Insert(i).is_inserted());
-
-    // Also check that the real set observed all of these changes.
-    EXPECT_TRUE(real_s.Contains(i));
-  }
-  EXPECT_TRUE(s.Insert(93).is_inserted());
-  EXPECT_TRUE(s.Contains(93));
-  ExpectSetElementsAre(static_cast<ViewT>(s),
-                       MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
-  ExpectSetElementsAre(real_s,
-                       MakeElements(llvm::seq(75, 102), llvm::seq(136, 175)));
 }
 
 }  // namespace

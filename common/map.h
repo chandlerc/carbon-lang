@@ -6,7 +6,6 @@
 #define CARBON_COMMON_MAP_H_
 
 #include <algorithm>
-#include <cstddef>
 #include <new>
 #include <tuple>
 #include <type_traits>
@@ -16,7 +15,6 @@
 #include "common/raw_hashtable.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/MathExtras.h"
 
 namespace Carbon {
 
@@ -26,62 +24,6 @@ template <typename KeyT, typename ValueT>
 class MapBase;
 template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
 class Map;
-
-namespace MapInternal {
-
-template <typename KeyT, typename ValueT>
-constexpr ssize_t StorageAlignment =
-    std::max<ssize_t>({RawHashtable::StorageAlignment<KeyT>, alignof(ValueT)});
-
-template <typename KeyT, typename ValueT>
-constexpr auto ComputeValueStorageOffset(ssize_t size) -> ssize_t {
-  // Skip the keys themselves.
-  ssize_t offset = sizeof(KeyT) * size;
-
-  // If the value type alignment is smaller than the key's, we're done.
-  if constexpr (alignof(ValueT) <= alignof(KeyT)) {
-    return offset;
-  }
-
-  // Otherwise, skip the alignment for the value type.
-  return llvm::alignTo<alignof(ValueT)>(offset);
-}
-
-constexpr ssize_t CachelineSize = 64;
-
-template <typename KeyT>
-constexpr auto NumKeysInCacheline() -> int {
-  return CachelineSize / sizeof(KeyT);
-}
-
-template <typename KeyT, typename ValueT>
-constexpr auto DefaultMinSmallSize() -> ssize_t {
-  return (CachelineSize - 3 * sizeof(void*)) / (sizeof(KeyT) + sizeof(ValueT));
-}
-
-template <typename KeyT, typename ValueT, ssize_t SmallSize>
-struct SmallSizeStorage;
-
-template <typename KeyT, typename ValueT>
-struct SmallSizeStorage<KeyT, ValueT, 0>
-    : RawHashtable::SmallSizeStorage<KeyT, 0> {
-  SmallSizeStorage() {}
-  union {
-    ValueT values[0];
-  };
-};
-
-template <typename KeyT, typename ValueT, ssize_t SmallSize>
-struct alignas(StorageAlignment<KeyT, ValueT>) SmallSizeStorage
-    : RawHashtable::SmallSizeStorage<KeyT, SmallSize> {
-  SmallSizeStorage() {}
-
-  union {
-    ValueT values[SmallSize];
-  };
-};
-
-}  // namespace MapInternal
 
 template <typename InputKeyT, typename InputValueT>
 class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
@@ -131,7 +73,7 @@ class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
   auto values_ptr() const -> ValueT* {
     return reinterpret_cast<ValueT*>(
         reinterpret_cast<unsigned char*>(this->keys_ptr()) +
-        MapInternal::ComputeValueStorageOffset<KeyT, ValueT>(this->size()));
+        RawHashtable::ComputeValueStorageOffset<KeyT, ValueT>(this->size()));
   }
 };
 
@@ -271,16 +213,14 @@ class MapBase : public RawHashtable::RawHashtableBase<InputKeyT> {
 
  protected:
   constexpr static auto ComputeStorageSize(ssize_t size) -> ssize_t {
-    return RawHashtable::ComputeKeyStorageOffset<KeyT>(size) +
-           MapInternal::ComputeValueStorageOffset<KeyT, ValueT>(size) +
-           sizeof(ValueT) * size;
+    return RawHashtable::ComputeKeyValueStorageSize<KeyT, ValueT>(size);
   }
 
   static auto Allocate(ssize_t size) -> RawHashtable::Storage* {
     ssize_t allocated_size = ComputeStorageSize(size);
     return reinterpret_cast<RawHashtable::Storage*>(__builtin_operator_new(
         allocated_size,
-        std::align_val_t(MapInternal::StorageAlignment<KeyT, ValueT>),
+        std::align_val_t(RawHashtable::StorageAlignment<KeyT, ValueT>),
         std::nothrow_t()));
   }
 
@@ -307,13 +247,12 @@ class MapBase : public RawHashtable::RawHashtableBase<InputKeyT> {
 #if __cpp_sized_deallocation
         allocated_size,
 #endif
-        std::align_val_t(MapInternal::StorageAlignment<KeyT, ValueT>));
+        std::align_val_t(RawHashtable::StorageAlignment<KeyT, ValueT>));
   }
 };
 
 template <typename InputKeyT, typename InputValueT,
-          ssize_t MinSmallSize =
-              MapInternal::DefaultMinSmallSize<InputKeyT, InputValueT>()>
+          ssize_t SmallSize = 0>
 class Map : public MapBase<InputKeyT, InputValueT> {
  public:
   using KeyT = InputKeyT;
@@ -336,40 +275,8 @@ class Map : public MapBase<InputKeyT, InputValueT> {
   void Reset();
 
  private:
-  static constexpr ssize_t SmallSize =
-      RawHashtable::ComputeSmallSize<MinSmallSize>();
-
-  static_assert(SmallSize >= 0, "Cannot have a negative small size!");
-
   using SmallSizeStorageT =
-      MapInternal::SmallSizeStorage<KeyT, ValueT, SmallSize>;
-
-  // Validate a collection of invariants between the small size storage layout
-  // and the dynamically computed storage layout. We need to do this after both
-  // are complete but in the context of a specific key type, value type, and
-  // small size, so here is the best place.
-  static_assert(SmallSize == 0 ||
-                    alignof(SmallSizeStorageT) ==
-                        MapInternal::StorageAlignment<KeyT, ValueT>,
-                "Small size buffer must have the same alignment as a heap "
-                "allocated buffer.");
-  static_assert(
-      SmallSize == 0 ||
-          offsetof(SmallSizeStorageT, keys) ==
-              RawHashtable::ComputeKeyStorageOffset<KeyT>(SmallSize),
-      "Offset to keys in small size storage doesn't match computed offset!");
-  static_assert(
-      SmallSize == 0 ||
-          offsetof(SmallSizeStorageT, values) ==
-              (RawHashtable::ComputeKeyStorageOffset<KeyT>(SmallSize) +
-               MapInternal::ComputeValueStorageOffset<KeyT, ValueT>(SmallSize)),
-      "Offset from keys to values in small size storage doesn't match computed "
-      "offset!");
-  static_assert(
-      SmallSize == 0 ||
-          sizeof(SmallSizeStorageT) == BaseT::ComputeStorageSize(SmallSize),
-      "The small size storage needs to match the dynamically computed storage "
-      "size.");
+      RawHashtable::SmallSizeKeyValueStorage<KeyT, ValueT, SmallSize>;
 
   auto small_storage() const -> RawHashtable::Storage* {
     return &small_storage_;
@@ -602,8 +509,8 @@ void MapBase<KeyT, ValueT>::Clear() {
   this->ClearImpl(index_cb);
 }
 
-template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
-void Map<KeyT, ValueT, MinSmallSize>::Reset() {
+template <typename KeyT, typename ValueT, ssize_t SmallSize>
+void Map<KeyT, ValueT, SmallSize>::Reset() {
   // Nothing to do when in the un-allocated and unused state.
   if (this->size() == 0) {
     return;

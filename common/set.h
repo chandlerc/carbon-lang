@@ -6,7 +6,6 @@
 #define CARBON_COMMON_SET_H_
 
 #include <algorithm>
-#include <cstddef>
 #include <new>
 #include <tuple>
 #include <utility>
@@ -123,8 +122,7 @@ class SetBase : public RawHashtable::RawHashtableBase<InputKeyT> {
 
  protected:
   constexpr static auto ComputeStorageSize(ssize_t size) -> ssize_t {
-    return RawHashtable::ComputeKeyStorageOffset<KeyT>(size) +
-           sizeof(KeyT) * size;
+    return RawHashtable::ComputeKeyStorageSize<KeyT>(size);
   }
 
   static auto Allocate(ssize_t size) -> RawHashtable::Storage* {
@@ -159,19 +157,7 @@ class SetBase : public RawHashtable::RawHashtableBase<InputKeyT> {
   }
 };
 
-namespace SetInternal {
-
-constexpr ssize_t CachelineSize = 64;
-
-template <typename KeyT>
-constexpr auto DefaultMinSmallSize() -> ssize_t {
-  return (CachelineSize - 3 * sizeof(void*)) / sizeof(KeyT);
-}
-
-}  // namespace SetInternal
-
-template <typename InputKeyT,
-          ssize_t MinSmallSize = SetInternal::DefaultMinSmallSize<InputKeyT>()>
+template <typename InputKeyT, ssize_t SmallSize = 0>
 class Set : public SetBase<InputKeyT> {
  public:
   using KeyT = InputKeyT;
@@ -193,30 +179,7 @@ class Set : public SetBase<InputKeyT> {
   void Reset();
 
  private:
-  static constexpr ssize_t SmallSize =
-      RawHashtable::ComputeSmallSize<MinSmallSize>();
-
-  static_assert(SmallSize >= 0, "Cannot have a negative small size!");
-
-  using SmallSizeStorageT = RawHashtable::SmallSizeStorage<KeyT, SmallSize>;
-
-  // Validate a collection of invariants between the small size storage layout
-  // and the dynamically computed storage layout. We need to do this after both
-  // are complete but in the context of a specific key type, value type, and
-  // small size, so here is the best place.
-  static_assert(SmallSize == 0 || alignof(SmallSizeStorageT) ==
-                                      RawHashtable::StorageAlignment<KeyT>,
-                "Small size buffer must have the same alignment as a heap "
-                "allocated buffer.");
-  static_assert(
-      SmallSize == 0 ||
-          (offsetof(SmallSizeStorageT, keys) ==
-           RawHashtable::ComputeKeyStorageOffset<KeyT>(SmallSize)),
-      "Offset to keys in small size storage doesn't match computed offset!");
-  static_assert(SmallSize == 0 || sizeof(SmallSizeStorageT) ==
-                                      BaseT::ComputeStorageSize(SmallSize),
-                "The small size storage needs to match the dynamically "
-                "computed storage size.");
+  using SmallSizeStorageT = RawHashtable::SmallSizeKeyStorage<KeyT, SmallSize>;
 
   auto small_storage() const -> RawHashtable::Storage* {
     return &small_storage_;
@@ -279,14 +242,13 @@ template <typename LookupKeyT>
   SetBase<KeyT> new_map(RawHashtable::ComputeNewSize(this->size()));
 
   ssize_t insert_count = 0;
+  KeyT* new_keys = new_map.keys_ptr();
   ViewT(*this).ForEachIndex(
       [&](KeyT* old_keys, ssize_t old_index) {
         ++insert_count;
-        KeyT& old_key = old_keys[old_index];
+        KeyT old_key = std::move(old_keys[old_index]);
         ssize_t new_index = new_map.InsertIntoEmptyIndex(old_key);
-        KeyT* new_keys = new_map.keys_ptr();
         new (&new_keys[new_index]) KeyT(std::move(old_key));
-        old_key.~KeyT();
       },
       [](auto...) {});
   new_map.growth_budget_ -= insert_count;
@@ -367,8 +329,8 @@ void SetBase<KeyT>::Clear() {
   this->ClearImpl(index_cb);
 }
 
-template <typename KeyT, ssize_t MinSmallSize>
-void Set<KeyT, MinSmallSize>::Reset() {
+template <typename KeyT, ssize_t SmallSize>
+void Set<KeyT, SmallSize>::Reset() {
   // Nothing to do when in the un-allocated and unused state.
   if (this->size() == 0) {
     return;
