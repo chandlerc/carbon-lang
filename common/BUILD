@@ -218,6 +218,7 @@ cc_binary(
     srcs = ["map_benchmark.cpp"],
     deps = [
         ":map",
+        ":raw_hashtable_benchmark_helpers",
         "@com_github_google_benchmark//:benchmark_main",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/random",
@@ -239,6 +240,20 @@ cc_library(
     deps = [
         ":check",
         ":hashing",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
+    name = "raw_hashtable_benchmark_helpers",
+    testonly = 1,
+    srcs = ["raw_hashtable_benchmark_helpers.cpp"],
+    hdrs = ["raw_hashtable_benchmark_helpers.h"],
+    deps = [
+        ":check",
+        ":hashing",
+        "@com_google_absl//absl/hash",
+        "@com_google_absl//absl/random",
         "@llvm-project//llvm:Support",
     ],
 )
@@ -269,6 +284,7 @@ cc_binary(
     testonly = 1,
     srcs = ["set_benchmark.cpp"],
     deps = [
+        ":raw_hashtable_benchmark_helpers",
         ":set",
         "@com_github_google_benchmark//:benchmark_main",
         "@com_google_absl//absl/container:flat_hash_set",
