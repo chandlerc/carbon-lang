@@ -120,7 +120,7 @@ struct SetWrapper<llvm::SmallDenseSet<KT, SmallSize, HasherT>> {
   auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 
-struct CarbonHashingDenseSetInfo {
+struct CarbonHashingDenseInfo {
   // The following should hold, but it would require int to be complete:
   // static_assert(alignof(int) <= (1 << Log2MaxAlign),
   //               "DenseSet does not support pointer keys requiring more than "
@@ -203,7 +203,7 @@ static void OneOpSizeArgs(benchmark::internal::Benchmark* b) {
 #define MAP_BENCHMARK_ONE_OP(NAME)                             \
   BENCHMARK(NAME<Set<int*>>)->Apply(OneOpSizeArgs);                 \
   BENCHMARK(NAME<absl::flat_hash_set<int*>>)->Apply(OneOpSizeArgs); \
-  BENCHMARK(NAME<llvm::DenseSet<int*, CarbonHashingDenseSetInfo>>)    \
+  BENCHMARK(NAME<llvm::DenseSet<int*, CarbonHashingDenseInfo>>)    \
       ->Apply(OneOpSizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
@@ -294,7 +294,7 @@ static void OpSeqSizeArgs(benchmark::internal::Benchmark* b) {
 #define MAP_BENCHMARK_OP_SEQ(NAME)                             \
   BENCHMARK(NAME<Set<int*>>)->Apply(OpSeqSizeArgs);                 \
   BENCHMARK(NAME<absl::flat_hash_set<int*>>)->Apply(OpSeqSizeArgs); \
-  BENCHMARK(NAME<llvm::DenseSet<int*, CarbonHashingDenseSetInfo>>)    \
+  BENCHMARK(NAME<llvm::DenseSet<int*, CarbonHashingDenseInfo>>)    \
       ->Apply(OpSeqSizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 

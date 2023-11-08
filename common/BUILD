@@ -220,6 +220,7 @@ cc_binary(
         ":map",
         "@com_github_google_benchmark//:benchmark_main",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/random",
         "@llvm-project//llvm:Support",
     ],
 )
