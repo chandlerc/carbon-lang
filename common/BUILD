@@ -237,6 +237,7 @@ cc_library(
 cc_library(
     name = "raw_hashtable",
     hdrs = ["raw_hashtable.h"],
+    srcs = ["raw_hashtable.cpp"],
     deps = [
         ":check",
         ":hashing",

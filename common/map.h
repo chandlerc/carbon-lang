@@ -62,7 +62,7 @@ class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
   template <typename MapKeyT, typename MapValueT, ssize_t MinSmallSize>
   friend class Map;
   friend class MapBase<KeyT, ValueT>;
-  friend class RawHashtable::RawHashtableBase<KeyT>;
+  friend class RawHashtable::RawHashtableKeyBase<KeyT>;
 
   MapView() = default;
   // NOLINTNEXTLINE(google-explicit-constructor): Implicit by design.
@@ -78,9 +78,9 @@ class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
 };
 
 template <typename InputKeyT, typename InputValueT>
-class MapBase : public RawHashtable::RawHashtableBase<InputKeyT> {
+class MapBase : public RawHashtable::RawHashtableKeyBase<InputKeyT> {
  public:
-  using BaseT = RawHashtable::RawHashtableBase<InputKeyT>;
+  using BaseT = RawHashtable::RawHashtableKeyBase<InputKeyT>;
   using KeyT = typename BaseT::KeyT;
   using ValueT = InputValueT;
   using ViewT = MapView<KeyT, ValueT>;

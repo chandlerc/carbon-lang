@@ -61,6 +61,10 @@ namespace Carbon::RawHashtable {
 // memory allocation is done consistently across the architectures.
 constexpr ssize_t MaxGroupSize = 16;
 
+// A global variable whose address is used as a seed. This allows ASLR to
+// introduce some variation in hashtable ordering.
+extern volatile std::byte global_addr_seed;
+
 template <typename MaskT, int Shift = 0, MaskT ZeroMask = 0>
 class BitIndexRange {
  public:
@@ -107,6 +111,11 @@ class BitIndexRange {
   auto begin() const -> Iterator { return Iterator(mask_); }
   auto end() const -> Iterator { return Iterator(); }
 
+  template <int N>
+  auto Test() const -> bool { return mask_ & (static_cast<MaskT>(1) << N); }
+
+  explicit operator MaskT() const { return mask_; }
+
  private:
   MaskT mask_ = 0;
 };
@@ -139,6 +148,20 @@ struct X86Group {
     X86Group g;
     g.byte_vec = _mm_load_si128(reinterpret_cast<__m128i*>(groups + index));
     return g;
+  }
+
+  auto Store(uint8_t* groups, ssize_t index) const -> void {
+    _mm_store_si128(reinterpret_cast<__m128i*>(groups + index), byte_vec);
+  }
+
+  template <int Index>
+  auto Set(uint8_t byte) -> void {
+    byte_vec = _mm_insert_epi8(byte_vec, byte, Index);
+  }
+
+  auto ClearDeleted() -> void {
+    // We cat zero every byte that isn't present.
+    byte_vec = _mm_blendv_epi8(_mm_setzero_si128(), byte_vec, byte_vec);
   }
 
   auto Match(uint8_t match_byte) const -> MatchedRange {
@@ -182,6 +205,15 @@ struct NeonGroup {
     NeonGroup g;
     g.byte_vec = vld1_u8(groups + index);
     return g;
+  }
+
+  auto Store(uint8_t* groups, ssize_t index) const -> void {
+    #error unimplemented
+  }
+
+  template <int Index>
+  auto Set(uint8_t byte) -> void {
+    byte_vec = vset_lane_u8(byte, byte_vec, Index);
   }
 
   auto Match(uint8_t match_byte) const -> MatchedRange {
@@ -231,6 +263,21 @@ struct PortableGroup {
     PortableGroup g;
     std::memcpy(&g.group, groups + index, sizeof(group));
     return g;
+  }
+
+  auto Store(uint8_t* groups, ssize_t index) const -> void {
+    std::memcpy(groups + index, &group, sizeof(group));
+  }
+
+  template <int Index>
+  auto Set(uint8_t byte) -> void {
+    uint64_t incoming = static_cast<uint64_t>(byte) << Index * 8;
+    group &= ~(static_cast<uint64_t>(0xff) << Index * 8);
+    group |= incoming;
+  }
+
+  auto ClearDeleted() -> void {
+    group &= (~LSBs | group >> 7);
   }
 
   auto Match(uint8_t match_byte) const -> MatchedRange {
@@ -410,6 +457,10 @@ constexpr auto ComputeValueStorageOffset(ssize_t size) -> ssize_t {
   return llvm::alignTo<alignof(ValueT)>(offset);
 }
 
+// If allocating storage, allocate a minimum of one cacheline of group metadata
+// and a minimum of one group.
+constexpr ssize_t MinAllocatedSize = std::max<ssize_t>(64, MaxGroupSize);
+
 template <typename KeyT>
 constexpr static auto ComputeKeyStorageSize(ssize_t size) -> ssize_t {
   return ComputeKeyStorageOffset<KeyT>(size) + sizeof(KeyT) * size;
@@ -509,19 +560,24 @@ struct alignas(StorageAlignment<KeyT, ValueT>) SmallSizeKeyValueStorage
   };
 };
 
+// Base class to hold all the implementation details that can be completely
+// isolated from the value type or even *if there is* a value type in the
+// hashtable.
 template <typename KeyT>
+class RawHashtableKeyBase;
+
+// Base class that encodes either the absence of a value or a value type.
+template <typename KeyT, typename ValueT = void>
 class RawHashtableBase;
 
 template <typename InputKeyT>
 class RawHashtableViewBase {
- public:
+ protected:
   using KeyT = InputKeyT;
 
-  template <typename LookupKeyT>
-  auto Contains(LookupKeyT lookup_key) const -> bool;
-
- protected:
-  friend class RawHashtableBase<KeyT>;
+  friend class RawHashtableKeyBase<KeyT>;
+  template <typename KeyT, typename ValueT>
+  friend class RawHashtableBase;
 
   RawHashtableViewBase() = default;
   RawHashtableViewBase(ssize_t size, Storage* storage)
@@ -533,13 +589,16 @@ class RawHashtableViewBase {
     return reinterpret_cast<uint8_t*>(storage_);
   }
   auto keys_ptr() const -> KeyT* {
-    CARBON_DCHECK(llvm::isPowerOf2_64(size()))
+    CARBON_DCHECK(size() == 0 || llvm::isPowerOf2_64(size()))
         << "Size must be a power of two for a hashed buffer!";
     CARBON_DCHECK(size() == ComputeKeyStorageOffset<KeyT>(size()))
         << "Cannot be more aligned than a power of two.";
     return reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(storage_) +
                                    size());
   }
+
+  template <typename LookupKeyT>
+  auto LookupIndexHashed(LookupKeyT lookup_key) const -> ssize_t;
 
   template <typename IndexCallbackT, typename GroupCallbackT>
   void ForEachIndex(IndexCallbackT index_callback,
@@ -550,26 +609,18 @@ class RawHashtableViewBase {
 };
 
 template <typename InputKeyT>
-class RawHashtableBase {
- public:
+class RawHashtableKeyBase {
+ protected:
   using KeyT = InputKeyT;
   using ViewBaseT = RawHashtableViewBase<KeyT>;
-  // using LookupResultT = SetInternal::LookupResult<KeyT>;
-  // using InsertResultT = SetInternal::InsertResult<KeyT>;
 
-  template <typename LookupKeyT>
-  auto Contains(LookupKeyT lookup_key) const -> bool {
-    return ViewBaseT(*this).Contains(lookup_key);
-  }
-
- protected:
-  RawHashtableBase(int small_size, Storage* small_storage) {
+  RawHashtableKeyBase(int small_size, Storage* small_storage) {
     Init(small_size, small_storage);
     small_size_ = small_size;
   }
   // An internal constructor used to build temporary map base objects with a
   // specific allocated size. This is used internally to build ephemeral maps.
-  explicit RawHashtableBase(ssize_t arg_size, Storage* arg_storage) {
+  explicit RawHashtableKeyBase(ssize_t arg_size, Storage* arg_storage) {
     Init(arg_size, arg_storage);
     small_size_ = 0;
   }
@@ -593,19 +644,80 @@ class RawHashtableBase {
   void Init(ssize_t init_size, Storage* init_storage);
 
   template <typename LookupKeyT>
-  auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<uint32_t, ssize_t>;
-  template <typename LookupKeyT>
-  auto InsertIntoEmptyIndex(LookupKeyT lookup_key) -> ssize_t;
+  auto InsertIntoEmptyIndex(LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t>;
 
   template <typename LookupKeyT>
   auto EraseKey(LookupKeyT lookup_key) -> ssize_t;
 
-  template <typename IndexCallback>
-  auto ClearImpl(IndexCallback index_callback) -> void;
-
   ViewBaseT impl_view_;
   int growth_budget_;
   int small_size_;
+};
+
+template <typename InputKeyT, typename InputValueT>
+class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
+ protected:
+  using KeyT = InputKeyT;
+  using ValueT = InputValueT;
+  using KeyBaseT = RawHashtableKeyBase<InputKeyT>;
+
+  static constexpr bool HasValue = !std::is_same_v<ValueT, void>;
+
+  static constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
+    if constexpr (!HasValue) {
+    return ComputeKeyStorageSize<KeyT>(size);
+    } else {
+    return ComputeKeyValueStorageSize<KeyT, ValueT>(size);
+    }
+  }
+
+  static constexpr auto ComputeStorageAlignment() -> std::align_val_t {
+    if constexpr (!HasValue) {
+      return std::align_val_t(StorageAlignment<KeyT>);
+    } else {
+      return std::align_val_t(StorageAlignment<KeyT, ValueT>);
+    }
+  }
+
+  static auto Allocate(ssize_t size) -> RawHashtable::Storage* {
+    return reinterpret_cast<RawHashtable::Storage*>(__builtin_operator_new(
+        ComputeStorageSize(size), ComputeStorageAlignment(), std::nothrow_t()));
+  }
+
+  RawHashtableBase(int small_size, RawHashtable::Storage* small_storage)
+      : KeyBaseT(small_size, small_storage) {}
+
+  // An internal constructor used to build temporary map base objects with a
+  // specific allocated size. This is used internally to build ephemeral maps.
+  explicit RawHashtableBase(ssize_t arg_size);
+
+  ~RawHashtableBase();
+
+  auto values_ptr() const -> ValueT* {
+    return reinterpret_cast<ValueT*>(
+        reinterpret_cast<unsigned char*>(this->keys_ptr()) +
+        ComputeValueStorageOffset<KeyT, ValueT>(this->size()));
+  }
+
+  template <typename LookupKeyT>
+  auto GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t>;
+  template <typename LookupKeyT>
+  auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t>;
+
+  auto Deallocate() -> void {
+    CARBON_DCHECK(!this->is_small());
+    ssize_t allocated_size = ComputeStorageSize(this->size());
+    // We don't need the size, but make sure it always compiles.
+    (void)allocated_size;
+    return __builtin_operator_delete(this->storage(),
+#if __cpp_sized_deallocation
+                                     allocated_size,
+#endif
+                                     ComputeStorageAlignment());
+  }
+
+  auto ClearImpl() -> void;
+  auto DestroyImpl() -> void;
 };
 
 inline auto ComputeProbeMaskFromSize(ssize_t size) -> size_t {
@@ -673,26 +785,31 @@ class ProbeSequence {
   auto getIndex() const -> ssize_t { return i; }
 };
 
+inline auto ComputeSeed() -> uint64_t {
+  return reinterpret_cast<uint64_t>(&global_addr_seed);
+}
+
 inline auto ComputeControlByte(size_t tag) -> uint8_t {
   // Mask one over the high bit so that engaged control bytes are easily
   // identified.
   return tag | 0b10000000;
 }
 
-template <typename KeyT, typename LookupKeyT>
-//[[clang::noinline]]
-auto LookupIndexHashed(LookupKeyT lookup_key, ssize_t size, Storage* storage)
+template <typename KeyT>
+template <typename LookupKeyT>
+[[clang::noinline]]
+auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
     -> ssize_t {
-  uint8_t* groups = reinterpret_cast<uint8_t*>(storage);
-  auto seed = reinterpret_cast<uint64_t>(groups);
-  HashCode hash = HashValue(lookup_key, seed);
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size);
+  ssize_t local_size = size();
+  uint8_t* groups = groups_ptr();
+  HashCode hash = HashValue(lookup_key, ComputeSeed());
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(local_size);
   uint8_t control_byte = ComputeControlByte(tag);
   // ssize_t hash_index = ComputeHashIndex(hash, groups);
 
   KeyT* keys =
-      reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(storage) + size);
-  ProbeSequence s(hash_index, size);
+      reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(groups) + local_size);
+  ProbeSequence s(hash_index, local_size);
   do {
     ssize_t group_index = s.getIndex();
     Group g = Group::Load(groups, group_index);
@@ -722,14 +839,6 @@ auto LookupIndexHashed(LookupKeyT lookup_key, ssize_t size, Storage* storage)
 }
 
 template <typename InputKeyT>
-template <typename LookupKeyT>
-auto RawHashtableViewBase<InputKeyT>::Contains(LookupKeyT lookup_key) const
-    -> bool {
-  Prefetch(storage_);
-  return LookupIndexHashed<KeyT>(lookup_key, size(), storage_) >= 0;
-}
-
-template <typename InputKeyT>
 template <typename IndexCallbackT, typename GroupCallbackT>
 [[clang::always_inline]] void RawHashtableViewBase<InputKeyT>::ForEachIndex(
     IndexCallbackT index_callback, GroupCallbackT group_callback) {
@@ -753,6 +862,245 @@ template <typename IndexCallbackT, typename GroupCallbackT>
   }
 }
 
+template <typename InputKeyT>
+template <typename LookupKeyT>
+[[clang::noinline]] auto RawHashtableKeyBase<InputKeyT>::InsertIntoEmptyIndex(
+    LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
+  uint8_t* groups = groups_ptr();
+  HashCode hash = HashValue(lookup_key, ComputeSeed());
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size());
+  uint8_t control_byte = ComputeControlByte(tag);
+
+  for (ProbeSequence s(hash_index, size());; s.step()) {
+    ssize_t group_index = s.getIndex();
+    auto g = Group::Load(groups, group_index);
+
+    if (auto empty_matched_range = g.MatchEmpty()) {
+      ssize_t index = group_index + *empty_matched_range.begin();
+      return {index, control_byte};
+    }
+
+    // Otherwise we continue probing.
+  }
+}
+
+inline auto ComputeNewSize(ssize_t old_size) -> ssize_t {
+  // We want the next power of two. This should always be a power of two coming
+  // in, and so we just verify that. Also verify that this doesn't overflow.
+  CARBON_DCHECK(old_size == (ssize_t)llvm::PowerOf2Ceil(old_size))
+      << "Expected a power of two!";
+  return old_size * 2;
+}
+
+inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
+  // We use a 7/8ths load factor to trigger growth.
+  return size - size / 8;
+}
+
+template <typename InputKeyT>
+void RawHashtableKeyBase<InputKeyT>::Init(ssize_t init_size,
+                                       Storage* init_storage) {
+  size() = init_size;
+  storage() = init_storage;
+  std::memset(groups_ptr(), 0, init_size);
+  growth_budget_ = GrowthThresholdForSize(init_size);
+}
+
+template <typename InputKeyT>
+template <typename LookupKeyT>
+auto RawHashtableKeyBase<InputKeyT>::EraseKey(LookupKeyT lookup_key) -> ssize_t {
+  ssize_t index = impl_view_.LookupIndexHashed(lookup_key);
+  if (index < 0) {
+    return index;
+  }
+
+  // If there are empty slots in this group then nothing will probe past this
+  // group looking for an entry so we can simply set this slot to empty as
+  // well. However, if every slot in this group is full, it might be part of
+  // a long probe chain that we can't disrupt. In that case we mark the group
+  // as deleted to keep probes continuing past it.
+  //
+  // If we mark the slot as empty, we'll also need to increase the growth
+  // budget.
+  uint8_t* groups = this->groups_ptr();
+  ssize_t group_index = index & ~GroupMask;
+  auto g = Group::Load(groups, group_index);
+  auto empty_matched_range = g.MatchEmpty();
+  if (empty_matched_range) {
+    groups[index] = Group::Empty;
+    ++this->growth_budget_;
+  } else {
+    groups[index] = Group::Deleted;
+  }
+
+  // Also destroy the key while we're here.
+  KeyT* keys = this->keys_ptr();
+  keys[index].~KeyT();
+
+  return index;
+}
+
+template <typename InputKeyT, typename InputValueT>
+RawHashtableBase<InputKeyT, InputValueT>::RawHashtableBase(ssize_t arg_size)
+    : KeyBaseT(arg_size, Allocate(arg_size)) {}
+
+template <typename InputKeyT, typename InputValueT>
+RawHashtableBase<InputKeyT, InputValueT>::~RawHashtableBase() {
+  DestroyImpl();
+}
+
+template <typename InputKeyT, typename InputValueT>
+template <typename LookupKeyT>
+[[clang::noinline]] auto
+RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
+    LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
+  // We grow into a new `MapBase` so that both the new and old maps are
+  // fully functional until all the entries are moved over. However, we directly
+  // manipulate the internals to short circuit many aspects of the growth.
+  ssize_t old_size = this->size();
+  CARBON_DCHECK(old_size > 0);
+
+  ssize_t new_size = RawHashtable::ComputeNewSize(old_size);
+  RawHashtableBase<KeyT, ValueT> new_table(new_size);
+  KeyT* new_keys = new_table.keys_ptr();
+
+  // The common case, especially for large sizes, is that we double the size
+  // when we grow. This allows an important optimization -- we're adding
+  // exactly one more high bit to the hash-computed index for each entry. This
+  // in turn means we can classify every entry in the table into three cases:
+  //
+  // 1) The new high bit is zero, the entry is at the same index in the new
+  //    table as the old.
+  //
+  // 2) The new high bit is one, the entry is at the old index plus the old
+  //    size.
+  //
+  // 3) The entry's current index doesn't match the initial hash index because
+  //    it required some amount of probing to find an empty slot.
+  //
+  // The design of the hash table is specifically to minimize how many entries
+  // fall into case (3), so we expect the vast majority of entries to be in
+  // (1) or (2). This lets us model growth notionally as duplicating the hash
+  // table up by `old_size` bytes, clearing out the empty slots, and inserting
+  // any probed elements.
+
+  // We collect the probed elements at the bottom of the old `keys` array.
+  // This requires an extra move for all the probed keys, but avoids any extra
+  // memory allocation.
+  ssize_t probed_key_end_index = 0;
+
+  uint8_t* old_groups = this->groups_ptr();
+  KeyT* old_keys = this->keys_ptr();
+  uint8_t* new_groups = new_table.groups_ptr();
+
+  // We have an important optimization for trivially relocatable keys. But we
+  // don't have a relocatable trait (yet) so we approximate it here.
+  constexpr bool IsKeyTriviallyRelocatable =
+      std::is_trivially_move_constructible_v<KeyT> &&
+      std::is_trivially_destructible_v<KeyT>;
+
+  for (ssize_t group_index = 0; group_index < old_size;
+       group_index += RawHashtable::GroupSize) {
+    auto g = RawHashtable::Group::Load(old_groups, group_index);
+    g.ClearDeleted();
+    g.Store(new_groups, group_index);
+    g.Store(new_groups, group_index | old_size);
+    auto present_matched_range = g.MatchPresent();
+    for (ssize_t byte_index : present_matched_range) {
+      ssize_t old_index = group_index + byte_index;
+      CARBON_DCHECK(new_groups[old_index] == old_groups[old_index]);
+      CARBON_DCHECK(new_groups[old_index | old_size] == old_groups[old_index]);
+      HashCode hash =
+          HashValue(old_keys[old_index], RawHashtable::ComputeSeed());
+      ssize_t old_hash_index =
+          hash.ExtractIndexAndTag<7>(old_size).first & ~RawHashtable::GroupMask;
+      if (old_hash_index != group_index) {
+        if (old_index > 0) {
+          new (&old_keys[probed_key_end_index])
+              KeyT(std::move(old_keys[old_index]));
+        }
+        ++probed_key_end_index;
+        new_groups[old_index] = RawHashtable::Group::Empty;
+        new_groups[old_index | old_size] = RawHashtable::Group::Empty;
+        continue;
+      }
+      ssize_t new_index =
+          hash.ExtractIndexAndTag<7>(new_size).first & ~RawHashtable::GroupMask;
+      CARBON_DCHECK(new_index == old_hash_index ||
+                    new_index == (old_hash_index | old_size));
+      new_index += byte_index;
+      // Toggle the newly added bit of the index to get to the other possible
+      // target index.
+      new_groups[new_index ^ old_size] = RawHashtable::Group::Empty;
+
+      // If we need to explicitly move (and destroy) the key, do so here where
+      // we already know its target.
+      if constexpr (!IsKeyTriviallyRelocatable) {
+        new (&new_keys[new_index]) KeyT(std::move(old_keys[old_index]));
+        old_keys[old_index].~KeyT();
+      }
+    }
+  }
+  CARBON_DCHECK(llvm::count(llvm::ArrayRef(new_groups, new_size),
+                            RawHashtable::Group::Empty) ==
+                llvm::count(llvm::ArrayRef(old_groups, old_size),
+                            RawHashtable::Group::Empty) +
+                    llvm::count(llvm::ArrayRef(old_groups, old_size),
+                                RawHashtable::Group::Deleted) +
+                    probed_key_end_index + old_size);
+
+  // If the keys are trivially relocatable, we do a bulk memcpy of them into
+  // place. This will copy the keys into both possible locations, which is
+  // fine. One will be empty and clobbered if reused or ignored. The other
+  // will be the one used. This might seem like it needs it to be valid for us
+  // to create two copies, but it doesn't. This produces the exact same
+  // storage as copying the storage into the wrong location first, and then
+  // again into the correct location. Only one is live and only one is
+  // destroyed.
+  if constexpr (IsKeyTriviallyRelocatable) {
+    memcpy(new_keys, old_keys, old_size * sizeof(KeyT));
+    memcpy(new_keys + old_size, old_keys, old_size * sizeof(KeyT));
+  }
+
+  // We have to use the normal insert for anything that was probed before, but
+  // we know we'll find an empty slot, so leverage that. We extract the probed
+  // keys from the bottom of the old keys storage.
+  for (KeyT& old_key_ref :
+       llvm::MutableArrayRef(old_keys, probed_key_end_index)) {
+    KeyT old_key = std::move(old_key_ref);
+    old_key_ref.~KeyT();
+
+    auto [new_index, control_byte] = new_table.InsertIntoEmptyIndex(old_key);
+    new (&new_keys[new_index]) KeyT(std::move(old_key));
+    new_groups[new_index] = control_byte;
+  }
+  new_table.growth_budget_ -=
+      RawHashtable::GrowthThresholdForSize(old_size) - this->growth_budget_;
+
+  CARBON_DCHECK(new_table.growth_budget_ >= 0 &&
+                "Must still have a growth budget after rehash!");
+
+  if (!this->is_small()) {
+    // Old isn't a small buffer, so we need to deallocate it.
+    Deallocate();
+  }
+
+  // Now that we've fully built the new, grown structures, replace the entries
+  // in the data structure. At this point we can be certain to not clobber
+  // anything aliasing a small buffer.
+  this->impl_view_ = new_table.impl_view_;
+  this->growth_budget_ = new_table.growth_budget_;
+
+  // Prevent the ephemeral new map object from doing anything when destroyed as
+  // we've taken over it's internals.
+  new_table.storage() = nullptr;
+  new_table.size() = 0;
+
+  // And lastly insert the lookup_key into an index in the newly grown map and
+  // return that index for use.
+  return this->InsertIntoEmptyIndex(lookup_key);
+}
+
 // Tries to insert the given lookup key into the map. Returns three pieces of
 // data compressed into two registers (in order to avoid an in-memory return).
 // These are the group pointer, a bool representing whether insertion is in fact
@@ -762,28 +1110,36 @@ template <typename IndexCallbackT, typename GroupCallbackT>
 // outlined for code size, we also need to encode the `bool` in a way that is
 // effective with various encodings and ABIs. Currently this is `uint32_t` as
 // that seems to result in good code.
-template <typename InputKeyT>
+template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-[[clang::noinline]] auto RawHashtableBase<InputKeyT>::InsertIndexHashed(
-    LookupKeyT lookup_key) -> std::pair<uint32_t, ssize_t> {
-  uint8_t* groups = groups_ptr();
+[[clang::noinline]]
+ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
+    LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
+  uint8_t* groups = this->groups_ptr();
 
-  auto seed = reinterpret_cast<uint64_t>(groups);
-  HashCode hash = HashValue(lookup_key, seed);
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size());
+  HashCode hash = HashValue(lookup_key, ComputeSeed());
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(this->size());
   uint8_t control_byte = ComputeControlByte(tag);
+
+  // We re-purpose the empty control byte to signal no insert is needed to the
+  // caller. This is guaranteed to not be a control byte we're inserting.
+  constexpr uint8_t NoInsertNeeded = Group::Empty;
+
+  if (LLVM_UNLIKELY(this->size() == 0)) {
+    this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
+    return this->InsertIntoEmptyIndex(lookup_key);
+  }
 
   ssize_t group_with_deleted_index = -1;
   Group::MatchedRange deleted_matched_range;
 
-  auto return_insert_at_index = [&](ssize_t index) -> std::pair<bool, ssize_t> {
+  auto return_insert_at_index = [&](ssize_t index) -> std::pair<uint32_t, ssize_t> {
     // We'll need to insert at this index so set the control group byte to the
     // proper value.
-    groups[index] = control_byte;
-    return {/*needs_insertion=*/true, index};
+    return {index, control_byte};
   };
 
-  for (ProbeSequence s(hash_index, size());; s.step()) {
+  for (ProbeSequence s(hash_index, this->size());; s.step()) {
     ssize_t group_index = s.getIndex();
     auto g = Group::Load(groups, group_index);
 
@@ -794,8 +1150,8 @@ template <typename LookupKeyT>
       auto byte_end = control_byte_matched_range.end();
       do {
         ssize_t index = group_index + *byte_it;
-        if (LLVM_LIKELY(keys_ptr()[index] == lookup_key)) {
-          return {/*needs_insertion=*/false, index};
+        if (LLVM_LIKELY(this->keys_ptr()[index] == lookup_key)) {
+          return {index, NoInsertNeeded};
         }
         ++byte_it;
       } while (LLVM_UNLIKELY(byte_it != byte_end));
@@ -827,11 +1183,8 @@ template <typename LookupKeyT>
     // empty slots. Check that we have the budget for that before we compute the
     // exact index of the empty slot. Without the growth budget we'll have to
     // completely rehash and so we can just bail here.
-    if (LLVM_UNLIKELY(growth_budget_ == 0)) {
-      // Without room to grow, return that no group is viable but also set the
-      // index to be negative. This ensures that a positive index is always
-      // sufficient to determine that an existing was found.
-      return {/*needs_insertion=*/true, -1};
+    if (LLVM_UNLIKELY(this->growth_budget_ == 0)) {
+      return this->GrowRehashAndInsertIndex(lookup_key);
     }
 
     return return_insert_at_index(group_index + *empty_matched_range.begin());
@@ -841,103 +1194,47 @@ template <typename LookupKeyT>
                                 *deleted_matched_range.begin());
 }
 
-template <typename InputKeyT>
-template <typename LookupKeyT>
-[[clang::noinline]] auto RawHashtableBase<InputKeyT>::InsertIntoEmptyIndex(
-    LookupKeyT lookup_key) -> ssize_t {
-  uint8_t* groups = groups_ptr();
-  auto seed = reinterpret_cast<uint64_t>(groups);
-  HashCode hash = HashValue(lookup_key, seed);
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size());
-  uint8_t control_byte = ComputeControlByte(tag);
-
-  for (ProbeSequence s(hash_index, size());; s.step()) {
-    ssize_t group_index = s.getIndex();
-    auto g = Group::Load(groups, group_index);
-
-    if (auto empty_matched_range = g.MatchEmpty()) {
-      ssize_t index = group_index + *empty_matched_range.begin();
-      groups[index] = control_byte;
-      return index;
-    }
-
-    // Otherwise we continue probing.
-  }
-}
-
-inline auto ComputeNewSize(ssize_t old_size) -> ssize_t {
-  // If we're going to heap allocate, allocate enough to fill a 64-byte
-  // cacheline with the control bytes or one group, whichever is larger.
-  constexpr ssize_t MinSize = std::max<ssize_t>(64, MaxGroupSize);
-  if (old_size < MinSize) {
-    return MinSize;
-  }
-
-  // Otherwise, we want the next power of two. This should always be a power of
-  // two coming in, and so we just verify that. Also verify that this doesn't
-  // overflow.
-  CARBON_DCHECK(old_size == (ssize_t)llvm::PowerOf2Ceil(old_size))
-      << "Expected a power of two!";
-  return old_size * 2;
-}
-
-inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
-  // We use a 7/8ths load factor to trigger growth.
-  return size - size / 8;
-}
-
-template <typename InputKeyT>
-void RawHashtableBase<InputKeyT>::Init(ssize_t init_size,
-                                       Storage* init_storage) {
-  size() = init_size;
-  storage() = init_storage;
-  std::memset(groups_ptr(), 0, init_size);
-  growth_budget_ = GrowthThresholdForSize(init_size);
-}
-
-template <typename InputKeyT>
-template <typename LookupKeyT>
-auto RawHashtableBase<InputKeyT>::EraseKey(LookupKeyT lookup_key) -> ssize_t {
-  ssize_t index = LookupIndexHashed<KeyT>(lookup_key, size(), storage());
-  if (index < 0) {
-    return index;
-  }
-
-  // If there are empty slots in this group then nothing will probe past this
-  // group looking for an entry so we can simply set this slot to empty as
-  // well. However, if every slot in this group is full, it might be part of
-  // a long probe chain that we can't disrupt. In that case we mark the group
-  // as deleted to keep probes continuing past it.
-  //
-  // If we mark the slot as empty, we'll also need to increase the growth
-  // budget.
-  uint8_t* groups = this->groups_ptr();
-  ssize_t group_index = index & ~GroupMask;
-  auto g = Group::Load(groups, group_index);
-  auto empty_matched_range = g.MatchEmpty();
-  if (empty_matched_range) {
-    groups[index] = Group::Empty;
-    ++this->growth_budget_;
-  } else {
-    groups[index] = Group::Deleted;
-  }
-
-  // Also destroy the key while we're here.
-  KeyT* keys = this->keys_ptr();
-  keys[index].~KeyT();
-
-  return index;
-}
-
-template <typename InputKeyT>
-template <typename IndexCallback>
-void RawHashtableBase<InputKeyT>::ClearImpl(IndexCallback index_callback) {
+template <typename InputKeyT, typename InputValueT>
+auto RawHashtableBase<InputKeyT, InputValueT>::ClearImpl() -> void {
   this->impl_view_.ForEachIndex(
-      index_callback, [](uint8_t* groups, ssize_t group_index) {
+      [this](KeyT* /*keys*/, ssize_t index) {
+        this->keys_ptr()[index].~KeyT();
+        if constexpr (HasValue) {
+          this->values_ptr()[index].~ValueT();
+        }
+      },
+      [](uint8_t* groups, ssize_t group_index) {
         // Clear the group.
         std::memset(groups + group_index, 0, GroupSize);
       });
-  this->growth_budget_ = GrowthThresholdForSize(size());
+  this->growth_budget_ = GrowthThresholdForSize(this->size());
+}
+
+template <typename InputKeyT, typename InputValueT>
+auto RawHashtableBase<InputKeyT, InputValueT>::DestroyImpl() -> void {
+  // Nothing to do when in the un-allocated and unused state.
+  if (this->size() == 0) {
+    return;
+  }
+
+  // Destroy all the keys and, if present, values.
+  this->impl_view_.ForEachIndex(
+      [this](KeyT* /*keys*/, ssize_t index) {
+        this->keys_ptr()[index].~KeyT();
+        if constexpr (HasValue) {
+          this->values_ptr()[index].~ValueT();
+        }
+      },
+      [](auto...) {});
+
+  // If small, nothing to deallocate.
+  if (this->is_small()) {
+    return;
+  }
+
+  // Just deallocate the storage without updating anything when destroying the
+  // object.
+  Deallocate();
 }
 
 }  // namespace Carbon::RawHashtable
