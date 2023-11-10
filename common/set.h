@@ -194,6 +194,7 @@ auto SetBase<KT>::Insert(
   ssize_t index;
   uint8_t control_byte;
   std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
+  CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
   if (LLVM_LIKELY(control_byte == 0)) {
     return InsertResult(false, this->keys_ptr()[index]);
   }

@@ -6,7 +6,6 @@
 #define CARBON_COMMON_MAP_H_
 
 #include <algorithm>
-#include <new>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -26,11 +25,13 @@ template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
 class Map;
 
 template <typename InputKeyT, typename InputValueT>
-class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
- public:
+class MapView : RawHashtable::RawHashtableViewBase<InputKeyT> {
   using BaseT = RawHashtable::RawHashtableViewBase<InputKeyT>;
+  
+ public:
   using KeyT = typename BaseT::KeyT;
   using ValueT = InputValueT;
+
   class LookupKVResult {
    public:
     LookupKVResult() = default;
@@ -47,7 +48,8 @@ class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
     ValueT* value_;
   };
 
-  using BaseT::Contains;
+  template <typename LookupKeyT>
+  auto Contains(LookupKeyT lookup_key) const -> bool;
 
   template <typename LookupKeyT>
   auto Lookup(LookupKeyT lookup_key) const -> LookupKVResult;
@@ -78,11 +80,13 @@ class MapView : public RawHashtable::RawHashtableViewBase<InputKeyT> {
 };
 
 template <typename InputKeyT, typename InputValueT>
-class MapBase : public RawHashtable::RawHashtableKeyBase<InputKeyT> {
+class MapBase
+    : protected RawHashtable::RawHashtableBase<InputKeyT, InputValueT> {
+  using BaseT = RawHashtable::RawHashtableBase<InputKeyT, InputValueT>;
+
  public:
-  using BaseT = RawHashtable::RawHashtableKeyBase<InputKeyT>;
   using KeyT = typename BaseT::KeyT;
-  using ValueT = InputValueT;
+  using ValueT = typename BaseT::ValueT;
   using ViewT = MapView<KeyT, ValueT>;
   using LookupKVResult = typename ViewT::LookupKVResult;
 
@@ -102,10 +106,13 @@ class MapBase : public RawHashtable::RawHashtableKeyBase<InputKeyT> {
     ValueT* value_;
   };
 
-  using BaseT::Contains;
-
   // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
   operator ViewT() const { return this->impl_view_; }
+
+  template <typename LookupKeyT>
+  auto Contains(LookupKeyT lookup_key) const -> bool {
+    return ViewT(*this).Contains(lookup_key);
+  }
 
   template <typename LookupKeyT>
   auto Lookup(LookupKeyT lookup_key) const -> LookupKVResult {
@@ -212,53 +219,21 @@ class MapBase : public RawHashtable::RawHashtableKeyBase<InputKeyT> {
   void Clear();
 
  protected:
-  constexpr static auto ComputeStorageSize(ssize_t size) -> ssize_t {
-    return RawHashtable::ComputeKeyValueStorageSize<KeyT, ValueT>(size);
-  }
-
-  static auto Allocate(ssize_t size) -> RawHashtable::Storage* {
-    ssize_t allocated_size = ComputeStorageSize(size);
-    return reinterpret_cast<RawHashtable::Storage*>(__builtin_operator_new(
-        allocated_size,
-        std::align_val_t(RawHashtable::StorageAlignment<KeyT, ValueT>),
-        std::nothrow_t()));
-  }
-
   MapBase(int small_size, RawHashtable::Storage* small_storage)
       : BaseT(small_size, small_storage) {}
-  // An internal constructor used to build temporary map base objects with a
-  // specific allocated size. This is used internally to build ephemeral maps.
-  explicit MapBase(ssize_t arg_size);
-
-  ~MapBase();
 
   auto values_ptr() -> ValueT* { return ViewT(*this).values_ptr(); }
-
-  template <typename LookupKeyT>
-  auto GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> ssize_t;
-
-  auto Deallocate() -> void {
-    CARBON_DCHECK(!this->is_small());
-    ssize_t allocated_size = ComputeStorageSize(this->size());
-    // We don't need the size, but make sure it always compiles.
-    (void)allocated_size;
-    return __builtin_operator_delete(
-        this->storage(),
-#if __cpp_sized_deallocation
-        allocated_size,
-#endif
-        std::align_val_t(RawHashtable::StorageAlignment<KeyT, ValueT>));
-  }
 };
 
 template <typename InputKeyT, typename InputValueT,
           ssize_t SmallSize = 0>
 class Map : public MapBase<InputKeyT, InputValueT> {
  public:
-  using KeyT = InputKeyT;
-  using ValueT = InputValueT;
+  using BaseT = MapBase<InputKeyT, InputValueT>;
+
+  using KeyT = typename BaseT::KeyT;
+  using ValueT = typename BaseT::ValueT;
   using ViewT = MapView<KeyT, ValueT>;
-  using BaseT = MapBase<KeyT, ValueT>;
   using LookupKVResult = typename BaseT::LookupKVResult;
   using InsertKVResult = typename BaseT::InsertKVResult;
 
@@ -285,12 +260,19 @@ class Map : public MapBase<InputKeyT, InputValueT> {
   mutable SmallSizeStorageT small_storage_;
 };
 
+template <typename InputKeyT, typename InputValueT>
+template <typename LookupKeyT>
+auto MapView<InputKeyT, InputValueT>::Contains(LookupKeyT lookup_key) const
+    -> bool {
+  RawHashtable::Prefetch(this->storage_);
+  return this->LookupIndexHashed(lookup_key) >= 0;
+}
+
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::Lookup(LookupKeyT lookup_key) const -> LookupKVResult {
   RawHashtable::Prefetch(this->storage_);
-  ssize_t index = RawHashtable::LookupIndexHashed<KeyT>(
-      lookup_key, this->size(), this->storage_);
+  ssize_t index = this->LookupIndexHashed(lookup_key);
   if (index < 0) {
     return LookupKVResult(nullptr, nullptr);
   }
@@ -315,95 +297,6 @@ void MapView<KT, VT>::ForEach(CallbackT callback) {
       [](auto...) {});
 }
 
-template <typename InputKeyT, typename InputValueT>
-MapBase<InputKeyT, InputValueT>::MapBase(ssize_t arg_size)
-    : BaseT(arg_size, Allocate(arg_size)) {}
-
-template <typename KeyT, typename ValueT>
-MapBase<KeyT, ValueT>::~MapBase() {
-  // Nothing to do when in the un-allocated and unused state.
-  if (this->size() == 0) {
-    return;
-  }
-
-  // Destroy all the keys and values.
-  ForEach([](KeyT& k, ValueT& v) {
-    k.~KeyT();
-    v.~ValueT();
-  });
-
-  // If small, nothing to deallocate.
-  if (this->is_small()) {
-    return;
-  }
-
-  // Just deallocate the storage without updating anything when destroying the
-  // object.
-  Deallocate();
-}
-
-template <typename InputKeyT, typename InputValueT>
-template <typename LookupKeyT>
-[[clang::noinline]] auto
-MapBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(LookupKeyT lookup_key)
-    -> ssize_t {
-  // We grow into a new `MapBase` so that both the new and old maps are
-  // fully functional until all the entries are moved over. However, we directly
-  // manipulate the internals to short circuit many aspects of the growth.
-  MapBase<KeyT, ValueT> new_map(RawHashtable::ComputeNewSize(this->size()));
-
-  ValueT* old_values = values_ptr();
-
-  ssize_t insert_count = 0;
-  KeyT* new_keys = new_map.keys_ptr();
-  ValueT* new_values = new_map.values_ptr();
-  ViewT(*this).ForEachIndex(
-      [&](KeyT* old_keys, ssize_t old_index) {
-        ++insert_count;
-
-        // We optimize for small keys that are likely to fit into a register and
-        // move twice to avoid loading the key twice from the old table -- first
-        // to hash it and a second time prior to storing it into the new table.
-        KeyT& old_key_ref = old_keys[old_index];
-        KeyT old_key = std::move(old_key_ref);
-        old_key_ref.~KeyT();
-
-        ssize_t new_index = new_map.InsertIntoEmptyIndex(old_key);
-        new (&new_keys[new_index]) KeyT(std::move(old_key));
-        old_key.~KeyT();
-
-        // Move directly from the old value to the new one.
-        ValueT& old_value_ref = old_values[old_index];
-        new (&new_values[new_index]) ValueT(std::move(old_value_ref));
-        old_value_ref.~ValueT();
-      },
-      [](auto...) {});
-  new_map.growth_budget_ -= insert_count;
-  CARBON_DCHECK(new_map.growth_budget_ >= 0 &&
-                "Must still have a growth budget after rehash!");
-
-  if (LLVM_LIKELY(!this->is_small())) {
-    // Old isn't a small buffer, so we need to deallocate it.
-    Deallocate();
-  }
-
-  // Now that we've fully built the new, grown structures, replace the entries
-  // in the data structure. At this point we can be certain to not clobber
-  // anything aliasing a small buffer.
-  this->impl_view_ = new_map.impl_view_;
-  this->growth_budget_ = new_map.growth_budget_;
-
-  // Prevent the ephemeral new map object from doing anything when destroyed as
-  // we've taken over it's internals.
-  new_map.storage() = nullptr;
-  new_map.size() = 0;
-
-  // And lastly insert the lookup_key into an index in the newly grown map and
-  // return that index for use.
-  --this->growth_budget_;
-  return this->InsertIntoEmptyIndex(lookup_key);
-}
-
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapBase<KT, VT>::Insert(
@@ -411,33 +304,18 @@ auto MapBase<KT, VT>::Insert(
     typename std::__type_identity<llvm::function_ref<std::pair<KeyT*, ValueT*>(
         LookupKeyT lookup_key, void* key_storage, void* value_storage)>>::type
         insert_cb) -> InsertKVResult {
-  ssize_t index = -1;
-  // Try inserting if we have storage at all.
-  if (this->size() > 0) {
-    bool needs_insertion;
-    std::tie(needs_insertion, index) = this->InsertIndexHashed(lookup_key);
-    if (LLVM_LIKELY(!needs_insertion)) {
-      CARBON_DCHECK(index >= 0)
-          << "Must have a valid group when we find an existing entry.";
+  ssize_t index;
+  uint8_t control_byte;
+  std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
+  CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
+  if (LLVM_LIKELY(control_byte == 0)) {
       return InsertKVResult(false, this->keys_ptr()[index],
                             values_ptr()[index]);
-    }
   }
 
-  if (index < 0) {
-    CARBON_DCHECK(this->growth_budget_ == 0)
-        << "Shouldn't need to grow the table until we exhaust our growth "
-           "budget!";
-
-    index = GrowRehashAndInsertIndex(lookup_key);
-  } else {
-    CARBON_DCHECK(this->growth_budget_ >= 0)
-        << "Cannot insert with zero budget!";
-    --this->growth_budget_;
-  }
-
-  CARBON_DCHECK(index >= 0) << "Should have a group to insert into now.";
-
+  CARBON_DCHECK(this->growth_budget_ >= 0) << "Cannot insert with zero budget!";
+  --this->growth_budget_;
+  this->groups_ptr()[index] = control_byte;
   KeyT* k;
   ValueT* v;
   std::tie(k, v) =
@@ -454,44 +332,23 @@ auto MapBase<KT, VT>::Update(
         insert_cb,
     llvm::function_ref<ValueT&(KeyT& key, ValueT& value)> update_cb)
     -> InsertKVResult {
-  ssize_t index = -1;
-
-  KeyT* keys;
-  ValueT* values;
-  if (this->size() > 0) {
-    bool needs_insertion = true;
-    std::tie(needs_insertion, index) = this->InsertIndexHashed(lookup_key);
-    keys = this->keys_ptr();
-    values = values_ptr();
-    if (LLVM_LIKELY(!needs_insertion)) {
-      CARBON_DCHECK(index >= 0)
-          << "Must have a valid group when we find an existing entry.";
-      KeyT& k = keys[index];
-      ValueT& v = update_cb(k, values[index]);
+  ssize_t index;
+  uint8_t control_byte;
+  std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
+  CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
+  if (LLVM_LIKELY(control_byte == 0)) {
+      KeyT& k = this->keys_ptr()[index];
+      ValueT& v = update_cb(k, this->values_ptr()[index]);
       return InsertKVResult(false, k, v);
-    }
-
-    if (index >= 0) {
-      // If inserting without growth, track that we've used that budget.
-      --this->growth_budget_;
-    }
   }
 
-  if (LLVM_UNLIKELY(index < 0)) {
-    CARBON_DCHECK(this->growth_budget_ == 0)
-        << "Shouldn't need to grow the table until we exhaust our growth "
-           "budget!";
-
-    index = GrowRehashAndInsertIndex(lookup_key);
-    // Refresh the keys and values.
-    keys = this->keys_ptr();
-    values = values_ptr();
-  }
-
-  CARBON_DCHECK(index >= 0) << "Should have a group to insert into now.";
+  CARBON_DCHECK(this->growth_budget_ >= 0) << "Cannot insert with zero budget!";
+  --this->growth_budget_;
+  this->groups_ptr()[index] = control_byte;
   KeyT* k;
   ValueT* v;
-  std::tie(k, v) = insert_cb(lookup_key, &keys[index], &values[index]);
+  std::tie(k, v) =
+      insert_cb(lookup_key, &this->keys_ptr()[index], &values_ptr()[index]);
   return InsertKVResult(true, *k, *v);
 }
 
@@ -509,36 +366,12 @@ auto MapBase<KeyT, ValueT>::Erase(LookupKeyT lookup_key) -> bool {
 
 template <typename KeyT, typename ValueT>
 void MapBase<KeyT, ValueT>::Clear() {
-  ValueT* values = values_ptr();
-  auto index_cb = [values](KeyT* keys, ssize_t i) {
-    // Destroy this key and value.
-    keys[i].~KeyT();
-    values[i].~ValueT();
-  };
-  this->ClearImpl(index_cb);
+  this->ClearImpl();
 }
 
 template <typename KeyT, typename ValueT, ssize_t SmallSize>
 void Map<KeyT, ValueT, SmallSize>::Reset() {
-  // Nothing to do when in the un-allocated and unused state.
-  if (this->size() == 0) {
-    return;
-  }
-
-  // If in the small rep, just clear the objects.
-  if (this->is_small()) {
-    this->Clear();
-    return;
-  }
-
-  // Otherwise do the first part of the clear to destroy all the elements.
-  this->ForEach([](KeyT& k, ValueT& v) {
-    k.~KeyT();
-    v.~ValueT();
-  });
-
-  // Deallocate the buffer.
-  this->Deallocate();
+  this->DestroyImpl();
 
   // Re-initialize the whole thing.
   CARBON_DCHECK(this->small_size() == SmallSize);

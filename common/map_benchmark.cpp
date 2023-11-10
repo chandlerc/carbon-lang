@@ -286,5 +286,63 @@ static void BM_MapEraseUpdateHit(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit);
 
+static void OpSeqSizeArgs(benchmark::internal::Benchmark* b) {
+  b->DenseRange(1, 13, 1);
+  b->DenseRange(15, 17, 1);
+  b->DenseRange(23, 25, 1);
+  b->DenseRange(31, 33, 1);
+  b->Range(1 << 6, 1 << 15);
+}
+
+// NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
+#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT, VT)                       \
+  BENCHMARK(NAME<Map<KT, VT>>)->Apply(OpSeqSizeArgs);                 \
+  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(OpSeqSizeArgs); \
+  BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashingDenseInfo<KT>>>) \
+      ->Apply(OpSeqSizeArgs)
+// NOLINTEND(bugprone-macro-parentheses)
+
+#define MAP_BENCHMARK_OP_SEQ(NAME) \
+ MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int, int); \
+ MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int*, int*); \
+ MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int, llvm::StringRef); \
+ MAP_BENCHMARK_OP_SEQ_SIZE(NAME, llvm::StringRef, int)
+
+template <typename MapT>
+static void BM_MapInsertSeq(benchmark::State& s) {
+  using MapWrapperT = MapWrapper<MapT>;
+  using KT = typename MapWrapperT::KeyT;
+  using VT = typename MapWrapperT::ValueT;
+  MapWrapperT m;
+  llvm::ArrayRef<KT> raw_keys = BuildKeys<KT>(s.range(0));
+  // We want to permute the keys so they're not in any particular order, but not
+  // generate a full shuffled set. Note that the branch predictor is likely to
+  // still be able to learn the complete pattern of branches inserted for very
+  // small key ranges.
+  llvm::SmallVector<KT> keys(raw_keys.begin(), raw_keys.end());
+  std::shuffle(keys.begin(), keys.end(), absl::BitGen());
+
+  // Now build a large shuffled set of keys (with duplicates) we'll use at the
+  // end.
+  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(raw_keys);
+  ssize_t i = 0;
+  for (auto _ : s) {
+    MapWrapperT m;
+    for (auto k : keys) {
+      bool inserted = m.BenchInsert(k, MakeValue2<VT>());
+      CARBON_DCHECK(inserted) << "Must be a successful insert!";
+    }
+
+    // Now insert a final random repeated key.
+    bool inserted = m.BenchInsert(shuffled_keys[i], MakeValue2<VT>());
+    CARBON_DCHECK(!inserted) << "Must already be in the map!";
+
+    // Rotate through the shuffled keys.
+    i = (i + static_cast<ssize_t>(inserted)) & (NumShuffledKeys - 1);
+    benchmark::DoNotOptimize(i);
+  }
+}
+MAP_BENCHMARK_OP_SEQ(BM_MapInsertSeq);
+
 }  // namespace
 }  // namespace Carbon

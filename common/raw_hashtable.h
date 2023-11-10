@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstring>
 #include <iterator>
+#include <type_traits>
 #include <utility>
 
 #include "common/check.h"
@@ -633,8 +634,8 @@ class RawHashtableKeyBase {
   auto storage() const -> Storage* { return impl_view_.storage_; }
   auto storage() -> Storage*& { return impl_view_.storage_; }
 
-  auto groups_ptr() -> uint8_t* { return impl_view_.groups_ptr(); }
-  auto keys_ptr() -> KeyT* { return impl_view_.keys_ptr(); }
+  auto groups_ptr() const -> uint8_t* { return impl_view_.groups_ptr(); }
+  auto keys_ptr() const -> KeyT* { return impl_view_.keys_ptr(); }
 
   auto is_small() const -> bool { return size() <= small_size(); }
   auto small_size() const -> ssize_t {
@@ -795,9 +796,10 @@ inline auto ComputeControlByte(size_t tag) -> uint8_t {
   return tag | 0b10000000;
 }
 
+// TODO: Evaluate keeping this outlined to see if macro benchmarks observe the
+// same perf hit as micros.
 template <typename KeyT>
 template <typename LookupKeyT>
-[[clang::noinline]]
 auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
     -> ssize_t {
   ssize_t local_size = size();
@@ -963,6 +965,10 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   ssize_t new_size = RawHashtable::ComputeNewSize(old_size);
   RawHashtableBase<KeyT, ValueT> new_table(new_size);
   KeyT* new_keys = new_table.keys_ptr();
+  ValueT* new_values;
+  if constexpr (HasValue) {
+    new_values = new_table.values_ptr();
+  }
 
   // The common case, especially for large sizes, is that we double the size
   // when we grow. This allows an important optimization -- we're adding
@@ -984,13 +990,23 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   // table up by `old_size` bytes, clearing out the empty slots, and inserting
   // any probed elements.
 
-  // We collect the probed elements at the bottom of the old `keys` array.
-  // This requires an extra move for all the probed keys, but avoids any extra
-  // memory allocation.
-  ssize_t probed_key_end_index = 0;
+  // We collect the probed elements in a small vector for re-insertion. It is
+  // tempting to re-use the already allocated storage, but doing so appears to
+  // be a (very slight) performance regression. These are relatively rare and
+  // storing them into the existing storage creates stores to the same regions
+  // of memory we're reading. Moreover, it requires moving both the key and the
+  // value twice, and doing the `memcpy` widening for relocatable types before
+  // the group walk rather than after the group walk. In practice, between the
+  // statistical rareness and using a large small size buffer on the stack, we
+  // can handle this most efficiently with temporary storage.
+  llvm::SmallVector<ssize_t, 128> probed_indices;
 
   uint8_t* old_groups = this->groups_ptr();
   KeyT* old_keys = this->keys_ptr();
+  ValueT* old_values;
+  if constexpr (HasValue) {
+    old_values = this->values_ptr();
+  }
   uint8_t* new_groups = new_table.groups_ptr();
 
   // We have an important optimization for trivially relocatable keys. But we
@@ -998,6 +1014,10 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   constexpr bool IsKeyTriviallyRelocatable =
       std::is_trivially_move_constructible_v<KeyT> &&
       std::is_trivially_destructible_v<KeyT>;
+
+  constexpr bool IsValueTriviallyRelocatable =
+      HasValue && std::is_trivially_move_constructible_v<ValueT> &&
+      std::is_trivially_destructible_v<ValueT>;
 
   for (ssize_t group_index = 0; group_index < old_size;
        group_index += RawHashtable::GroupSize) {
@@ -1014,12 +1034,8 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
           HashValue(old_keys[old_index], RawHashtable::ComputeSeed());
       ssize_t old_hash_index =
           hash.ExtractIndexAndTag<7>(old_size).first & ~RawHashtable::GroupMask;
-      if (old_hash_index != group_index) {
-        if (old_index > 0) {
-          new (&old_keys[probed_key_end_index])
-              KeyT(std::move(old_keys[old_index]));
-        }
-        ++probed_key_end_index;
+      if (LLVM_UNLIKELY(old_hash_index != group_index)) {
+        probed_indices.push_back(old_index);
         new_groups[old_index] = RawHashtable::Group::Empty;
         new_groups[old_index | old_size] = RawHashtable::Group::Empty;
         continue;
@@ -1033,11 +1049,15 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
       // target index.
       new_groups[new_index ^ old_size] = RawHashtable::Group::Empty;
 
-      // If we need to explicitly move (and destroy) the key, do so here where
-      // we already know its target.
+      // If we need to explicitly move (and destroy) the key or value, do so
+      // here where we already know its target.
       if constexpr (!IsKeyTriviallyRelocatable) {
         new (&new_keys[new_index]) KeyT(std::move(old_keys[old_index]));
         old_keys[old_index].~KeyT();
+      }
+      if constexpr (HasValue && !IsValueTriviallyRelocatable) {
+        new (&new_values[new_index]) ValueT(std::move(old_values[old_index]));
+        old_values[old_index].~ValueT();
       }
     }
   }
@@ -1047,31 +1067,37 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
                             RawHashtable::Group::Empty) +
                     llvm::count(llvm::ArrayRef(old_groups, old_size),
                                 RawHashtable::Group::Deleted) +
-                    probed_key_end_index + old_size);
+                    static_cast<ssize_t>(probed_indices.size()) + old_size);
 
-  // If the keys are trivially relocatable, we do a bulk memcpy of them into
-  // place. This will copy the keys into both possible locations, which is
-  // fine. One will be empty and clobbered if reused or ignored. The other
-  // will be the one used. This might seem like it needs it to be valid for us
-  // to create two copies, but it doesn't. This produces the exact same
-  // storage as copying the storage into the wrong location first, and then
-  // again into the correct location. Only one is live and only one is
-  // destroyed.
+  // If the keys or values are trivially relocatable, we do a bulk memcpy of
+  // them into place. This will copy them into both possible locations, which is
+  // fine. One will be empty and clobbered if reused or ignored. The other will
+  // be the one used. This might seem like it needs it to be valid for us to
+  // create two copies, but it doesn't. This produces the exact same storage as
+  // copying the storage into the wrong location first, and then again into the
+  // correct location. Only one is live and only one is destroyed.
   if constexpr (IsKeyTriviallyRelocatable) {
     memcpy(new_keys, old_keys, old_size * sizeof(KeyT));
     memcpy(new_keys + old_size, old_keys, old_size * sizeof(KeyT));
+  }
+  if constexpr (IsValueTriviallyRelocatable) {
+    memcpy(new_values, old_values, old_size * sizeof(ValueT));
+    memcpy(new_values + old_size, old_values, old_size * sizeof(ValueT));
   }
 
   // We have to use the normal insert for anything that was probed before, but
   // we know we'll find an empty slot, so leverage that. We extract the probed
   // keys from the bottom of the old keys storage.
-  for (KeyT& old_key_ref :
-       llvm::MutableArrayRef(old_keys, probed_key_end_index)) {
-    KeyT old_key = std::move(old_key_ref);
-    old_key_ref.~KeyT();
+  for (ssize_t old_index : probed_indices) {
+    KeyT old_key = std::move(old_keys[old_index]);
+    old_keys[old_index].~KeyT();
 
     auto [new_index, control_byte] = new_table.InsertIntoEmptyIndex(old_key);
     new (&new_keys[new_index]) KeyT(std::move(old_key));
+    if constexpr (HasValue) {
+      new (&new_values[new_index]) ValueT(std::move(old_values[old_index]));
+      old_values[old_index].~ValueT();
+    }
     new_groups[new_index] = control_byte;
   }
   new_table.growth_budget_ -=
@@ -1115,6 +1141,11 @@ template <typename LookupKeyT>
 [[clang::noinline]]
  auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
+  if (LLVM_UNLIKELY(this->size() == 0)) {
+    this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
+    return this->InsertIntoEmptyIndex(lookup_key);
+  }
+
   uint8_t* groups = this->groups_ptr();
 
   HashCode hash = HashValue(lookup_key, ComputeSeed());
@@ -1124,11 +1155,6 @@ template <typename LookupKeyT>
   // We re-purpose the empty control byte to signal no insert is needed to the
   // caller. This is guaranteed to not be a control byte we're inserting.
   constexpr uint8_t NoInsertNeeded = Group::Empty;
-
-  if (LLVM_UNLIKELY(this->size() == 0)) {
-    this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
-    return this->InsertIntoEmptyIndex(lookup_key);
-  }
 
   ssize_t group_with_deleted_index = -1;
   Group::MatchedRange deleted_matched_range;
@@ -1167,22 +1193,25 @@ template <typename LookupKeyT>
 
     // We failed to find a matching entry in this bucket, so check if there are
     // no empty slots. In that case, we'll continue probing.
-    if (LLVM_LIKELY(!empty_matched_range)) {
+    if (!empty_matched_range) {
       continue;
     }
-
     // Ok, we've finished probing without finding anything and need to insert
     // instead.
+
+    // If we found a deleted slot, we don't need the probe sequence to insert
+    // so just bail. We want to ensure building up a table is fast so we
+    // de-prioritize this a bit. In practice this doesn't have too much of an
+    // effect.
     if (LLVM_UNLIKELY(group_with_deleted_index >= 0)) {
-      // If we found a deleted slot, we don't need the probe sequence to insert
-      // so just bail.
-      break;
+      return return_insert_at_index(group_with_deleted_index +
+                                    *deleted_matched_range.begin());
     }
 
-    // Otherwise, we're going to need to grow by inserting over one of these
-    // empty slots. Check that we have the budget for that before we compute the
-    // exact index of the empty slot. Without the growth budget we'll have to
-    // completely rehash and so we can just bail here.
+    // We're going to need to grow by inserting into an empty slot. Check that
+    // we have the budget for that before we compute the exact index of the
+    // empty slot. Without the growth budget we'll have to completely rehash and
+    // so we can just bail here.
     if (LLVM_UNLIKELY(this->growth_budget_ == 0)) {
       return this->GrowRehashAndInsertIndex(lookup_key);
     }
@@ -1190,8 +1219,8 @@ template <typename LookupKeyT>
     return return_insert_at_index(group_index + *empty_matched_range.begin());
   }
 
-  return return_insert_at_index(group_with_deleted_index +
-                                *deleted_matched_range.begin());
+  CARBON_FATAL() << "We should never finish probing without finding the entry "
+                    "or an empty slot.";
 }
 
 template <typename InputKeyT, typename InputValueT>
