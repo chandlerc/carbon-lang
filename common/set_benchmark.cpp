@@ -5,8 +5,8 @@
 #include <benchmark/benchmark.h>
 
 #include "absl/container/flat_hash_set.h"
-#include "common/set.h"
 #include "common/raw_hashtable_benchmark_helpers.h"
+#include "common/set.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 

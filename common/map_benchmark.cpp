@@ -104,7 +104,8 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
   auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
 };
 
-// Helper to synthesize some value of one of the three types we use as value types.
+// Helper to synthesize some value of one of the three types we use as value
+// types.
 template <typename T>
 auto MakeValue2() -> T {
   if constexpr (std::is_same_v<T, llvm::StringRef>) {
@@ -302,11 +303,11 @@ static void OpSeqSizeArgs(benchmark::internal::Benchmark* b) {
       ->Apply(OpSeqSizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_OP_SEQ(NAME) \
- MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int, int); \
- MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int*, int*); \
- MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int, llvm::StringRef); \
- MAP_BENCHMARK_OP_SEQ_SIZE(NAME, llvm::StringRef, int)
+#define MAP_BENCHMARK_OP_SEQ(NAME)                       \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int, int);             \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int*, int*);           \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int, llvm::StringRef); \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, llvm::StringRef, int)
 
 template <typename MapT>
 static void BM_MapInsertSeq(benchmark::State& s) {

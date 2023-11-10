@@ -159,8 +159,7 @@ class Set : public SetBase<InputKeyT> {
 
 template <typename InputKeyT>
 template <typename LookupKeyT>
-auto SetView<InputKeyT>::Contains(LookupKeyT lookup_key) const
-    -> bool {
+auto SetView<InputKeyT>::Contains(LookupKeyT lookup_key) const -> bool {
   RawHashtable::Prefetch(this->storage_);
   return this->LookupIndexHashed(lookup_key) >= 0;
 }

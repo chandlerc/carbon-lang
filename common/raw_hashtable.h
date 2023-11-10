@@ -40,16 +40,16 @@
 // The utilities in this namespace fall into a few categories:
 //
 // - Primitives to manage "groups" of hashtable entries that have densely packed
-//   control bytes we can scan rapidly as a group, often using SIMD facilities to
-//   process the entire group at once.
+//   control bytes we can scan rapidly as a group, often using SIMD facilities
+//   to process the entire group at once.
 //
 // - Tools to manipulate and work with the storage of offsets needed to
 //   represent both key and key-value hashtables using these groups to organize
 //   their entries.
 //
 // - Abstractions around efficiently probing across the hashtable consisting of
-//   these "groups" of entries, and scanning within them to implement traditional
-//   open-hashing hashtable operations.
+//   these "groups" of entries, and scanning within them to implement
+//   traditional open-hashing hashtable operations.
 //
 // - Base classes to provide as much of the implementation of the user-facing
 //   APIs as possible in a common way. This includes the most performance
@@ -113,7 +113,9 @@ class BitIndexRange {
   auto end() const -> Iterator { return Iterator(); }
 
   template <int N>
-  auto Test() const -> bool { return mask_ & (static_cast<MaskT>(1) << N); }
+  auto Test() const -> bool {
+    return mask_ & (static_cast<MaskT>(1) << N);
+  }
 
   explicit operator MaskT() const { return mask_; }
 
@@ -209,7 +211,7 @@ struct NeonGroup {
   }
 
   auto Store(uint8_t* groups, ssize_t index) const -> void {
-    #error unimplemented
+#error unimplemented
   }
 
   template <int Index>
@@ -277,9 +279,7 @@ struct PortableGroup {
     group |= incoming;
   }
 
-  auto ClearDeleted() -> void {
-    group &= (~LSBs | group >> 7);
-  }
+  auto ClearDeleted() -> void { group &= (~LSBs | group >> 7); }
 
   auto Match(uint8_t match_byte) const -> MatchedRange {
     // This algorithm only works for matching *present* bytes. We leverage the
@@ -429,7 +429,7 @@ constexpr ssize_t GroupMask = GroupSize - 1;
 // This also lets us define statically allocated storage as subclasses.
 struct Storage {};
 
-template <typename ...Ts>
+template <typename... Ts>
 constexpr ssize_t StorageAlignment =
     std::max<ssize_t>({GroupSize, alignof(Group), alignof(Ts)...});
 
@@ -489,7 +489,8 @@ struct SmallSizeKeyStorage<KeyT, 0> : Storage {
   };
 };
 template <typename KeyT, typename ValueT>
-struct SmallSizeKeyValueStorage<KeyT, ValueT, 0> : SmallSizeKeyStorage<KeyT, 0> {
+struct SmallSizeKeyValueStorage<KeyT, ValueT, 0>
+    : SmallSizeKeyStorage<KeyT, 0> {
   SmallSizeKeyValueStorage() {}
   union {
     ValueT values[0];
@@ -519,8 +520,8 @@ struct alignas(StorageAlignment<KeyT>) SmallSizeKeyStorage : Storage {
     // Validate a collection of invariants between the small size storage layout
     // and the dynamically computed storage layout. We need the key type to be
     // complete so we do this in the constructor body.
-    static_assert(SmallSize == 0 || alignof(SmallSizeKeyStorage) ==
-                                        StorageAlignment<KeyT>,
+    static_assert(SmallSize == 0 ||
+                      alignof(SmallSizeKeyStorage) == StorageAlignment<KeyT>,
                   "Small size buffer must have the same alignment as a heap "
                   "allocated buffer.");
     static_assert(
@@ -645,7 +646,8 @@ class RawHashtableKeyBase {
   void Init(ssize_t init_size, Storage* init_storage);
 
   template <typename LookupKeyT>
-  auto InsertIntoEmptyIndex(LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t>;
+  auto InsertIntoEmptyIndex(LookupKeyT lookup_key)
+      -> std::pair<ssize_t, uint8_t>;
 
   template <typename LookupKeyT>
   auto EraseKey(LookupKeyT lookup_key) -> ssize_t;
@@ -666,9 +668,9 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
 
   static constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
     if constexpr (!HasValue) {
-    return ComputeKeyStorageSize<KeyT>(size);
+      return ComputeKeyStorageSize<KeyT>(size);
     } else {
-    return ComputeKeyValueStorageSize<KeyT, ValueT>(size);
+      return ComputeKeyValueStorageSize<KeyT, ValueT>(size);
     }
   }
 
@@ -701,7 +703,8 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
   }
 
   template <typename LookupKeyT>
-  auto GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t>;
+  auto GrowRehashAndInsertIndex(LookupKeyT lookup_key)
+      -> std::pair<ssize_t, uint8_t>;
   template <typename LookupKeyT>
   auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t>;
 
@@ -809,8 +812,8 @@ auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
   uint8_t control_byte = ComputeControlByte(tag);
   // ssize_t hash_index = ComputeHashIndex(hash, groups);
 
-  KeyT* keys =
-      reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(groups) + local_size);
+  KeyT* keys = reinterpret_cast<KeyT*>(
+      reinterpret_cast<unsigned char*>(groups) + local_size);
   ProbeSequence s(hash_index, local_size);
   do {
     ssize_t group_index = s.getIndex();
@@ -901,7 +904,7 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
 
 template <typename InputKeyT>
 void RawHashtableKeyBase<InputKeyT>::Init(ssize_t init_size,
-                                       Storage* init_storage) {
+                                          Storage* init_storage) {
   size() = init_size;
   storage() = init_storage;
   std::memset(groups_ptr(), 0, init_size);
@@ -910,7 +913,8 @@ void RawHashtableKeyBase<InputKeyT>::Init(ssize_t init_size,
 
 template <typename InputKeyT>
 template <typename LookupKeyT>
-auto RawHashtableKeyBase<InputKeyT>::EraseKey(LookupKeyT lookup_key) -> ssize_t {
+auto RawHashtableKeyBase<InputKeyT>::EraseKey(LookupKeyT lookup_key)
+    -> ssize_t {
   ssize_t index = impl_view_.LookupIndexHashed(lookup_key);
   if (index < 0) {
     return index;
@@ -1138,8 +1142,8 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
 // that seems to result in good code.
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-[[clang::noinline]]
- auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
+[[clang::noinline]] auto
+RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
   if (LLVM_UNLIKELY(this->size() == 0)) {
     this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
@@ -1159,7 +1163,8 @@ template <typename LookupKeyT>
   ssize_t group_with_deleted_index = -1;
   Group::MatchedRange deleted_matched_range;
 
-  auto return_insert_at_index = [&](ssize_t index) -> std::pair<uint32_t, ssize_t> {
+  auto return_insert_at_index =
+      [&](ssize_t index) -> std::pair<uint32_t, ssize_t> {
     // We'll need to insert at this index so set the control group byte to the
     // proper value.
     return {index, control_byte};

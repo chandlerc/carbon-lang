@@ -35,8 +35,8 @@ void ExpectMapElementsAre(MapT&& m, MatcherRangeT element_matchers) {
 
 // Allow directly using an initializer list.
 template <typename MapT, typename MatcherT>
-void ExpectMapElementsAre(
-    MapT&& m, std::initializer_list<MatcherT> element_matchers) {
+void ExpectMapElementsAre(MapT&& m,
+                          std::initializer_list<MatcherT> element_matchers) {
   std::vector<MatcherT> element_matchers_storage = element_matchers;
   ExpectMapElementsAre(m, element_matchers_storage);
 }

@@ -27,7 +27,7 @@ class Map;
 template <typename InputKeyT, typename InputValueT>
 class MapView : RawHashtable::RawHashtableViewBase<InputKeyT> {
   using BaseT = RawHashtable::RawHashtableViewBase<InputKeyT>;
-  
+
  public:
   using KeyT = typename BaseT::KeyT;
   using ValueT = InputValueT;
@@ -225,8 +225,7 @@ class MapBase
   auto values_ptr() -> ValueT* { return ViewT(*this).values_ptr(); }
 };
 
-template <typename InputKeyT, typename InputValueT,
-          ssize_t SmallSize = 0>
+template <typename InputKeyT, typename InputValueT, ssize_t SmallSize = 0>
 class Map : public MapBase<InputKeyT, InputValueT> {
  public:
   using BaseT = MapBase<InputKeyT, InputValueT>;
@@ -309,8 +308,7 @@ auto MapBase<KT, VT>::Insert(
   std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
   if (LLVM_LIKELY(control_byte == 0)) {
-      return InsertKVResult(false, this->keys_ptr()[index],
-                            values_ptr()[index]);
+    return InsertKVResult(false, this->keys_ptr()[index], values_ptr()[index]);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0) << "Cannot insert with zero budget!";
@@ -337,9 +335,9 @@ auto MapBase<KT, VT>::Update(
   std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
   if (LLVM_LIKELY(control_byte == 0)) {
-      KeyT& k = this->keys_ptr()[index];
-      ValueT& v = update_cb(k, this->values_ptr()[index]);
-      return InsertKVResult(false, k, v);
+    KeyT& k = this->keys_ptr()[index];
+    ValueT& v = update_cb(k, this->values_ptr()[index]);
+    return InsertKVResult(false, k, v);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0) << "Cannot insert with zero budget!";
