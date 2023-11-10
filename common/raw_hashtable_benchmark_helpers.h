@@ -26,7 +26,8 @@ auto BuildStrKeys(ssize_t size) -> llvm::ArrayRef<llvm::StringRef>;
 auto BuildPtrKeys(ssize_t size) -> llvm::ArrayRef<int*>;
 auto BuildIntKeys(ssize_t size) -> llvm::ArrayRef<int>;
 
-template <typename T> auto BuildKeys(ssize_t size) -> llvm::ArrayRef<T> {
+template <typename T>
+auto BuildKeys(ssize_t size) -> llvm::ArrayRef<T> {
   CARBON_CHECK(size <= MaxNumKeys);
   if constexpr (std::is_same_v<T, llvm::StringRef>) {
     return BuildStrKeys(size);
@@ -61,7 +62,8 @@ template <typename T>
 template <typename T>
 struct CarbonHashingDenseInfo;
 
-template <> struct CarbonHashingDenseInfo<int> {
+template <>
+struct CarbonHashingDenseInfo<int> {
   static inline auto getEmptyKey() -> int { return -1; }
   static inline auto getTombstoneKey() -> int { return -2; }
   static auto getHashValue(const int val) -> unsigned {
@@ -72,7 +74,8 @@ template <> struct CarbonHashingDenseInfo<int> {
   }
 };
 
-template <typename T> struct CarbonHashingDenseInfo<T*> {
+template <typename T>
+struct CarbonHashingDenseInfo<T*> {
   static constexpr uintptr_t Log2MaxAlign = 12;
 
   static inline auto getEmptyKey() -> T* {
@@ -93,12 +96,11 @@ template <typename T> struct CarbonHashingDenseInfo<T*> {
     return static_cast<uint64_t>(HashValue(ptr_val));
   }
 
-  static auto isEqual(const T* lhs, const T* rhs) -> bool {
-    return lhs == rhs;
-  }
+  static auto isEqual(const T* lhs, const T* rhs) -> bool { return lhs == rhs; }
 };
 
-template <> struct CarbonHashingDenseInfo<llvm::StringRef> {
+template <>
+struct CarbonHashingDenseInfo<llvm::StringRef> {
   static auto getEmptyKey() -> llvm::StringRef {
     return llvm::StringRef(
         // NOLINTNEXTLINE(performance-no-int-to-ptr): Required by the API.
@@ -126,4 +128,4 @@ template <> struct CarbonHashingDenseInfo<llvm::StringRef> {
 
 }  // namespace Carbon::RawHashtable
 
-#endif
+#endif  // CARBON_COMMON_RAW_HASHTABLE_BENCHMARK_HELPERS_H_
