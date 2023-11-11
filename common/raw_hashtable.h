@@ -216,7 +216,8 @@ struct NeonGroup {
 
   auto ClearDeleted() -> void {
     // Compare less than zero of each byte to identify the present elements.
-    uint8x8_t present_mask = vclt_s8(vreinterpret_s8_u8(byte_vec), vdup_n_s8(0));
+    uint8x8_t present_mask =
+        vclt_s8(vreinterpret_s8_u8(byte_vec), vdup_n_s8(0));
     // And mask every other lane to zero.
     byte_vec = vand_u8(byte_vec, present_mask);
   }

@@ -311,7 +311,6 @@ auto MapBase<KT, VT>::Insert(
     return InsertKVResult(false, this->keys_ptr()[index], values_ptr()[index]);
   }
 
-
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
   this->groups_ptr()[index] = control_byte;
