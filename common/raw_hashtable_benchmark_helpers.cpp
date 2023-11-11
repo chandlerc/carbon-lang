@@ -10,8 +10,7 @@
 
 namespace Carbon::RawHashtable {
 
-auto BuildStrKeys(ssize_t size)
-    -> llvm::ArrayRef<llvm::StringRef> {
+auto BuildStrKeys(ssize_t size) -> llvm::ArrayRef<llvm::StringRef> {
   static std::vector<llvm::StringRef> keys = [] {
     std::vector<llvm::StringRef> keys;
 
