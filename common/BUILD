@@ -253,6 +253,7 @@ cc_library(
     deps = [
         ":check",
         ":hashing",
+        ":set",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/random",
         "@llvm-project//llvm:Support",

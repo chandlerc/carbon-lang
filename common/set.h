@@ -112,7 +112,7 @@ class SetBase : protected RawHashtable::RawHashtableBase<InputKeyT> {
   auto Insert(LookupKeyT lookup_key) -> InsertResult {
     return Insert(lookup_key,
                   [](LookupKeyT lookup_key, void* key_storage) -> KeyT* {
-                    return new (key_storage) KeyT(lookup_key);
+                    return new (key_storage) KeyT(std::move(lookup_key));
                   });
   }
 
@@ -198,8 +198,8 @@ auto SetBase<KT>::Insert(
     return InsertResult(false, this->keys_ptr()[index]);
   }
 
-  CARBON_DCHECK(this->growth_budget_ >= 0) << "Cannot insert with zero budget!";
-  --this->growth_budget_;
+  CARBON_DCHECK(this->growth_budget_ >= 0)
+      << "Growth budget shouldn't have gone negative!";
   this->groups_ptr()[index] = control_byte;
   KeyT* k = insert_cb(lookup_key, &this->keys_ptr()[index]);
   return InsertResult(true, *k);

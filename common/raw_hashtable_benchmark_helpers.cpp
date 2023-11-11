@@ -6,6 +6,8 @@
 
 #include <vector>
 
+#include "common/set.h"
+
 namespace Carbon::RawHashtable {
 
 [[clang::noinline]] auto BuildStrKeys(ssize_t size)
@@ -30,6 +32,7 @@ namespace Carbon::RawHashtable {
     };
 
     absl::BitGen gen;
+    Set<llvm::StringRef> key_set;
     keys.reserve(MaxNumKeys);
     for (ssize_t i : llvm::seq<ssize_t>(0, MaxNumKeys)) {
       // We allocate and leak a string for each key. This is fine as we're a
@@ -38,11 +41,17 @@ namespace Carbon::RawHashtable {
 
       ssize_t bucket = i % 16;
       ssize_t length = length_buckets[bucket];
-      for ([[maybe_unused]] ssize_t j : llvm::seq<ssize_t>(0, length)) {
-        s.push_back(
-            characters[absl::Uniform<ssize_t>(gen, 0, characters.size())]);
-      }
-      keys.push_back(s);
+      bool inserted = false;
+      do {
+        s.clear();
+        for ([[maybe_unused]] ssize_t j : llvm::seq<ssize_t>(0, length)) {
+          s.push_back(
+              characters[absl::Uniform<ssize_t>(gen, 0, characters.size())]);
+        }
+        inserted = key_set.Insert(llvm::StringRef(s)).is_inserted();
+        // Keep generating strings until we get a unique one.
+      } while (!inserted);
+      keys.push_back(llvm::StringRef(s));
     }
     return keys;
   }();

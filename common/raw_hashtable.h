@@ -211,7 +211,14 @@ struct NeonGroup {
   }
 
   auto Store(uint8_t* groups, ssize_t index) const -> void {
-#error unimplemented
+    memcpy(groups + index, &byte_vec, sizeof(byte_vec));
+  }
+
+  auto ClearDeleted() -> void {
+    // Compare less than zero of each byte to identify the present elements.
+    uint8x8_t present_mask = vclt_s8(vreinterpret_s8_u8(byte_vec), vdup_n_s8(0));
+    // And mask every other lane to zero.
+    byte_vec = vand_u8(byte_vec, present_mask);
   }
 
   template <int Index>
@@ -960,14 +967,27 @@ template <typename LookupKeyT>
 [[clang::noinline]] auto
 RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
+  // We collect the probed elements in a small vector for re-insertion. It is
+  // tempting to re-use the already allocated storage, but doing so appears to
+  // be a (very slight) performance regression. These are relatively rare and
+  // storing them into the existing storage creates stores to the same regions
+  // of memory we're reading. Moreover, it requires moving both the key and the
+  // value twice, and doing the `memcpy` widening for relocatable types before
+  // the group walk rather than after the group walk. In practice, between the
+  // statistical rareness and using a large small size buffer on the stack, we
+  // can handle this most efficiently with temporary storage.
+  llvm::SmallVector<ssize_t, 128> probed_indices;
+
   // We grow into a new `MapBase` so that both the new and old maps are
   // fully functional until all the entries are moved over. However, we directly
   // manipulate the internals to short circuit many aspects of the growth.
   ssize_t old_size = this->size();
   CARBON_DCHECK(old_size > 0);
+  CARBON_DCHECK(this->growth_budget_ == 0);
 
   ssize_t new_size = RawHashtable::ComputeNewSize(old_size);
   RawHashtableBase<KeyT, ValueT> new_table(new_size);
+  uint8_t* new_groups = new_table.groups_ptr();
   KeyT* new_keys = new_table.keys_ptr();
   ValueT* new_values;
   if constexpr (HasValue) {
@@ -994,24 +1014,13 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   // table up by `old_size` bytes, clearing out the empty slots, and inserting
   // any probed elements.
 
-  // We collect the probed elements in a small vector for re-insertion. It is
-  // tempting to re-use the already allocated storage, but doing so appears to
-  // be a (very slight) performance regression. These are relatively rare and
-  // storing them into the existing storage creates stores to the same regions
-  // of memory we're reading. Moreover, it requires moving both the key and the
-  // value twice, and doing the `memcpy` widening for relocatable types before
-  // the group walk rather than after the group walk. In practice, between the
-  // statistical rareness and using a large small size buffer on the stack, we
-  // can handle this most efficiently with temporary storage.
-  llvm::SmallVector<ssize_t, 128> probed_indices;
-
   uint8_t* old_groups = this->groups_ptr();
   KeyT* old_keys = this->keys_ptr();
   ValueT* old_values;
   if constexpr (HasValue) {
     old_values = this->values_ptr();
   }
-  uint8_t* new_groups = new_table.groups_ptr();
+  ssize_t count = 0;
 
   // We have an important optimization for trivially relocatable keys. But we
   // don't have a relocatable trait (yet) so we approximate it here.
@@ -1031,6 +1040,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     g.Store(new_groups, group_index | old_size);
     auto present_matched_range = g.MatchPresent();
     for (ssize_t byte_index : present_matched_range) {
+      ++count;
       ssize_t old_index = group_index + byte_index;
       CARBON_DCHECK(new_groups[old_index] == old_groups[old_index]);
       CARBON_DCHECK(new_groups[old_index | old_size] == old_groups[old_index]);
@@ -1104,10 +1114,13 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     }
     new_groups[new_index] = control_byte;
   }
-  new_table.growth_budget_ -=
-      RawHashtable::GrowthThresholdForSize(old_size) - this->growth_budget_;
 
-  CARBON_DCHECK(new_table.growth_budget_ >= 0 &&
+  new_table.growth_budget_ -= count;
+  CARBON_DCHECK(new_table.growth_budget_ ==
+                (GrowthThresholdForSize(new_size) -
+                 (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
+                                         Group::Empty))));
+  CARBON_DCHECK(new_table.growth_budget_ > 0 &&
                 "Must still have a growth budget after rehash!");
 
   if (!this->is_small()) {
@@ -1128,6 +1141,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
 
   // And lastly insert the lookup_key into an index in the newly grown map and
   // return that index for use.
+  --this->growth_budget_;
   return this->InsertIntoEmptyIndex(lookup_key);
 }
 
@@ -1221,6 +1235,7 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
       return this->GrowRehashAndInsertIndex(lookup_key);
     }
 
+    --this->growth_budget_;
     return return_insert_at_index(group_index + *empty_matched_range.begin());
   }
 
