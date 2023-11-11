@@ -10,7 +10,7 @@
 
 namespace Carbon::RawHashtable {
 
-[[clang::noinline]] auto BuildStrKeys(ssize_t size)
+auto BuildStrKeys(ssize_t size)
     -> llvm::ArrayRef<llvm::StringRef> {
   static std::vector<llvm::StringRef> keys = [] {
     std::vector<llvm::StringRef> keys;
@@ -58,7 +58,7 @@ namespace Carbon::RawHashtable {
   return llvm::ArrayRef(keys).slice(0, size);
 }
 
-[[clang::noinline]] auto BuildPtrKeys(ssize_t size) -> llvm::ArrayRef<int*> {
+auto BuildPtrKeys(ssize_t size) -> llvm::ArrayRef<int*> {
   static std::vector<int*> keys = [] {
     std::vector<int*> keys;
     for (ssize_t i : llvm::seq<ssize_t>(0, MaxNumKeys)) {
@@ -70,7 +70,7 @@ namespace Carbon::RawHashtable {
   return llvm::ArrayRef(keys).slice(0, size);
 }
 
-[[clang::noinline]] auto BuildIntKeys(ssize_t size) -> llvm::ArrayRef<int> {
+auto BuildIntKeys(ssize_t size) -> llvm::ArrayRef<int> {
   static std::vector<int> keys = [] {
     std::vector<int> keys;
     for (ssize_t i : llvm::seq<ssize_t>(0, MaxNumKeys)) {

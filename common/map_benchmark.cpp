@@ -21,18 +21,6 @@ using RawHashtable::CarbonHashingDenseInfo;
 using RawHashtable::NumOtherKeys;
 using RawHashtable::NumShuffledKeys;
 
-// This map has an intentional inlining blocker to avoid code growth. However,
-// both Abseil and LLVM's maps don't have this and at least on AArch64 both
-// inline heavily and show performance differences that seem entirely to stem
-// from that. We use this to block inlining on the wrapper as a way to get
-// slightly more comparable benchmark results. It's not perfect, but seems more
-// useful than the alternatives.
-#ifdef __aarch64__
-#define CARBON_ARM64_NOINLINE [[gnu::noinline]]
-#else
-#define CARBON_ARM64_NOINLINE
-#endif
-
 template <typename MapT>
 struct MapWrapper {
   using KeyT = typename MapT::key_type;
@@ -42,10 +30,8 @@ struct MapWrapper {
 
   void CreateView() {}
 
-  CARBON_ARM64_NOINLINE
   auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
 
-  CARBON_ARM64_NOINLINE
   auto BenchLookup(KeyT k) -> ValueT* {
     auto it = M.find(k);
     if (it == M.end()) {
@@ -55,20 +41,17 @@ struct MapWrapper {
     return v;
   }
 
-  CARBON_ARM64_NOINLINE
   auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.insert({k, v});
     return result.second;
   }
 
-  CARBON_ARM64_NOINLINE
   auto BenchUpdate(KeyT k, ValueT v) -> bool {
     auto result = M.insert({k, v});
     result.first->second = v;
     return result.second;
   }
 
-  CARBON_ARM64_NOINLINE
   auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 

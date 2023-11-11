@@ -200,6 +200,8 @@ struct NeonGroup {
   static constexpr uint8_t Empty = 0;
   static constexpr uint8_t Deleted = 1;
 
+  static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
+
   using MatchedRange = BitIndexRange<uint64_t, /*Shift=*/3>;
 
   uint8x8_t byte_vec = {};
@@ -211,7 +213,7 @@ struct NeonGroup {
   }
 
   auto Store(uint8_t* groups, ssize_t index) const -> void {
-    memcpy(groups + index, &byte_vec, sizeof(byte_vec));
+    vst1_u8(groups + index, byte_vec);
   }
 
   auto ClearDeleted() -> void {
@@ -231,23 +233,21 @@ struct NeonGroup {
     auto match_byte_vec = vdup_n_u8(match_byte);
     auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
     uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-    return MatchedRange(mask);
+    return MatchedRange(mask & MSBs);
   }
 
   auto MatchEmpty() const -> MatchedRange {
     auto match_byte_cmp_vec = vceqz_u8(byte_vec);
     uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-    return MatchedRange(mask);
+    return MatchedRange(mask & MSBs);
   }
 
   auto MatchDeleted() const -> MatchedRange { return Match(Deleted); }
 
   auto MatchPresent() const -> MatchedRange {
-    static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
-    uint64_t mask;
-    std::memcpy(&mask, &byte_vec, sizeof(byte_vec));
-    mask &= MSBs;
-    return MatchedRange(mask);
+    // Just directly extract the bytes as the MSB already marks presence.
+    uint64_t mask = vreinterpret_u64_u8(byte_vec)[0];
+    return MatchedRange(mask & MSBs);
   }
 };
 #endif
