@@ -16,6 +16,7 @@
 #include "common/hashing.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/bit.h"
+#include "llvm/Support/Alignment.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
@@ -674,6 +675,19 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
 
   static constexpr bool HasValue = !std::is_same_v<ValueT, void>;
 
+  // We have an important optimization for trivially relocatable keys. But we
+  // don't have a relocatable trait (yet) so we approximate it here.
+  static constexpr bool IsKeyTriviallyRelocatable =
+      std::is_trivially_move_constructible_v<KeyT> &&
+      std::is_trivially_destructible_v<KeyT>;
+
+  static constexpr bool IsValueTriviallyRelocatable =
+      HasValue && std::is_trivially_move_constructible_v<ValueT> &&
+      std::is_trivially_destructible_v<ValueT>;
+
+  static constexpr bool UseRealloc =
+      IsKeyTriviallyRelocatable && (!HasValue || IsValueTriviallyRelocatable);
+
   static constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
     if constexpr (!HasValue) {
       return ComputeKeyStorageSize<KeyT>(size);
@@ -691,8 +705,27 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
   }
 
   static auto Allocate(ssize_t size) -> RawHashtable::Storage* {
-    return reinterpret_cast<RawHashtable::Storage*>(__builtin_operator_new(
-        ComputeStorageSize(size), ComputeStorageAlignment(), std::nothrow_t()));
+    if constexpr (UseRealloc) {
+      auto* storage = reinterpret_cast<RawHashtable::Storage*>(
+          malloc(ComputeStorageSize(size)));
+      CARBON_CHECK(
+          llvm::isAddrAligned(llvm::Align(ComputeStorageAlignment()), storage));
+      return storage;
+    } else {
+      return reinterpret_cast<RawHashtable::Storage*>(
+          __builtin_operator_new(ComputeStorageSize(size),
+                                 ComputeStorageAlignment(), std::nothrow_t()));
+    }
+  }
+
+  static auto Realloc(Storage* old_storage, ssize_t size) -> Storage* {
+    static_assert(UseRealloc);
+
+    auto* new_storage = reinterpret_cast<Storage*>(
+        realloc(old_storage, ComputeStorageSize(size)));
+    CARBON_CHECK(llvm::isAddrAligned(llvm::Align(ComputeStorageAlignment()),
+                                     new_storage));
+    return new_storage;
   }
 
   RawHashtableBase(int small_size, RawHashtable::Storage* small_storage)
@@ -721,11 +754,15 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
     ssize_t allocated_size = ComputeStorageSize(this->size());
     // We don't need the size, but make sure it always compiles.
     (void)allocated_size;
-    return __builtin_operator_delete(this->storage(),
+    if constexpr (UseRealloc) {
+      return free(this->storage());
+    } else {
+      return __builtin_operator_delete(this->storage(),
 #if __cpp_sized_deallocation
-                                     allocated_size,
+                                       allocated_size,
 #endif
-                                     ComputeStorageAlignment());
+                                       ComputeStorageAlignment());
+    }
   }
 
   auto ClearImpl() -> void;
@@ -955,8 +992,8 @@ auto RawHashtableKeyBase<InputKeyT>::EraseKey(LookupKeyT lookup_key)
 }
 
 template <typename InputKeyT, typename InputValueT>
-RawHashtableBase<InputKeyT, InputValueT>::RawHashtableBase(ssize_t arg_size)
-    : KeyBaseT(arg_size, Allocate(arg_size)) {}
+RawHashtableBase<InputKeyT, InputValueT>::RawHashtableBase(ssize_t arg_size, Storage* arg_allocation)
+    : KeyBaseT(arg_size, arg_allocation) {}
 
 template <typename InputKeyT, typename InputValueT>
 RawHashtableBase<InputKeyT, InputValueT>::~RawHashtableBase() {
@@ -1022,16 +1059,6 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     old_values = this->values_ptr();
   }
   ssize_t count = 0;
-
-  // We have an important optimization for trivially relocatable keys. But we
-  // don't have a relocatable trait (yet) so we approximate it here.
-  constexpr bool IsKeyTriviallyRelocatable =
-      std::is_trivially_move_constructible_v<KeyT> &&
-      std::is_trivially_destructible_v<KeyT>;
-
-  constexpr bool IsValueTriviallyRelocatable =
-      HasValue && std::is_trivially_move_constructible_v<ValueT> &&
-      std::is_trivially_destructible_v<ValueT>;
 
   for (ssize_t group_index = 0; group_index < old_size;
        group_index += RawHashtable::GroupSize) {
