@@ -992,7 +992,8 @@ auto RawHashtableKeyBase<InputKeyT>::EraseKey(LookupKeyT lookup_key)
 }
 
 template <typename InputKeyT, typename InputValueT>
-RawHashtableBase<InputKeyT, InputValueT>::RawHashtableBase(ssize_t arg_size, Storage* arg_allocation)
+RawHashtableBase<InputKeyT, InputValueT>::RawHashtableBase(
+    ssize_t arg_size, Storage* arg_allocation)
     : KeyBaseT(arg_size, arg_allocation) {}
 
 template <typename InputKeyT, typename InputValueT>
