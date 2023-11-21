@@ -1000,7 +1000,8 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   ssize_t debug_empty_count =
       llvm::count(llvm::ArrayRef(old_groups, old_size), Group::Empty) +
       llvm::count(llvm::ArrayRef(old_groups, old_size), Group::Deleted);
-  CARBON_DCHECK(debug_empty_count >= (old_size - GrowthThresholdForSize(old_size)));
+  CARBON_DCHECK(debug_empty_count >=
+                (old_size - GrowthThresholdForSize(old_size)));
 #endif
 
   // Compute the new size and grow the storage in place (if possible).
