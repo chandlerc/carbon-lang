@@ -126,6 +126,7 @@ TEST(SetTest, Basic) {
   for (int i : llvm::seq(14, 100)) {
     SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
     EXPECT_TRUE(s.Insert(i).is_inserted());
+    ASSERT_TRUE(s.Contains(1));
   }
   for (int i : llvm::seq(1, 100)) {
     SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());

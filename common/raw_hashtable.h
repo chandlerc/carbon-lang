@@ -16,7 +16,6 @@
 #include "common/hashing.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/bit.h"
-#include "llvm/Support/Alignment.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
@@ -685,9 +684,6 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
       HasValue && std::is_trivially_move_constructible_v<ValueT> &&
       std::is_trivially_destructible_v<ValueT>;
 
-  static constexpr bool UseRealloc =
-      IsKeyTriviallyRelocatable && (!HasValue || IsValueTriviallyRelocatable);
-
   static constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
     if constexpr (!HasValue) {
       return ComputeKeyStorageSize<KeyT>(size);
@@ -705,35 +701,23 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
   }
 
   static auto Allocate(ssize_t size) -> RawHashtable::Storage* {
-    if constexpr (UseRealloc) {
-      auto* storage = reinterpret_cast<RawHashtable::Storage*>(
-          malloc(ComputeStorageSize(size)));
-      CARBON_CHECK(
-          llvm::isAddrAligned(llvm::Align(ComputeStorageAlignment()), storage));
-      return storage;
-    } else {
-      return reinterpret_cast<RawHashtable::Storage*>(
-          __builtin_operator_new(ComputeStorageSize(size),
-                                 ComputeStorageAlignment(), std::nothrow_t()));
-    }
+    return reinterpret_cast<RawHashtable::Storage*>(__builtin_operator_new(
+        ComputeStorageSize(size), ComputeStorageAlignment(), std::nothrow_t()));
   }
 
-  static auto Realloc(Storage* old_storage, ssize_t size) -> Storage* {
-    static_assert(UseRealloc);
-
-    auto* new_storage = reinterpret_cast<Storage*>(
-        realloc(old_storage, ComputeStorageSize(size)));
-    CARBON_CHECK(llvm::isAddrAligned(llvm::Align(ComputeStorageAlignment()),
-                                     new_storage));
-    return new_storage;
+  static auto Deallocate(Storage* storage, ssize_t size) -> void {
+    ssize_t allocated_size = ComputeStorageSize(size);
+    // We don't need the size, but make sure it always compiles.
+    (void)allocated_size;
+    return __builtin_operator_delete(storage,
+#if __cpp_sized_deallocation
+                                     allocated_size,
+#endif
+                                     ComputeStorageAlignment());
   }
 
   RawHashtableBase(int small_size, RawHashtable::Storage* small_storage)
       : KeyBaseT(small_size, small_storage) {}
-
-  // An internal constructor used to build temporary map base objects with a
-  // specific allocated size. This is used internally to build ephemeral maps.
-  explicit RawHashtableBase(ssize_t arg_size);
 
   ~RawHashtableBase();
 
@@ -748,22 +732,6 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
       -> std::pair<ssize_t, uint8_t>;
   template <typename LookupKeyT>
   auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t>;
-
-  auto Deallocate() -> void {
-    CARBON_DCHECK(!this->is_small());
-    ssize_t allocated_size = ComputeStorageSize(this->size());
-    // We don't need the size, but make sure it always compiles.
-    (void)allocated_size;
-    if constexpr (UseRealloc) {
-      return free(this->storage());
-    } else {
-      return __builtin_operator_delete(this->storage(),
-#if __cpp_sized_deallocation
-                                       allocated_size,
-#endif
-                                       ComputeStorageAlignment());
-    }
-  }
 
   auto ClearImpl() -> void;
   auto DestroyImpl() -> void;
@@ -992,11 +960,6 @@ auto RawHashtableKeyBase<InputKeyT>::EraseKey(LookupKeyT lookup_key)
 }
 
 template <typename InputKeyT, typename InputValueT>
-RawHashtableBase<InputKeyT, InputValueT>::RawHashtableBase(
-    ssize_t arg_size, Storage* arg_allocation)
-    : KeyBaseT(arg_size, arg_allocation) {}
-
-template <typename InputKeyT, typename InputValueT>
 RawHashtableBase<InputKeyT, InputValueT>::~RawHashtableBase() {
   DestroyImpl();
 }
@@ -1024,13 +987,34 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   CARBON_DCHECK(old_size > 0);
   CARBON_DCHECK(this->growth_budget_ == 0);
 
-  ssize_t new_size = RawHashtable::ComputeNewSize(old_size);
-  RawHashtableBase<KeyT, ValueT> new_table(new_size);
-  uint8_t* new_groups = new_table.groups_ptr();
-  KeyT* new_keys = new_table.keys_ptr();
+  bool old_small = this->is_small();
+  Storage* old_storage = this->storage();
+  uint8_t* old_groups = this->groups_ptr();
+  KeyT* old_keys = this->keys_ptr();
+  ValueT* old_values;
+  if constexpr (HasValue) {
+    old_values = this->values_ptr();
+  }
+
+#ifndef NDEBUG
+  ssize_t debug_empty_count =
+      llvm::count(llvm::ArrayRef(old_groups, old_size), Group::Empty) +
+      llvm::count(llvm::ArrayRef(old_groups, old_size), Group::Deleted);
+  CARBON_DCHECK(debug_empty_count >= (old_size - GrowthThresholdForSize(old_size)));
+#endif
+
+  // Compute the new size and grow the storage in place (if possible).
+  ssize_t new_size = ComputeNewSize(old_size);
+  this->size() = new_size;
+  this->storage() = Allocate(new_size);
+  this->growth_budget_ = GrowthThresholdForSize(new_size);
+
+  // Now extract the new components of the table.
+  uint8_t* new_groups = this->groups_ptr();
+  KeyT* new_keys = this->keys_ptr();
   ValueT* new_values;
   if constexpr (HasValue) {
-    new_values = new_table.values_ptr();
+    new_values = this->values_ptr();
   }
 
   // The common case, especially for large sizes, is that we double the size
@@ -1053,16 +1037,9 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   // table up by `old_size` bytes, clearing out the empty slots, and inserting
   // any probed elements.
 
-  uint8_t* old_groups = this->groups_ptr();
-  KeyT* old_keys = this->keys_ptr();
-  ValueT* old_values;
-  if constexpr (HasValue) {
-    old_values = this->values_ptr();
-  }
   ssize_t count = 0;
-
   for (ssize_t group_index = 0; group_index < old_size;
-       group_index += RawHashtable::GroupSize) {
+       group_index += GroupSize) {
     auto g = RawHashtable::Group::Load(old_groups, group_index);
     g.ClearDeleted();
     g.Store(new_groups, group_index);
@@ -1073,24 +1050,23 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
       ssize_t old_index = group_index + byte_index;
       CARBON_DCHECK(new_groups[old_index] == old_groups[old_index]);
       CARBON_DCHECK(new_groups[old_index | old_size] == old_groups[old_index]);
-      HashCode hash =
-          HashValue(old_keys[old_index], RawHashtable::ComputeSeed());
+      HashCode hash = HashValue(old_keys[old_index], ComputeSeed());
       ssize_t old_hash_index =
-          hash.ExtractIndexAndTag<7>(old_size).first & ~RawHashtable::GroupMask;
+          hash.ExtractIndexAndTag<7>(old_size).first & ~GroupMask;
       if (LLVM_UNLIKELY(old_hash_index != group_index)) {
         probed_indices.push_back(old_index);
-        new_groups[old_index] = RawHashtable::Group::Empty;
-        new_groups[old_index | old_size] = RawHashtable::Group::Empty;
+        new_groups[old_index] = Group::Empty;
+        new_groups[old_index | old_size] = Group::Empty;
         continue;
       }
       ssize_t new_index =
-          hash.ExtractIndexAndTag<7>(new_size).first & ~RawHashtable::GroupMask;
+          hash.ExtractIndexAndTag<7>(new_size).first & ~GroupMask;
       CARBON_DCHECK(new_index == old_hash_index ||
                     new_index == (old_hash_index | old_size));
       new_index += byte_index;
       // Toggle the newly added bit of the index to get to the other possible
       // target index.
-      new_groups[new_index ^ old_size] = RawHashtable::Group::Empty;
+      new_groups[new_index ^ old_size] = Group::Empty;
 
       // If we need to explicitly move (and destroy) the key or value, do so
       // here where we already know its target.
@@ -1104,13 +1080,16 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
       }
     }
   }
-  CARBON_DCHECK(llvm::count(llvm::ArrayRef(new_groups, new_size),
-                            RawHashtable::Group::Empty) ==
-                llvm::count(llvm::ArrayRef(old_groups, old_size),
-                            RawHashtable::Group::Empty) +
-                    llvm::count(llvm::ArrayRef(old_groups, old_size),
-                                RawHashtable::Group::Deleted) +
-                    static_cast<ssize_t>(probed_indices.size()) + old_size);
+  CARBON_DCHECK((count - static_cast<ssize_t>(probed_indices.size())) ==
+                (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
+                                        Group::Empty)));
+#ifndef NDEBUG
+  CARBON_DCHECK(debug_empty_count == (old_size - count));
+  CARBON_DCHECK(
+      llvm::count(llvm::ArrayRef(new_groups, new_size), Group::Empty) ==
+      debug_empty_count + static_cast<ssize_t>(probed_indices.size()) +
+          old_size);
+#endif
 
   // If the keys or values are trivially relocatable, we do a bulk memcpy of
   // them into place. This will copy them into both possible locations, which is
@@ -1135,38 +1114,36 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     KeyT old_key = std::move(old_keys[old_index]);
     old_keys[old_index].~KeyT();
 
-    auto [new_index, control_byte] = new_table.InsertIntoEmptyIndex(old_key);
+    // We may end up needing to do a sequence of re-inserts, swapping out keys
+    // and values each time, so we enter a loop here and break out of it for the
+    // simple cases of re-inserting into a genuinely empty slot.
+    auto [new_index, control_byte] = this->InsertIntoEmptyIndex(old_key);
     new (&new_keys[new_index]) KeyT(std::move(old_key));
+
     if constexpr (HasValue) {
-      new (&new_values[new_index]) ValueT(std::move(old_values[old_index]));
-      old_values[old_index].~ValueT();
+      if (new_index == old_index) {
+        new (&new_values[new_index]) ValueT(std::move(old_values[old_index]));
+        old_values[old_index].~ValueT();
+      }
     }
+
     new_groups[new_index] = control_byte;
   }
-
-  new_table.growth_budget_ -= count;
-  CARBON_DCHECK(new_table.growth_budget_ ==
+  CARBON_DCHECK(count ==
+                (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
+                                        Group::Empty)));
+  this->growth_budget_ -= count;
+  CARBON_DCHECK(this->growth_budget_ ==
                 (GrowthThresholdForSize(new_size) -
                  (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
                                          Group::Empty))));
-  CARBON_DCHECK(new_table.growth_budget_ > 0 &&
+  CARBON_DCHECK(this->growth_budget_ > 0 &&
                 "Must still have a growth budget after rehash!");
 
-  if (!this->is_small()) {
+  if (!old_small) {
     // Old isn't a small buffer, so we need to deallocate it.
-    Deallocate();
+    Deallocate(old_storage, old_size);
   }
-
-  // Now that we've fully built the new, grown structures, replace the entries
-  // in the data structure. At this point we can be certain to not clobber
-  // anything aliasing a small buffer.
-  this->impl_view_ = new_table.impl_view_;
-  this->growth_budget_ = new_table.growth_budget_;
-
-  // Prevent the ephemeral new map object from doing anything when destroyed as
-  // we've taken over it's internals.
-  new_table.storage() = nullptr;
-  new_table.size() = 0;
 
   // And lastly insert the lookup_key into an index in the newly grown map and
   // return that index for use.
@@ -1312,7 +1289,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::DestroyImpl() -> void {
 
   // Just deallocate the storage without updating anything when destroying the
   // object.
-  Deallocate();
+  Deallocate(this->storage(), this->size());
 }
 
 }  // namespace Carbon::RawHashtable
