@@ -18,6 +18,8 @@ using RawHashtable::BuildShuffledKeys;
 using RawHashtable::CarbonHashingDenseInfo;
 using RawHashtable::NumOtherKeys;
 using RawHashtable::NumShuffledKeys;
+using RawHashtable::OneOpSizeArgs;
+using RawHashtable::OpSeqSizeArgs;
 
 // This map has an intentional inlining blocker to avoid code growth. However,
 // both Abseil and LLVM's maps don't have this and at least on AArch64 both
@@ -33,6 +35,7 @@ using RawHashtable::NumShuffledKeys;
 
 template <typename SetT>
 struct SetWrapper {
+  static constexpr bool IsCarbonSet = false;
   using KeyT = typename SetT::key_type;
 
   SetT M;
@@ -55,6 +58,7 @@ struct SetWrapper {
 
 template <typename KT, int MinSmallSize>
 struct SetWrapper<Set<KT, MinSmallSize>> {
+  static constexpr bool IsCarbonSet = true;
   using SetT = Set<KT, MinSmallSize>;
   using KeyT = KT;
 
@@ -73,14 +77,9 @@ struct SetWrapper<Set<KT, MinSmallSize>> {
   }
 
   auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
-};
 
-static void OneOpSizeArgs(benchmark::internal::Benchmark* b) {
-  b->DenseRange(1, 8, 1);
-  b->DenseRange(12, 16, 4);
-  b->DenseRange(24, 64, 8);
-  b->Range(1 << 7, 1 << 20);
-}
+  auto CountProbedKeys() const -> ssize_t { return M.CountProbedKeys(); }
+};
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_ONE_OP_SIZE(NAME, KT)                       \
@@ -167,14 +166,6 @@ static void BM_SetEraseInsertHitPtr(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_SetEraseInsertHitPtr);
 
-static void OpSeqSizeArgs(benchmark::internal::Benchmark* b) {
-  b->DenseRange(1, 13, 1);
-  b->DenseRange(15, 17, 1);
-  b->DenseRange(23, 25, 1);
-  b->DenseRange(31, 33, 1);
-  b->Range(1 << 6, 1 << 15);
-}
-
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT)                       \
   BENCHMARK(NAME<Set<KT>>)->Apply(OpSeqSizeArgs);                 \
@@ -215,6 +206,31 @@ static void BM_SetInsertPtrSeq(benchmark::State& s) {
     // Rotate through the shuffled keys.
     i = (i + static_cast<ssize_t>(inserted)) & (NumShuffledKeys - 1);
     benchmark::DoNotOptimize(i);
+  }
+
+  // It can be easier in some cases to think of this as a key-throughput rate of
+  // insertion rather than the latency of inserting N keys, so construct the
+  // rate counter as well.
+  s.counters["KeyRate"] = benchmark::Counter(
+      keys.size(), benchmark::Counter::kIsIterationInvariantRate);
+
+  // Report some extra statistics about the Carbon type.
+  if constexpr (SetWrapperT::IsCarbonSet) {
+    // Re-build a set outside of the timing loop to look at the statistics
+    // rather than the timing.
+    SetWrapperT set;
+    for (auto k : keys) {
+      bool inserted = set.BenchInsert(k);
+      CARBON_DCHECK(inserted) << "Must be a successful insert!";
+    }
+
+    // While this count is "iteration invariant" (it should be exactly the same
+    // for every iteration as the set of keys is the same), we don't use that
+    // because it will scale this by the number of iterations. We want to
+    // display the probe count of this benchmark *parameter*, not the probe
+    // count that resulted from the number of iterations. That means we use the
+    // normal counter API without flags.
+    s.counters["NumProbed"] = benchmark::Counter(set.CountProbedKeys());
   }
 }
 MAP_BENCHMARK_OP_SEQ(BM_SetInsertPtrSeq);

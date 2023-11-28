@@ -60,6 +60,8 @@ class MapView : RawHashtable::RawHashtableViewBase<InputKeyT> {
   template <typename CallbackT>
   void ForEach(CallbackT callback);
 
+  auto CountProbedKeys() -> ssize_t { return BaseT::CountProbedKeys(); }
+
  private:
   template <typename MapKeyT, typename MapValueT, ssize_t MinSmallSize>
   friend class Map;
@@ -217,6 +219,10 @@ class MapBase
   auto Erase(LookupKeyT lookup_key) -> bool;
 
   void Clear();
+  
+  auto CountProbedKeys() const -> ssize_t {
+    return ViewT(*this).CountProbedKeys();
+  }
 
  protected:
   MapBase(int small_size, RawHashtable::Storage* small_storage)

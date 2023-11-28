@@ -7,6 +7,8 @@
 
 #include <sys/types.h>
 
+#include <benchmark/benchmark.h>
+
 #include "absl/random/random.h"
 #include "common/check.h"
 #include "common/hashing.h"
@@ -50,6 +52,23 @@ template <typename T>
   }
   std::shuffle(shuffled_keys.begin(), shuffled_keys.end(), absl::BitGen());
   return shuffled_keys;
+}
+
+inline auto OneOpSizeArgs(benchmark::internal::Benchmark* b) -> void {
+  b->DenseRange(1, 8, 1);
+  b->DenseRange(12, 16, 4);
+  b->DenseRange(24, 64, 8);
+  b->Range(1 << 7, 1 << 20);
+}
+
+inline auto OpSeqSizeArgs(benchmark::internal::Benchmark* b) -> void {
+  b->DenseRange(1, 4, 1);
+  b->Arg(8); 
+  b->Arg(16); 
+  b->Arg(32); 
+  b->Arg(64); 
+  b->Arg(128); 
+  b->Range(1 << 8, 1 << 18);
 }
 
 // Provide some Dense{Map,Set}Info viable implementations for the key types

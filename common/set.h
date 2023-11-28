@@ -48,6 +48,8 @@ class SetView : RawHashtable::RawHashtableViewBase<InputKeyT> {
   template <typename CallbackT>
   void ForEach(CallbackT callback);
 
+  auto CountProbedKeys() -> ssize_t { return BaseT::CountProbedKeys(); }
+
  private:
   template <typename SetKeyT, ssize_t MinSmallSize>
   friend class Set;
@@ -100,6 +102,10 @@ class SetBase : protected RawHashtable::RawHashtableBase<InputKeyT> {
   template <typename CallbackT>
   void ForEach(CallbackT callback) {
     return ViewT(*this).ForEach(callback);
+  }
+  
+  auto CountProbedKeys() const -> ssize_t {
+    return ViewT(*this).CountProbedKeys();
   }
 
   template <typename LookupKeyT>

@@ -20,9 +20,12 @@ using RawHashtable::BuildShuffledKeys;
 using RawHashtable::CarbonHashingDenseInfo;
 using RawHashtable::NumOtherKeys;
 using RawHashtable::NumShuffledKeys;
+using RawHashtable::OneOpSizeArgs;
+using RawHashtable::OpSeqSizeArgs;
 
 template <typename MapT>
 struct MapWrapper {
+  static constexpr bool IsCarbonMap = false;
   using KeyT = typename MapT::key_type;
   using ValueT = typename MapT::mapped_type;
 
@@ -57,6 +60,7 @@ struct MapWrapper {
 
 template <typename KT, typename VT, int MinSmallSize>
 struct MapWrapper<Map<KT, VT, MinSmallSize>> {
+  static constexpr bool IsCarbonMap = true;
   using MapT = Map<KT, VT, MinSmallSize>;
   using KeyT = KT;
   using ValueT = VT;
@@ -85,6 +89,8 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
   }
 
   auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
+
+  auto CountProbedKeys() const -> ssize_t { return M.CountProbedKeys(); }
 };
 
 // Helper to synthesize some value of one of the three types we use as value
@@ -99,12 +105,6 @@ auto MakeValue2() -> T {
   } else {
     return 42;
   }
-}
-
-static void OneOpSizeArgs(benchmark::internal::Benchmark* b) {
-  b->DenseRange(1, 16, 4);
-  b->DenseRange(24, 64, 8);
-  b->Range(1 << 7, 1 << 20);
 }
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
@@ -270,14 +270,6 @@ static void BM_MapEraseUpdateHit(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit);
 
-static void OpSeqSizeArgs(benchmark::internal::Benchmark* b) {
-  b->DenseRange(1, 13, 1);
-  b->DenseRange(15, 17, 1);
-  b->DenseRange(23, 25, 1);
-  b->DenseRange(31, 33, 1);
-  b->Range(1 << 6, 1 << 15);
-}
-
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT, VT)                       \
   BENCHMARK(NAME<Map<KT, VT>>)->Apply(OpSeqSizeArgs);                 \
@@ -324,6 +316,31 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     // Rotate through the shuffled keys.
     i = (i + static_cast<ssize_t>(inserted)) & (NumShuffledKeys - 1);
     benchmark::DoNotOptimize(i);
+  }
+
+  // It can be easier in some cases to think of this as a key-throughput rate of
+  // insertion rather than the latency of inserting N keys, so construct the
+  // rate counter as well.
+  s.counters["KeyRate"] = benchmark::Counter(
+      keys.size(), benchmark::Counter::kIsIterationInvariantRate);
+
+  // Report some extra statistics about the Carbon type.
+  if constexpr (MapWrapperT::IsCarbonMap) {
+    // Re-build a map outside of the timing loop to look at the statistics
+    // rather than the timing.
+    MapWrapperT map;
+    for (auto k : keys) {
+      bool inserted = map.BenchInsert(k, MakeValue2<VT>());
+      CARBON_DCHECK(inserted) << "Must be a successful insert!";
+    }
+
+    // While this count is "iteration invariant" (it should be exactly the same
+    // for every iteration as the set of keys is the same), we don't use that
+    // because it will scale this by the number of iterations. We want to
+    // display the probe count of this benchmark *parameter*, not the probe
+    // count that resulted from the number of iterations. That means we use the
+    // normal counter API without flags.
+    s.counters["NumProbed"] = benchmark::Counter(map.CountProbedKeys());
   }
 }
 MAP_BENCHMARK_OP_SEQ(BM_MapInsertSeq);

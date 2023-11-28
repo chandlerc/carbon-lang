@@ -614,6 +614,8 @@ class RawHashtableViewBase {
   void ForEachIndex(IndexCallbackT index_callback,
                     GroupCallbackT group_callback);
 
+  auto CountProbedKeys() const -> ssize_t;
+
   ssize_t size_;
   Storage* storage_;
 };
@@ -878,6 +880,27 @@ template <typename IndexCallbackT, typename GroupCallbackT>
 
     group_callback(groups, group_index);
   }
+}
+
+template <typename InputKeyT>
+auto RawHashtableViewBase<InputKeyT>::CountProbedKeys() const -> ssize_t {
+  uint8_t* groups = this->groups_ptr();
+  KeyT* keys = this->keys_ptr();
+
+  ssize_t local_size = this->size();
+  ssize_t count = 0;
+  for (ssize_t group_index = 0; group_index < local_size;
+       group_index += GroupSize) {
+    auto g = RawHashtable::Group::Load(groups, group_index);
+    auto present_matched_range = g.MatchPresent();
+    for (ssize_t byte_index : present_matched_range) {
+      ssize_t index = group_index + byte_index;
+      HashCode hash = HashValue(keys[index], ComputeSeed());
+      ssize_t hash_index = hash.ExtractIndexAndTag<7>(local_size).first & ~GroupMask;
+      count += static_cast<ssize_t>(hash_index != group_index);
+    }
+  }
+  return count;
 }
 
 template <typename InputKeyT>
