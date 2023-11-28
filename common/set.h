@@ -103,7 +103,7 @@ class SetBase : protected RawHashtable::RawHashtableBase<InputKeyT> {
   void ForEach(CallbackT callback) {
     return ViewT(*this).ForEach(callback);
   }
-  
+
   auto CountProbedKeys() const -> ssize_t {
     return ViewT(*this).CountProbedKeys();
   }

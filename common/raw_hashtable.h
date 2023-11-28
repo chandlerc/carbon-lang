@@ -896,7 +896,8 @@ auto RawHashtableViewBase<InputKeyT>::CountProbedKeys() const -> ssize_t {
     for (ssize_t byte_index : present_matched_range) {
       ssize_t index = group_index + byte_index;
       HashCode hash = HashValue(keys[index], ComputeSeed());
-      ssize_t hash_index = hash.ExtractIndexAndTag<7>(local_size).first & ~GroupMask;
+      ssize_t hash_index =
+          hash.ExtractIndexAndTag<7>(local_size).first & ~GroupMask;
       count += static_cast<ssize_t>(hash_index != group_index);
     }
   }

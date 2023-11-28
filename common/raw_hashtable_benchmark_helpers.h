@@ -5,9 +5,8 @@
 #ifndef CARBON_COMMON_RAW_HASHTABLE_BENCHMARK_HELPERS_H_
 #define CARBON_COMMON_RAW_HASHTABLE_BENCHMARK_HELPERS_H_
 
-#include <sys/types.h>
-
 #include <benchmark/benchmark.h>
+#include <sys/types.h>
 
 #include "absl/random/random.h"
 #include "common/check.h"
@@ -63,11 +62,11 @@ inline auto OneOpSizeArgs(benchmark::internal::Benchmark* b) -> void {
 
 inline auto OpSeqSizeArgs(benchmark::internal::Benchmark* b) -> void {
   b->DenseRange(1, 4, 1);
-  b->Arg(8); 
-  b->Arg(16); 
-  b->Arg(32); 
-  b->Arg(64); 
-  b->Arg(128); 
+  b->Arg(8);
+  b->Arg(16);
+  b->Arg(32);
+  b->Arg(64);
+  b->Arg(128);
   b->Range(1 << 8, 1 << 18);
 }
 

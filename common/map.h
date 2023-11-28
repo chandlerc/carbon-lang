@@ -219,7 +219,7 @@ class MapBase
   auto Erase(LookupKeyT lookup_key) -> bool;
 
   void Clear();
-  
+
   auto CountProbedKeys() const -> ssize_t {
     return ViewT(*this).CountProbedKeys();
   }
