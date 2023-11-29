@@ -11,6 +11,7 @@
 #include "absl/random/random.h"
 #include "common/check.h"
 #include "common/hashing.h"
+#include "common/raw_hashtable.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
@@ -21,7 +22,7 @@ namespace Carbon::RawHashtable {
 // We want to support benchmarking with 1M keys plus up to 1k "other" keys (for
 // misses).
 constexpr ssize_t NumOtherKeys = 1 << 10;
-constexpr ssize_t MaxNumKeys = (1 << 20) + NumOtherKeys;
+constexpr ssize_t MaxNumKeys = (1 << 24) + NumOtherKeys;
 
 auto BuildStrKeys(ssize_t size) -> llvm::ArrayRef<llvm::StringRef>;
 auto BuildPtrKeys(ssize_t size) -> llvm::ArrayRef<int*>;
@@ -67,7 +68,7 @@ inline auto OpSeqSizeArgs(benchmark::internal::Benchmark* b) -> void {
   b->Arg(32);
   b->Arg(64);
   b->Arg(128);
-  b->Range(1 << 8, 1 << 18);
+  b->Range(1 << 8, 1 << 24);
 }
 
 // Provide some Dense{Map,Set}Info viable implementations for the key types
@@ -143,6 +144,65 @@ struct CarbonHashingDenseInfo<llvm::StringRef> {
     return lhs == rhs;
   }
 };
+
+template <typename T>
+auto DumpHashStatistics(llvm::ArrayRef<T> keys) -> void {
+  if (keys.size() < GroupSize) {
+    return;
+  }
+
+  // The hash table load factor is 7/8ths, so we want to add 1/7th of our
+  // current size, subtract one, and pick the next power of two to get the power
+  // of two where 7/8ths is greater than or equal to the incoming key size.
+  ssize_t expected_size =
+      llvm::NextPowerOf2(keys.size() + (keys.size() / 7) - 1);
+
+  constexpr int GroupShift = llvm::CTLog2<GroupSize>();
+
+  auto get_hash_index = [expected_size](auto x) -> ssize_t {
+    return HashValue(x, ComputeSeed())
+               .template ExtractIndexAndTag<7>(expected_size)
+               .first >>
+           GroupShift;
+  };
+
+  std::vector<std::vector<int>> grouped_key_indices(expected_size >>
+                                                    GroupShift);
+  for (auto [i, k] : llvm::enumerate(keys)) {
+    ssize_t hash_index = get_hash_index(k);
+    CARBON_CHECK(hash_index < (expected_size >> GroupShift)) << hash_index;
+    grouped_key_indices[hash_index].push_back(i);
+  }
+  ssize_t max_group_index =
+      std::max_element(grouped_key_indices.begin(), grouped_key_indices.end(),
+                       [](const auto& lhs, const auto& rhs) {
+                         return lhs.size() < rhs.size();
+                       }) -
+      grouped_key_indices.begin();
+
+  // If the max number of collisions on the index is less than or equal to the
+  // group size, there shouldn't be any necessary probing (outside of deletion)
+  // and so this isn't interesting, skip printing.
+  if (grouped_key_indices[max_group_index].size() <= GroupSize) {
+    return;
+  }
+
+  llvm::errs() << "keys: " << keys.size()
+               << "  groups: " << grouped_key_indices.size() << "\n"
+               << "max group index: " << llvm::formatv("{0x8}", max_group_index)
+               << "  collisions: "
+               << grouped_key_indices[max_group_index].size() << "\n";
+
+  for (auto i : llvm::ArrayRef(grouped_key_indices[max_group_index])
+                    .take_front(2 * GroupSize)) {
+    auto k = keys[i];
+    auto hash = static_cast<uint64_t>(HashValue(k, ComputeSeed()));
+    uint64_t salt = ComputeSeed();
+    llvm::errs() << "  key: " << k
+                 << "  salt: " << llvm::formatv("{0:x16}", salt)
+                 << "  hash: " << llvm::formatv("{0:x16}", hash) << "\n";
+  }
+}
 
 }  // namespace Carbon::RawHashtable
 

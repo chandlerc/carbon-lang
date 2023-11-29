@@ -231,6 +231,8 @@ static void BM_SetInsertPtrSeq(benchmark::State& s) {
     // count that resulted from the number of iterations. That means we use the
     // normal counter API without flags.
     s.counters["NumProbed"] = benchmark::Counter(set.CountProbedKeys());
+
+    RawHashtable::DumpHashStatistics(raw_keys);
   }
 }
 MAP_BENCHMARK_OP_SEQ(BM_SetInsertPtrSeq);
