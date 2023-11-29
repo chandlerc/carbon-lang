@@ -253,6 +253,7 @@ cc_library(
     deps = [
         ":check",
         ":hashing",
+        ":raw_hashtable",
         ":set",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/hash",

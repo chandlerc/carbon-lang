@@ -396,7 +396,7 @@ class Hasher {
   // details on its selection, see:
   // https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/
   // https://book.huihoo.com/data-structures-and-algorithms-with-object-oriented-design-patterns-in-c++/html/page214.html
-  //static constexpr uint64_t MulConstant = 0x9e37'79b9'7f4a'7c15U;
+  // static constexpr uint64_t MulConstant = 0x9e37'79b9'7f4a'7c15U;
 
   // Empirically better constant compared to Knuth's, Rust's FxHash, and others
   // we've tried. Found by a search of uniformly distributed odd numbers and
