@@ -341,6 +341,11 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     // count that resulted from the number of iterations. That means we use the
     // normal counter API without flags.
     s.counters["NumProbed"] = benchmark::Counter(map.CountProbedKeys());
+
+    // Uncomment this call to print out statistics about the index-collisions
+    // among these keys for debugging:
+    //
+    // RawHashtable::DumpHashStatistics(raw_keys);
   }
 }
 MAP_BENCHMARK_OP_SEQ(BM_MapInsertSeq);

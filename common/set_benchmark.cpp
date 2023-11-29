@@ -232,7 +232,10 @@ static void BM_SetInsertPtrSeq(benchmark::State& s) {
     // normal counter API without flags.
     s.counters["NumProbed"] = benchmark::Counter(set.CountProbedKeys());
 
-    RawHashtable::DumpHashStatistics(raw_keys);
+    // Uncomment this call to print out statistics about the index-collisions
+    // among these keys for debugging:
+    //
+    // RawHashtable::DumpHashStatistics(raw_keys);
   }
 }
 MAP_BENCHMARK_OP_SEQ(BM_SetInsertPtrSeq);
