@@ -69,6 +69,13 @@ inline auto OpSeqSizeArgs(benchmark::internal::Benchmark* b) -> void {
   b->Arg(64);
   b->Arg(128);
   b->Range(1 << 8, 1 << 24);
+
+  // Now eplicate the >= 64 sizes from above, but subtracting 1/8th to end with
+  // a max load factor table.
+  for (auto s :
+       {64, 128, 256, 512, 1 << 12, 1 << 15, 1 << 18, 1 << 21, 1 << 24}) {
+    b->Arg(s - (s / 8));
+  }
 }
 
 // Provide some Dense{Map,Set}Info viable implementations for the key types

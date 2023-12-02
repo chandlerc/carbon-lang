@@ -230,7 +230,7 @@ static void BM_SetInsertPtrSeq(benchmark::State& s) {
     // display the probe count of this benchmark *parameter*, not the probe
     // count that resulted from the number of iterations. That means we use the
     // normal counter API without flags.
-    s.counters["NumProbed"] = benchmark::Counter(set.CountProbedKeys());
+    s.counters["Probed"] = set.CountProbedKeys();
 
     // Uncomment this call to print out statistics about the index-collisions
     // among these keys for debugging:
