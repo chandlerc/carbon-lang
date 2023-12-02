@@ -395,10 +395,10 @@ class Hasher {
   // We need a multiplicative hashing constant for both 64-bit multiplicative
   // hashing fast paths and some other 128-bit folded multiplies. We use an
   // empirically better constant compared to Knuth's, Rust's FxHash, and others
-  // we've tried. It was found by a search of uniformly distributed odd numbers and
-  // examining them for desirable properties when used as a multiplicative hash,
-  // however our search seems largely to have been lucky rather than having a
-  // highly effective set of criteria.
+  // we've tried. It was found by a search of uniformly distributed odd numbers
+  // and examining them for desirable properties when used as a multiplicative
+  // hash, however our search seems largely to have been lucky rather than
+  // having a highly effective set of criteria.
   //
   // For reference, some other constants include one derived by diving 2^64 by
   // Phi: 0x9e37'79b9'7f4a'7c15U -- see these sites for details:
@@ -644,7 +644,6 @@ inline auto Hasher::WeakMix(uint64_t value) -> uint64_t {
 #ifdef __ARM_ACLE
   // Arm has a fast bit-reversal that gives us the optimal distribution.
   value = __rbitll(value);
-  //value = llvm::rotr(value, 30);
 #else
   // Otherwise, assume an optimized BSWAP such as x86's. That's close enough.
   value = __builtin_bswap64(value);
