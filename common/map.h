@@ -24,12 +24,12 @@ template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
 class Map;
 
 template <typename InputKeyT, typename InputValueT>
-class MapView : RawHashtable::RawHashtableViewBase<InputKeyT> {
-  using BaseT = RawHashtable::RawHashtableViewBase<InputKeyT>;
+class MapView : RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT> {
+  using BaseT = RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT>;
 
  public:
   using KeyT = typename BaseT::KeyT;
-  using ValueT = InputValueT;
+  using ValueT = typename BaseT::ValueT;
 
   class LookupKVResult {
    public:
@@ -65,19 +65,14 @@ class MapView : RawHashtable::RawHashtableViewBase<InputKeyT> {
   template <typename MapKeyT, typename MapValueT, ssize_t MinSmallSize>
   friend class Map;
   friend class MapBase<KeyT, ValueT>;
-  friend class RawHashtable::RawHashtableKeyBase<KeyT>;
+
+  using EntryT = typename BaseT::EntryT;
 
   MapView() = default;
   // NOLINTNEXTLINE(google-explicit-constructor): Implicit by design.
   MapView(BaseT base) : BaseT(base) {}
   MapView(ssize_t size, RawHashtable::Storage* storage)
       : BaseT(size, storage) {}
-
-  auto values_ptr() const -> ValueT* {
-    return reinterpret_cast<ValueT*>(
-        reinterpret_cast<unsigned char*>(this->keys_ptr()) +
-        RawHashtable::ComputeValueStorageOffset<KeyT, ValueT>(this->size()));
-  }
 };
 
 template <typename InputKeyT, typename InputValueT>
@@ -187,10 +182,12 @@ class MapBase
   }
 
  protected:
+  using EntryT = typename BaseT::EntryT;
+  template <ssize_t SmallSize>
+  using SmallStorageT = typename BaseT::template SmallStorageT<SmallSize>;
+
   MapBase(int small_size, RawHashtable::Storage* small_storage)
       : BaseT(small_size, small_storage) {}
-
-  auto values_ptr() -> ValueT* { return ViewT(*this).values_ptr(); }
 };
 
 template <typename InputKeyT, typename InputValueT, ssize_t SmallSize = 0>
@@ -217,8 +214,8 @@ class Map : public MapBase<InputKeyT, InputValueT> {
   void Reset();
 
  private:
-  using SmallSizeStorageT =
-      RawHashtable::SmallSizeKeyValueStorage<KeyT, ValueT, SmallSize>;
+  using EntryT = typename BaseT::EntryT;
+  using SmallSizeStorageT = typename BaseT::template SmallStorageT<SmallSize>;
 
   auto small_storage() const -> RawHashtable::Storage* {
     return &small_storage_;
@@ -244,7 +241,8 @@ auto MapView<KT, VT>::Lookup(LookupKeyT lookup_key) const -> LookupKVResult {
     return LookupKVResult(nullptr, nullptr);
   }
 
-  return LookupKVResult(&this->keys_ptr()[index], &this->values_ptr()[index]);
+  EntryT& entry = this->entries()[index];
+  return LookupKVResult(&entry.key, &entry.value);
 }
 
 template <typename KT, typename VT>
@@ -258,8 +256,9 @@ template <typename KT, typename VT>
 template <typename CallbackT>
 void MapView<KT, VT>::ForEach(CallbackT callback) {
   this->ForEachIndex(
-      [this, callback](KeyT* keys, ssize_t i) {
-        callback(keys[i], values_ptr()[i]);
+      [this, callback](EntryT* /*entries*/, ssize_t i) {
+        EntryT& entry = this->entries()[i];
+        callback(entry.key, entry.value);
       },
       [](auto...) {});
 }
@@ -311,17 +310,18 @@ template <typename LookupKeyT, typename InsertCallbackT>
   uint8_t control_byte;
   std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
+  EntryT& entry = this->entries()[index];
+
   if (LLVM_LIKELY(control_byte == 0)) {
-    return InsertKVResult(false, this->keys_ptr()[index], values_ptr()[index]);
+    return InsertKVResult(false, entry.key, entry.value);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  this->groups_ptr()[index] = control_byte;
   KeyT* k;
   ValueT* v;
-  std::tie(k, v) =
-      insert_cb(lookup_key, &this->keys_ptr()[index], &values_ptr()[index]);
+  std::tie(k, v) = insert_cb(lookup_key, &entry.key, &entry.value);
+  this->groups_ptr()[index] = control_byte;
   return InsertKVResult(true, *k, *v);
 }
 
@@ -389,33 +389,28 @@ template <typename LookupKeyT, typename InsertCallbackT,
   uint8_t control_byte;
   std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
+  EntryT& entry = this->entries()[index];
+
   if (LLVM_LIKELY(control_byte == 0)) {
-    KeyT* k = &this->keys_ptr()[index];
-    ValueT* v = &this->values_ptr()[index];
+    KeyT* k = &entry.key;
+    ValueT* v = &entry.value;
     std::tie(k, v) = update_cb(*k, *v);
     return InsertKVResult(false, *k, *v);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  this->groups_ptr()[index] = control_byte;
   KeyT* k;
   ValueT* v;
-  std::tie(k, v) =
-      insert_cb(lookup_key, &this->keys_ptr()[index], &values_ptr()[index]);
+  std::tie(k, v) = insert_cb(lookup_key, &entry.key, &entry.value);
+  this->groups_ptr()[index] = control_byte;
   return InsertKVResult(true, *k, *v);
 }
 
 template <typename KeyT, typename ValueT>
 template <typename LookupKeyT>
 auto MapBase<KeyT, ValueT>::Erase(LookupKeyT lookup_key) -> bool {
-  ssize_t erased_index = this->EraseKey(lookup_key);
-  if (erased_index < 0) {
-    return false;
-  }
-
-  values_ptr()[erased_index].~ValueT();
-  return true;
+  return this->EraseKey(lookup_key) >= 0;
 }
 
 template <typename KeyT, typename ValueT>

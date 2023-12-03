@@ -54,7 +54,9 @@ class SetView : RawHashtable::RawHashtableViewBase<InputKeyT> {
   template <typename SetKeyT, ssize_t MinSmallSize>
   friend class Set;
   friend class SetBase<KeyT>;
-  friend class RawHashtable::RawHashtableKeyBase<KeyT>;
+  friend class RawHashtable::RawHashtableBase<KeyT>;
+
+  using EntryT = typename BaseT::EntryT;
 
   SetView() = default;
   // NOLINTNEXTLINE(google-explicit-constructor): Implicit by design.
@@ -128,6 +130,11 @@ class SetBase : protected RawHashtable::RawHashtableBase<InputKeyT> {
   void Clear();
 
  protected:
+  template <ssize_t SmallSize>
+  using SmallStorageT = typename BaseT::template SmallStorageT<SmallSize>;
+
+  using EntryT = typename BaseT::EntryT;
+
   SetBase(int small_size, RawHashtable::Storage* small_storage)
       : BaseT(small_size, small_storage) {}
 };
@@ -154,7 +161,8 @@ class Set : public SetBase<InputKeyT> {
   void Reset();
 
  private:
-  using SmallSizeStorageT = RawHashtable::SmallSizeKeyStorage<KeyT, SmallSize>;
+  using EntryT = typename BaseT::EntryT;
+  using SmallSizeStorageT = typename BaseT::template SmallStorageT<SmallSize>;
 
   auto small_storage() const -> RawHashtable::Storage* {
     return &small_storage_;
@@ -179,14 +187,15 @@ auto SetView<KT>::Lookup(LookupKeyT lookup_key) const -> LookupResult {
     return LookupResult();
   }
 
-  return LookupResult(&this->keys_ptr()[index]);
+  return LookupResult(&this->entries()[index].key);
 }
 
 template <typename KT>
 template <typename CallbackT>
 void SetView<KT>::ForEach(CallbackT callback) {
-  this->ForEachIndex([callback](KeyT* keys, ssize_t i) { callback(keys[i]); },
-                     [](auto...) {});
+  this->ForEachIndex(
+      [callback](EntryT* entries, ssize_t i) { callback(entries[i].key); },
+      [](auto...) {});
 }
 
 template <typename KT>
@@ -201,13 +210,15 @@ auto SetBase<KT>::Insert(
   std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
   if (LLVM_LIKELY(control_byte == 0)) {
-    return InsertResult(false, this->keys_ptr()[index]);
+    return InsertResult(false, this->entries()[index].key);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  this->groups_ptr()[index] = control_byte;
-  KeyT* k = insert_cb(lookup_key, &this->keys_ptr()[index]);
+  uint8_t* byte_ptr = &this->groups_ptr()[index];
+  KeyT* k = &this->entries()[index].key;
+  k = insert_cb(lookup_key, k);
+  *byte_ptr = control_byte;
   return InsertResult(true, *k);
 }
 

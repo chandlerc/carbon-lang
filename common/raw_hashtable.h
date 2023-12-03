@@ -448,82 +448,112 @@ constexpr ssize_t GroupMask = GroupSize - 1;
   __builtin_prefetch(address, /*read*/ 0, /*low-locality*/ 1);
 }
 
-// We use pointers to this empty class to model the pointer to a dynamically
-// allocated structure of arrays with the groups, keys, and values.
-//
-// This also lets us define statically allocated storage as subclasses.
-struct Storage {};
-
-template <typename... Ts>
-constexpr ssize_t StorageAlignment =
-    std::max<ssize_t>({GroupSize, alignof(Group), alignof(Ts)...});
-
-// Utility function to compute the offset from the storage pointer to the key
-// array.
-template <typename KeyT>
-constexpr auto ComputeKeyStorageOffset(ssize_t size) -> ssize_t {
-  // There are `size` control bytes plus any alignment needed for the key type.
-  return llvm::alignTo<alignof(KeyT)>(size);
-}
-
-// Utility function to compute the offset from the storage pointer to the value
-// array (assuming one exists). This is only valid to use in map-oriented
-// derivations of the raw hashtables where we have both key and value storage.
 template <typename KeyT, typename ValueT>
-constexpr auto ComputeValueStorageOffset(ssize_t size) -> ssize_t {
-  // Skip the keys themselves.
-  ssize_t offset = sizeof(KeyT) * size;
+struct StorageEntry {
+  static constexpr bool IsTriviallyDestructible =
+      std::is_trivially_destructible_v<KeyT> &&
+      std::is_trivially_destructible_v<ValueT>;
 
-  // If the value type alignment is smaller than the key's, we're done.
-  if constexpr (alignof(ValueT) <= alignof(KeyT)) {
-    return offset;
+  static constexpr bool IsTriviallyRelocatable =
+      IsTriviallyDestructible && std::is_trivially_move_constructible_v<KeyT> &&
+      std::is_trivially_move_constructible_v<ValueT>;
+
+  // We handle destruction and move manually as we only want to expose distinct
+  // `KeyT` and `ValueT` subobjects to user code that may need to do in-place
+  // construction. As a consequence, this struct only provides the storage and
+  // we have to manually manage the construction, move, and destruction of the
+  // objects.
+  auto Destroy() -> void {
+    static_assert(!IsTriviallyDestructible,
+                  "Should never instantiate when trivial!");
+    key.~KeyT();
+    value.~ValueT();
+  }
+  auto Move(StorageEntry& new_entry) -> void {
+    if constexpr (IsTriviallyRelocatable) {
+      memcpy(&new_entry, this, sizeof(StorageEntry));
+    } else {
+      new (&new_entry.key) KeyT(std::move(key));
+      key.~KeyT();
+      new (&new_entry.value) KeyT(std::move(value));
+      value.~ValueT();
+    }
   }
 
-  // Otherwise, skip the alignment for the value type.
-  return llvm::alignTo<alignof(ValueT)>(offset);
+  union {
+    KeyT key;
+  };
+  union {
+    ValueT value;
+  };
+};
+
+template <typename KeyT>
+struct StorageEntry<KeyT, void> {
+  static constexpr bool IsTriviallyDestructible =
+      std::is_trivially_destructible_v<KeyT>;
+
+  static constexpr bool IsTriviallyRelocatable =
+      IsTriviallyDestructible && std::is_trivially_move_constructible_v<KeyT>;
+
+  auto Destroy() -> void {
+    static_assert(!IsTriviallyDestructible,
+                  "Should never instantiate when trivial!");
+    key.~KeyT();
+  }
+  auto Move(StorageEntry& new_entry) -> void {
+    if constexpr (IsTriviallyRelocatable) {
+      memcpy(&new_entry, this, sizeof(StorageEntry));
+    } else {
+      new (&new_entry.key) KeyT(std::move(key));
+      key.~KeyT();
+    }
+  }
+
+  union {
+    KeyT key;
+  };
+};
+
+template <typename KeyT, typename ValueT>
+constexpr ssize_t StorageAlignment = std::max<ssize_t>(
+    {GroupSize, alignof(Group), alignof(StorageEntry<KeyT, ValueT>)});
+
+struct Storage {};
+
+template <typename KeyT, typename ValueT, ssize_t SmallSize>
+struct SmallStorageImpl;
+
+template <typename KeyT, typename ValueT>
+struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl<KeyT, ValueT, 0>
+    : Storage {
+  SmallStorageImpl() {}
+
+  Group groups[0];
+
+  union {
+    StorageEntry<KeyT, ValueT> entries[0];
+  };
+};
+
+template <typename KeyT, typename ValueT>
+constexpr auto ComputeStorageEntryOffset(ssize_t size) -> ssize_t {
+  // There are `size` control bytes plus any alignment needed for the key type.
+  return llvm::alignTo<alignof(StorageEntry<KeyT, ValueT>)>(size);
 }
 
 // If allocating storage, allocate a minimum of one cacheline of group metadata
 // and a minimum of one group.
 constexpr ssize_t MinAllocatedSize = std::max<ssize_t>(64, MaxGroupSize);
 
-template <typename KeyT>
-constexpr static auto ComputeKeyStorageSize(ssize_t size) -> ssize_t {
-  return ComputeKeyStorageOffset<KeyT>(size) + sizeof(KeyT) * size;
-}
-
 template <typename KeyT, typename ValueT>
-constexpr static auto ComputeKeyValueStorageSize(ssize_t size) -> ssize_t {
-  return ComputeKeyStorageOffset<KeyT>(size) +
-         ComputeValueStorageOffset<KeyT, ValueT>(size) + sizeof(ValueT) * size;
+constexpr static auto ComputeStorageSize(ssize_t size) -> ssize_t {
+  return ComputeStorageEntryOffset<KeyT, ValueT>(size) +
+         sizeof(StorageEntry<KeyT, ValueT>) * size;
 }
 
-// Template classes to form helper classes of small-size storage buffers with
-// the correct layout. These can be used by either set-oriented hash tables or
-// map-oriented to provide inline storage.
-template <typename KeyT, ssize_t SmallSize>
-struct SmallSizeKeyStorage;
 template <typename KeyT, typename ValueT, ssize_t SmallSize>
-struct SmallSizeKeyValueStorage;
-
-template <typename KeyT>
-struct SmallSizeKeyStorage<KeyT, 0> : Storage {
-  SmallSizeKeyStorage() {}
-  union {
-    KeyT keys[0];
-  };
-};
-template <typename KeyT, typename ValueT>
-struct SmallSizeKeyValueStorage<KeyT, ValueT, 0>
-    : SmallSizeKeyStorage<KeyT, 0> {
-  SmallSizeKeyValueStorage() {}
-  union {
-    ValueT values[0];
-  };
-};
-
-template <typename KeyT, ssize_t SmallSize>
-struct alignas(StorageAlignment<KeyT>) SmallSizeKeyStorage : Storage {
+struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl : Storage {
   // Do early validation of the small size here.
   static_assert(llvm::isPowerOf2_64(SmallSize),
                 "SmallSize must be a power of two for a hashed buffer!");
@@ -541,70 +571,44 @@ struct alignas(StorageAlignment<KeyT>) SmallSizeKeyStorage : Storage {
   static_assert(llvm::isPowerOf2_64(SmallNumGroups),
                 "The number of groups must be a power of two when hashing!");
 
-  SmallSizeKeyStorage() {
+  SmallStorageImpl() {
     // Validate a collection of invariants between the small size storage layout
     // and the dynamically computed storage layout. We need the key type to be
     // complete so we do this in the constructor body.
-    static_assert(SmallSize == 0 ||
-                      alignof(SmallSizeKeyStorage) == StorageAlignment<KeyT>,
+    static_assert(SmallSize == 0 || alignof(SmallStorageImpl) ==
+                                        StorageAlignment<KeyT, ValueT>,
                   "Small size buffer must have the same alignment as a heap "
                   "allocated buffer.");
     static_assert(
-        SmallSize == 0 || (offsetof(SmallSizeKeyStorage, keys) ==
-                           ComputeKeyStorageOffset<KeyT>(SmallSize)),
+        SmallSize == 0 || (offsetof(SmallStorageImpl, entries) ==
+                           ComputeStorageEntryOffset<KeyT, ValueT>(SmallSize)),
         "Offset to keys in small size storage doesn't match computed offset!");
-    static_assert(SmallSize == 0 || sizeof(SmallSizeKeyStorage) ==
-                                        ComputeKeyStorageSize<KeyT>(SmallSize),
-                  "The small size storage needs to match the dynamically "
-                  "computed storage size.");
+    static_assert(
+        SmallSize == 0 || sizeof(SmallStorageImpl) ==
+                              ComputeStorageSize<KeyT, ValueT>(SmallSize),
+        "The small size storage needs to match the dynamically "
+        "computed storage size.");
   }
 
   Group groups[SmallNumGroups];
 
   union {
-    KeyT keys[SmallSize];
+    StorageEntry<KeyT, ValueT> entries[SmallSize];
   };
 };
-template <typename KeyT, typename ValueT, ssize_t SmallSize>
-struct alignas(StorageAlignment<KeyT, ValueT>) SmallSizeKeyValueStorage
-    : RawHashtable::SmallSizeKeyStorage<KeyT, SmallSize> {
-  SmallSizeKeyValueStorage() {
-    static_assert(SmallSize == 0 ||
-                      offsetof(SmallSizeKeyValueStorage, values) ==
-                          (ComputeKeyStorageOffset<KeyT>(SmallSize) +
-                           ComputeValueStorageOffset<KeyT, ValueT>(SmallSize)),
-                  "Offset from keys to values in small size storage doesn't "
-                  "match computed offset!");
-    static_assert(SmallSize == 0 ||
-                      sizeof(SmallSizeKeyValueStorage) ==
-                          ComputeKeyValueStorageSize<KeyT, ValueT>(SmallSize),
-                  "The small size storage needs to match the dynamically "
-                  "computed storage size.");
-  }
-
-  union {
-    ValueT values[SmallSize];
-  };
-};
-
-// Base class to hold all the implementation details that can be completely
-// isolated from the value type or even *if there is* a value type in the
-// hashtable.
-template <typename KeyT>
-class RawHashtableKeyBase;
 
 // Base class that encodes either the absence of a value or a value type.
 template <typename KeyT, typename ValueT = void>
 class RawHashtableBase;
 
-template <typename InputKeyT>
+template <typename InputKeyT, typename InputValueT = void>
 class RawHashtableViewBase {
  protected:
   using KeyT = InputKeyT;
+  using ValueT = InputValueT;
+  using EntryT = StorageEntry<KeyT, ValueT>;
 
-  friend class RawHashtableKeyBase<KeyT>;
-  template <typename KeyT, typename ValueT>
-  friend class RawHashtableBase;
+  friend class RawHashtableBase<KeyT, ValueT>;
 
   RawHashtableViewBase() = default;
   RawHashtableViewBase(ssize_t size, Storage* storage)
@@ -615,13 +619,13 @@ class RawHashtableViewBase {
   auto groups_ptr() const -> uint8_t* {
     return reinterpret_cast<uint8_t*>(storage_);
   }
-  auto keys_ptr() const -> KeyT* {
+  auto entries() const -> EntryT* {
     CARBON_DCHECK(size() == 0 || llvm::isPowerOf2_64(size()))
         << "Size must be a power of two for a hashed buffer!";
-    CARBON_DCHECK(size() == ComputeKeyStorageOffset<KeyT>(size()))
+    CARBON_DCHECK(size() == ComputeStorageEntryOffset<KeyT, ValueT>(size()))
         << "Cannot be more aligned than a power of two.";
-    return reinterpret_cast<KeyT*>(reinterpret_cast<unsigned char*>(storage_) +
-                                   size());
+    return reinterpret_cast<EntryT*>(
+        reinterpret_cast<unsigned char*>(storage_) + size());
   }
 
   template <typename LookupKeyT>
@@ -637,59 +641,16 @@ class RawHashtableViewBase {
   Storage* storage_;
 };
 
-template <typename InputKeyT>
-class RawHashtableKeyBase {
- protected:
-  using KeyT = InputKeyT;
-  using ViewBaseT = RawHashtableViewBase<KeyT>;
-
-  RawHashtableKeyBase(int small_size, Storage* small_storage) {
-    Init(small_size, small_storage);
-    small_size_ = small_size;
-  }
-  // An internal constructor used to build temporary map base objects with a
-  // specific allocated size. This is used internally to build ephemeral maps.
-  explicit RawHashtableKeyBase(ssize_t arg_size, Storage* arg_storage) {
-    Init(arg_size, arg_storage);
-    small_size_ = 0;
-  }
-
-  // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
-  operator ViewBaseT() const { return impl_view_; }
-
-  auto size() const -> ssize_t { return impl_view_.size_; }
-  auto size() -> ssize_t& { return impl_view_.size_; }
-  auto storage() const -> Storage* { return impl_view_.storage_; }
-  auto storage() -> Storage*& { return impl_view_.storage_; }
-
-  auto groups_ptr() const -> uint8_t* { return impl_view_.groups_ptr(); }
-  auto keys_ptr() const -> KeyT* { return impl_view_.keys_ptr(); }
-
-  auto is_small() const -> bool { return size() <= small_size(); }
-  auto small_size() const -> ssize_t {
-    return static_cast<unsigned>(small_size_);
-  }
-
-  void Init(ssize_t init_size, Storage* init_storage);
-
-  template <typename LookupKeyT>
-  auto InsertIntoEmptyIndex(LookupKeyT lookup_key)
-      -> std::pair<ssize_t, uint8_t>;
-
-  template <typename LookupKeyT>
-  auto EraseKey(LookupKeyT lookup_key) -> ssize_t;
-
-  ViewBaseT impl_view_;
-  int growth_budget_;
-  int small_size_;
-};
-
 template <typename InputKeyT, typename InputValueT>
-class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
+class RawHashtableBase {
  protected:
   using KeyT = InputKeyT;
   using ValueT = InputValueT;
-  using KeyBaseT = RawHashtableKeyBase<InputKeyT>;
+  using ViewBaseT = RawHashtableViewBase<KeyT, ValueT>;
+  using EntryT = typename ViewBaseT::EntryT;
+
+  template <ssize_t SmallSize>
+  using SmallStorageT = SmallStorageImpl<KeyT, ValueT, SmallSize>;
 
   static constexpr bool HasValue = !std::is_same_v<ValueT, void>;
 
@@ -704,22 +665,14 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
       std::is_trivially_destructible_v<ValueT>;
 
   static constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
-    if constexpr (!HasValue) {
-      return ComputeKeyStorageSize<KeyT>(size);
-    } else {
-      return ComputeKeyValueStorageSize<KeyT, ValueT>(size);
-    }
+    return RawHashtable::ComputeStorageSize<KeyT, ValueT>(size);
   }
 
   static constexpr auto ComputeStorageAlignment() -> std::align_val_t {
-    if constexpr (!HasValue) {
-      return std::align_val_t(StorageAlignment<KeyT>);
-    } else {
-      return std::align_val_t(StorageAlignment<KeyT, ValueT>);
-    }
+    return std::align_val_t(StorageAlignment<KeyT, ValueT>);
   }
 
-  static auto Allocate(ssize_t size) -> RawHashtable::Storage* {
+  static auto Allocate(ssize_t size) -> Storage* {
     return reinterpret_cast<RawHashtable::Storage*>(__builtin_operator_new(
         ComputeStorageSize(size), ComputeStorageAlignment(), std::nothrow_t()));
   }
@@ -735,16 +688,44 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
                                      ComputeStorageAlignment());
   }
 
-  RawHashtableBase(int small_size, RawHashtable::Storage* small_storage)
-      : KeyBaseT(small_size, small_storage) {}
+  RawHashtableBase(int small_size, Storage* small_storage) {
+    Init(small_size, small_storage);
+    small_size_ = small_size;
+  }
+
+  // An internal constructor used to build temporary map base objects with a
+  // specific allocated size. This is used internally to build ephemeral maps.
+  explicit RawHashtableBase(ssize_t arg_size, Storage* arg_storage) {
+    Init(arg_size, arg_storage);
+    small_size_ = 0;
+  }
 
   ~RawHashtableBase();
 
-  auto values_ptr() const -> ValueT* {
-    return reinterpret_cast<ValueT*>(
-        reinterpret_cast<unsigned char*>(this->keys_ptr()) +
-        ComputeValueStorageOffset<KeyT, ValueT>(this->size()));
+  // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
+  operator ViewBaseT() const { return impl_view_; }
+
+  auto size() const -> ssize_t { return impl_view_.size_; }
+  auto size() -> ssize_t& { return impl_view_.size_; }
+  auto storage() const -> Storage* { return impl_view_.storage_; }
+  auto storage() -> Storage*& { return impl_view_.storage_; }
+
+  auto groups_ptr() const -> uint8_t* { return impl_view_.groups_ptr(); }
+  auto entries() const -> EntryT* { return impl_view_.entries(); }
+
+  auto is_small() const -> bool { return size() <= small_size(); }
+  auto small_size() const -> ssize_t {
+    return static_cast<unsigned>(small_size_);
   }
+
+  void Init(ssize_t init_size, Storage* init_storage);
+
+  template <typename LookupKeyT>
+  auto InsertIntoEmptyIndex(LookupKeyT lookup_key)
+      -> std::pair<ssize_t, uint8_t>;
+
+  template <typename LookupKeyT>
+  auto EraseKey(LookupKeyT lookup_key) -> ssize_t;
 
   template <typename LookupKeyT>
   auto GrowRehashAndInsertIndex(LookupKeyT lookup_key)
@@ -754,6 +735,10 @@ class RawHashtableBase : protected RawHashtableKeyBase<InputKeyT> {
 
   auto ClearImpl() -> void;
   auto DestroyImpl() -> void;
+
+  ViewBaseT impl_view_;
+  int growth_budget_;
+  int small_size_;
 };
 
 inline auto ComputeProbeMaskFromSize(ssize_t size) -> size_t {
@@ -833,10 +818,10 @@ inline auto ComputeControlByte(size_t tag) -> uint8_t {
 
 // TODO: Evaluate keeping this outlined to see if macro benchmarks observe the
 // same perf hit as micros.
-template <typename KeyT>
+template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
-    -> ssize_t {
+auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
+    LookupKeyT lookup_key) const -> ssize_t {
   ssize_t local_size = size();
   if (LLVM_UNLIKELY(local_size == 0)) {
     return -1;
@@ -847,8 +832,7 @@ auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
   uint8_t control_byte = ComputeControlByte(tag);
   // ssize_t hash_index = ComputeHashIndex(hash, groups);
 
-  KeyT* keys = reinterpret_cast<KeyT*>(
-      reinterpret_cast<unsigned char*>(groups) + local_size);
+  EntryT* local_entries = entries();
   ProbeSequence s(hash_index, local_size);
   do {
     ssize_t group_index = s.getIndex();
@@ -859,7 +843,7 @@ auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
       auto byte_end = control_byte_matched_range.end();
       do {
         ssize_t index = group_index + *byte_it;
-        if (LLVM_LIKELY(keys[index] == lookup_key)) {
+        if (LLVM_LIKELY(local_entries[index].key == lookup_key)) {
           __builtin_assume(index >= 0);
           return index;
         }
@@ -878,14 +862,15 @@ auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
   } while (LLVM_UNLIKELY(true));
 }
 
-template <typename InputKeyT>
+template <typename InputKeyT, typename InputValueT>
 template <typename IndexCallbackT, typename GroupCallbackT>
-[[clang::always_inline]] void RawHashtableViewBase<InputKeyT>::ForEachIndex(
+[[clang::always_inline]] void
+RawHashtableViewBase<InputKeyT, InputValueT>::ForEachIndex(
     IndexCallbackT index_callback, GroupCallbackT group_callback) {
-  uint8_t* groups = this->groups_ptr();
-  KeyT* keys = this->keys_ptr();
+  uint8_t* groups = groups_ptr();
+  EntryT* local_entries = entries();
 
-  ssize_t local_size = this->size();
+  ssize_t local_size = size();
   for (ssize_t group_index = 0; group_index < local_size;
        group_index += GroupSize) {
     auto g = Group::Load(groups, group_index);
@@ -895,18 +880,18 @@ template <typename IndexCallbackT, typename GroupCallbackT>
     }
     for (ssize_t byte_index : present_matched_range) {
       ssize_t index = group_index + byte_index;
-      index_callback(keys, index);
+      index_callback(local_entries, index);
     }
 
     group_callback(groups, group_index);
   }
 }
 
-template <typename InputKeyT>
-auto RawHashtableViewBase<InputKeyT>::CountProbedKeys() const -> ssize_t {
+template <typename InputKeyT, typename InputValueT>
+auto RawHashtableViewBase<InputKeyT, InputValueT>::CountProbedKeys() const
+    -> ssize_t {
   uint8_t* groups = this->groups_ptr();
-  KeyT* keys = this->keys_ptr();
-
+  EntryT* local_entries = this->entries();
   ssize_t local_size = this->size();
   ssize_t count = 0;
   for (ssize_t group_index = 0; group_index < local_size;
@@ -915,7 +900,7 @@ auto RawHashtableViewBase<InputKeyT>::CountProbedKeys() const -> ssize_t {
     auto present_matched_range = g.MatchPresent();
     for (ssize_t byte_index : present_matched_range) {
       ssize_t index = group_index + byte_index;
-      HashCode hash = HashValue(keys[index], ComputeSeed());
+      HashCode hash = HashValue(local_entries[index].key, ComputeSeed());
       ssize_t hash_index = hash.ExtractIndexAndTag<7>().first &
                            ComputeProbeMaskFromSize(local_size);
       count += static_cast<ssize_t>(hash_index != group_index);
@@ -924,9 +909,10 @@ auto RawHashtableViewBase<InputKeyT>::CountProbedKeys() const -> ssize_t {
   return count;
 }
 
-template <typename InputKeyT>
+template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-[[clang::noinline]] auto RawHashtableKeyBase<InputKeyT>::InsertIntoEmptyIndex(
+[[clang::noinline]] auto
+RawHashtableBase<InputKeyT, InputValueT>::InsertIntoEmptyIndex(
     LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
   uint8_t* groups = groups_ptr();
   HashCode hash = HashValue(lookup_key, ComputeSeed());
@@ -959,18 +945,18 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
   return size - size / 8;
 }
 
-template <typename InputKeyT>
-void RawHashtableKeyBase<InputKeyT>::Init(ssize_t init_size,
-                                          Storage* init_storage) {
+template <typename InputKeyT, typename InputValueT>
+void RawHashtableBase<InputKeyT, InputValueT>::Init(ssize_t init_size,
+                                                    Storage* init_storage) {
   size() = init_size;
   storage() = init_storage;
   std::memset(groups_ptr(), 0, init_size);
   growth_budget_ = GrowthThresholdForSize(init_size);
 }
 
-template <typename InputKeyT>
+template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-auto RawHashtableKeyBase<InputKeyT>::EraseKey(LookupKeyT lookup_key)
+auto RawHashtableBase<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
     -> ssize_t {
   ssize_t index = impl_view_.LookupIndexHashed(lookup_key);
   if (index < 0) {
@@ -996,9 +982,9 @@ auto RawHashtableKeyBase<InputKeyT>::EraseKey(LookupKeyT lookup_key)
     groups[index] = Group::Deleted;
   }
 
-  // Also destroy the key while we're here.
-  KeyT* keys = this->keys_ptr();
-  keys[index].~KeyT();
+  if constexpr (!EntryT::IsTriviallyDestructible) {
+    this->entries()[index].Destroy();
+  }
 
   return index;
 }
@@ -1034,18 +1020,15 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   bool old_small = this->is_small();
   Storage* old_storage = this->storage();
   uint8_t* old_groups = this->groups_ptr();
-  KeyT* old_keys = this->keys_ptr();
-  ValueT* old_values;
-  if constexpr (HasValue) {
-    old_values = this->values_ptr();
-  }
+  EntryT* old_entries = this->entries();
 
 #ifndef NDEBUG
   ssize_t debug_empty_count =
       llvm::count(llvm::ArrayRef(old_groups, old_size), Group::Empty) +
       llvm::count(llvm::ArrayRef(old_groups, old_size), Group::Deleted);
   CARBON_DCHECK(debug_empty_count >=
-                (old_size - GrowthThresholdForSize(old_size)));
+                (old_size - GrowthThresholdForSize(old_size)))
+      << "debug_empty_count: " << debug_empty_count << ", size: " << old_size;
 #endif
 
   // Compute the new size and grow the storage in place (if possible).
@@ -1056,11 +1039,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
 
   // Now extract the new components of the table.
   uint8_t* new_groups = this->groups_ptr();
-  KeyT* new_keys = this->keys_ptr();
-  ValueT* new_values;
-  if constexpr (HasValue) {
-    new_values = this->values_ptr();
-  }
+  EntryT* new_entries = this->entries();
 
   // The common case, especially for large sizes, is that we double the size
   // when we grow. This allows an important optimization -- we're adding
@@ -1106,7 +1085,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
       CARBON_DCHECK(new_groups[old_index] == old_groups[old_index]);
       CARBON_DCHECK(new_groups[old_index | old_size] == old_groups[old_index]);
 #endif
-      HashCode hash = HashValue(old_keys[old_index], ComputeSeed());
+      HashCode hash = HashValue(old_entries[old_index].key, ComputeSeed());
       ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
                                ComputeProbeMaskFromSize(old_size);
       if (LLVM_UNLIKELY(old_hash_index != group_index)) {
@@ -1138,13 +1117,8 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
 
       // If we need to explicitly move (and destroy) the key or value, do so
       // here where we already know its target.
-      if constexpr (!IsKeyTriviallyRelocatable) {
-        new (&new_keys[new_index]) KeyT(std::move(old_keys[old_index]));
-        old_keys[old_index].~KeyT();
-      }
-      if constexpr (HasValue && !IsValueTriviallyRelocatable) {
-        new (&new_values[new_index]) ValueT(std::move(old_values[old_index]));
-        old_values[old_index].~ValueT();
+      if constexpr (!EntryT::IsTriviallyRelocatable) {
+        old_entries[old_index].Move(new_entries[new_index]);
       }
     }
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
@@ -1170,35 +1144,21 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   // create two copies, but it doesn't. This produces the exact same storage as
   // copying the storage into the wrong location first, and then again into the
   // correct location. Only one is live and only one is destroyed.
-  if constexpr (IsKeyTriviallyRelocatable) {
-    memcpy(new_keys, old_keys, old_size * sizeof(KeyT));
-    memcpy(new_keys + old_size, old_keys, old_size * sizeof(KeyT));
-  }
-  if constexpr (IsValueTriviallyRelocatable) {
-    memcpy(new_values, old_values, old_size * sizeof(ValueT));
-    memcpy(new_values + old_size, old_values, old_size * sizeof(ValueT));
+  if constexpr (EntryT::IsTriviallyRelocatable) {
+    memcpy(new_entries, old_entries, old_size * sizeof(EntryT));
+    memcpy(new_entries + old_size, old_entries, old_size * sizeof(EntryT));
   }
 
   // We have to use the normal insert for anything that was probed before, but
   // we know we'll find an empty slot, so leverage that. We extract the probed
   // keys from the bottom of the old keys storage.
   for (ssize_t old_index : probed_indices) {
-    KeyT old_key = std::move(old_keys[old_index]);
-    old_keys[old_index].~KeyT();
-
     // We may end up needing to do a sequence of re-inserts, swapping out keys
     // and values each time, so we enter a loop here and break out of it for the
     // simple cases of re-inserting into a genuinely empty slot.
-    auto [new_index, control_byte] = this->InsertIntoEmptyIndex(old_key);
-    new (&new_keys[new_index]) KeyT(std::move(old_key));
-
-    if constexpr (HasValue) {
-      if (new_index != old_index) {
-        new (&new_values[new_index]) ValueT(std::move(old_values[old_index]));
-        old_values[old_index].~ValueT();
-      }
-    }
-
+    auto [new_index, control_byte] =
+        this->InsertIntoEmptyIndex(old_entries[old_index].key);
+    old_entries[old_index].Move(new_entries[new_index]);
     new_groups[new_index] = control_byte;
   }
   CARBON_DCHECK(count ==
@@ -1263,6 +1223,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     return {index, control_byte};
   };
 
+  EntryT* local_entries = this->entries();
   for (ProbeSequence s(hash_index, this->size());; s.step()) {
     ssize_t group_index = s.getIndex();
     auto g = Group::Load(groups, group_index);
@@ -1274,7 +1235,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
       auto byte_end = control_byte_matched_range.end();
       do {
         ssize_t index = group_index + *byte_it;
-        if (LLVM_LIKELY(this->keys_ptr()[index] == lookup_key)) {
+        if (LLVM_LIKELY(local_entries[index].key == lookup_key)) {
           return {index, NoInsertNeeded};
         }
         ++byte_it;
@@ -1323,10 +1284,11 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
 template <typename InputKeyT, typename InputValueT>
 auto RawHashtableBase<InputKeyT, InputValueT>::ClearImpl() -> void {
   this->impl_view_.ForEachIndex(
-      [this](KeyT* /*keys*/, ssize_t index) {
-        this->keys_ptr()[index].~KeyT();
-        if constexpr (HasValue) {
-          this->values_ptr()[index].~ValueT();
+      [this](EntryT* /*entries*/, ssize_t index) {
+        // FIXME
+        static_cast<void>(this);
+        if constexpr (!EntryT::IsTriviallyDestructible) {
+          this->entries()[index].Destroy();
         }
       },
       [](uint8_t* groups, ssize_t group_index) {
@@ -1343,15 +1305,14 @@ auto RawHashtableBase<InputKeyT, InputValueT>::DestroyImpl() -> void {
     return;
   }
 
-  // Destroy all the keys and, if present, values.
-  this->impl_view_.ForEachIndex(
-      [this](KeyT* /*keys*/, ssize_t index) {
-        this->keys_ptr()[index].~KeyT();
-        if constexpr (HasValue) {
-          this->values_ptr()[index].~ValueT();
-        }
-      },
-      [](auto...) {});
+  // Destroy all the entries.
+  if constexpr (!EntryT::IsTriviallyDestructible) {
+    this->impl_view_.ForEachIndex(
+        [this](EntryT* /*entries*/, ssize_t index) {
+          this->entries()[index].Destroy();
+        },
+        [](auto...) {});
+  }
 
   // If small, nothing to deallocate.
   if (this->is_small()) {
