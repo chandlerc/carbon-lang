@@ -1149,7 +1149,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     new (&new_keys[new_index]) KeyT(std::move(old_key));
 
     if constexpr (HasValue) {
-      if (new_index == old_index) {
+      if (new_index != old_index) {
         new (&new_values[new_index]) ValueT(std::move(old_values[old_index]));
         old_values[old_index].~ValueT();
       }

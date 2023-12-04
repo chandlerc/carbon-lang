@@ -92,12 +92,11 @@ TEST(MapTest, Basic) {
     // insertion corrupts the rest of the table.
     for (int j : llvm::seq(1, i)) {
       SCOPED_TRACE(llvm::formatv("Assert key: {0}", j).str());
-      ASSERT_TRUE(m.Contains(j));
+      ASSERT_EQ(j * 100 + (int)(j == 1), *m[j]);
     }
   }
   for (int i : llvm::seq(1, 512)) {
     SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
-    EXPECT_EQ(i * 100 + (int)(i == 1), *m[i]);
     EXPECT_FALSE(m.Insert(i, i * 100 + 1).is_inserted());
     EXPECT_EQ(i * 100 + (int)(i == 1), *m[i]);
     EXPECT_FALSE(m.Update(i, i * 100 + 1).is_inserted());
