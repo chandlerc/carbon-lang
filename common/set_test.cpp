@@ -50,6 +50,39 @@ auto MakeElements(RangeT&& range, RangeTs&&... ranges) {
 }
 
 TEST(SetTest, Basic) {
+  Set<int> s;
+
+  EXPECT_FALSE(s.Contains(42));
+  EXPECT_TRUE(s.Insert(1).is_inserted());
+  EXPECT_TRUE(s.Contains(1));
+  auto result = s.Lookup(1);
+  EXPECT_TRUE(result);
+  EXPECT_EQ(1, result.key());
+  auto i_result = s.Insert(1);
+  EXPECT_FALSE(i_result.is_inserted());
+  EXPECT_TRUE(s.Contains(1));
+
+  // Verify all the elements.
+  ExpectSetElementsAre(s, {1});
+
+  // Fill up a bunch to ensure we trigger growth a few times.
+  for (int i : llvm::seq(2, 512)) {
+    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
+    EXPECT_TRUE(s.Insert(i).is_inserted());
+  }
+  for (int i : llvm::seq(1, 512)) {
+    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
+    EXPECT_TRUE(s.Contains(i));
+    EXPECT_FALSE(s.Insert(i).is_inserted());
+  }
+  EXPECT_FALSE(s.Contains(513));
+
+  // Verify all the elements.
+  ExpectSetElementsAre(s, MakeElements(llvm::seq(1, 512)));
+}
+
+TEST(SetTest, ComplexOpSequence) {
+  // Use a small size as well to cover more growth scenarios.
   Set<int, 16> s;
 
   EXPECT_FALSE(s.Contains(42));

@@ -58,6 +58,60 @@ auto MakeKeyValues(ValueCB value_cb, RangeT&& range, RangeTs&&... ranges) {
 }
 
 TEST(MapTest, Basic) {
+  Map<int, int> m;
+
+  EXPECT_FALSE(m.Contains(42));
+  EXPECT_EQ(nullptr, m[42]);
+  EXPECT_TRUE(m.Insert(1, 100).is_inserted());
+  ASSERT_TRUE(m.Contains(1));
+  auto result = m.Lookup(1);
+  EXPECT_TRUE(result);
+  EXPECT_EQ(1, result.key());
+  EXPECT_EQ(100, result.value());
+  EXPECT_EQ(100, *m[1]);
+  // Reinsertion doesn't change the value.
+  auto i_result = m.Insert(1, 101);
+  EXPECT_FALSE(i_result.is_inserted());
+  EXPECT_EQ(100, i_result.value());
+  EXPECT_EQ(100, *m[1]);
+  // Update does change the value.
+  i_result = m.Update(1, 101);
+  EXPECT_FALSE(i_result.is_inserted());
+  EXPECT_EQ(101, i_result.value());
+  EXPECT_EQ(101, *m[1]);
+
+  // Verify all the elements.
+  ExpectMapElementsAre(m, {Pair(1, 101)});
+
+  // Fill up a bunch to ensure we trigger growth a few times.
+  for (int i : llvm::seq(2, 512)) {
+    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
+    EXPECT_TRUE(m.Insert(i, i * 100).is_inserted());
+
+    // Immediately do a basic check of all elements to pin down when an
+    // insertion corrupts the rest of the table.
+    for (int j : llvm::seq(1, i)) {
+      SCOPED_TRACE(llvm::formatv("Assert key: {0}", j).str());
+      ASSERT_TRUE(m.Contains(j));
+    }
+  }
+  for (int i : llvm::seq(1, 512)) {
+    SCOPED_TRACE(llvm::formatv("Key: {0}", i).str());
+    EXPECT_EQ(i * 100 + (int)(i == 1), *m[i]);
+    EXPECT_FALSE(m.Insert(i, i * 100 + 1).is_inserted());
+    EXPECT_EQ(i * 100 + (int)(i == 1), *m[i]);
+    EXPECT_FALSE(m.Update(i, i * 100 + 1).is_inserted());
+    EXPECT_EQ(i * 100 + 1, *m[i]);
+  }
+  EXPECT_FALSE(m.Contains(513));
+
+  // Verify all the elements.
+  ExpectMapElementsAre(
+      m, MakeKeyValues([](int k) { return k * 100 + 1; }, llvm::seq(1, 512)));
+}
+
+TEST(MapTest, ComplexOpSequence) {
+  // Use a small size as well to cover more growth scenarios.
   Map<int, int, 16> m;
 
   EXPECT_FALSE(m.Contains(42));

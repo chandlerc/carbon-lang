@@ -821,6 +821,9 @@ template <typename LookupKeyT>
 auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
     -> ssize_t {
   ssize_t local_size = size();
+  if (LLVM_UNLIKELY(local_size == 0)) {
+    return -1;
+  }
   uint8_t* groups = groups_ptr();
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(local_size);
@@ -1192,6 +1195,7 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
   if (LLVM_UNLIKELY(this->size() == 0)) {
     this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
+    --this->growth_budget_;
     return this->InsertIntoEmptyIndex(lookup_key);
   }
 
