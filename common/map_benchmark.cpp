@@ -17,11 +17,10 @@ namespace {
 
 using RawHashtable::BuildKeys;
 using RawHashtable::BuildShuffledKeys;
-using RawHashtable::CarbonHashingDenseInfo;
+using RawHashtable::CarbonHashDI;
 using RawHashtable::NumOtherKeys;
 using RawHashtable::NumShuffledKeys;
-using RawHashtable::OneOpSizeArgs;
-using RawHashtable::OpSeqSizeArgs;
+using RawHashtable::SizeArgs;
 
 template <typename MapT>
 struct MapWrapper {
@@ -108,11 +107,10 @@ auto MakeValue2() -> T {
 }
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, KT, VT)                       \
-  BENCHMARK(NAME<Map<KT, VT>>)->Apply(OneOpSizeArgs);                 \
-  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(OneOpSizeArgs); \
-  BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashingDenseInfo<KT>>>) \
-      ->Apply(OneOpSizeArgs)
+#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, KT, VT)                  \
+  BENCHMARK(NAME<Map<KT, VT>>)->Apply(SizeArgs);                 \
+  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(SizeArgs); \
+  BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
 #define MAP_BENCHMARK_ONE_OP(NAME)                       \
@@ -271,11 +269,10 @@ static void BM_MapEraseUpdateHit(benchmark::State& s) {
 MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit);
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT, VT)                       \
-  BENCHMARK(NAME<Map<KT, VT>>)->Apply(OpSeqSizeArgs);                 \
-  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(OpSeqSizeArgs); \
-  BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashingDenseInfo<KT>>>) \
-      ->Apply(OpSeqSizeArgs)
+#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT, VT)                  \
+  BENCHMARK(NAME<Map<KT, VT>>)->Apply(SizeArgs);                 \
+  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(SizeArgs); \
+  BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
 #define MAP_BENCHMARK_OP_SEQ(NAME)                       \

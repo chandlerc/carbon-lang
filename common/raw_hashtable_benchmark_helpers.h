@@ -54,26 +54,19 @@ template <typename T>
   return shuffled_keys;
 }
 
-inline auto OneOpSizeArgs(benchmark::internal::Benchmark* b) -> void {
-  b->DenseRange(1, 8, 1);
-  b->DenseRange(12, 16, 4);
-  b->DenseRange(24, 64, 8);
-  b->Range(1 << 7, 1 << 20);
-}
-
-inline auto OpSeqSizeArgs(benchmark::internal::Benchmark* b) -> void {
+inline auto SizeArgs(benchmark::internal::Benchmark* b) -> void {
   b->DenseRange(1, 4, 1);
   b->Arg(8);
   b->Arg(16);
   b->Arg(32);
-  b->Arg(64);
-  b->Arg(128);
-  b->Range(1 << 8, 1 << 24);
 
-  // Now eplicate the >= 64 sizes from above, but subtracting 1/8th to end with
-  // a max load factor table.
-  for (auto s :
-       {64, 128, 256, 512, 1 << 12, 1 << 15, 1 << 18, 1 << 21, 1 << 24}) {
+  // For sizes >= 64 we first use the power of two which will have a low load
+  // factor, and then target exactly at our max load factor.
+  auto large_sizes = {64, 1 << 8, 1 << 12, 1 << 16, 1 << 20, 1 << 24};
+  for (auto s : large_sizes) {
+    b->Arg(s);
+  }
+  for (auto s : large_sizes) {
     b->Arg(s - (s / 8));
   }
 }
@@ -86,10 +79,10 @@ inline auto OpSeqSizeArgs(benchmark::internal::Benchmark* b) -> void {
 // for broader use. The Carbon hashing infrastructure has only been evaluated in
 // the context of its specific hashtable design.
 template <typename T>
-struct CarbonHashingDenseInfo;
+struct CarbonHashDI;
 
 template <>
-struct CarbonHashingDenseInfo<int> {
+struct CarbonHashDI<int> {
   static inline auto getEmptyKey() -> int { return -1; }
   static inline auto getTombstoneKey() -> int { return -2; }
   static auto getHashValue(const int val) -> unsigned {
@@ -101,7 +94,7 @@ struct CarbonHashingDenseInfo<int> {
 };
 
 template <typename T>
-struct CarbonHashingDenseInfo<T*> {
+struct CarbonHashDI<T*> {
   static constexpr uintptr_t Log2MaxAlign = 12;
 
   static inline auto getEmptyKey() -> T* {
@@ -126,7 +119,7 @@ struct CarbonHashingDenseInfo<T*> {
 };
 
 template <>
-struct CarbonHashingDenseInfo<llvm::StringRef> {
+struct CarbonHashDI<llvm::StringRef> {
   static auto getEmptyKey() -> llvm::StringRef {
     return llvm::StringRef(
         // NOLINTNEXTLINE(performance-no-int-to-ptr): Required by the API.

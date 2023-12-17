@@ -15,11 +15,10 @@ namespace {
 
 using RawHashtable::BuildKeys;
 using RawHashtable::BuildShuffledKeys;
-using RawHashtable::CarbonHashingDenseInfo;
+using RawHashtable::CarbonHashDI;
 using RawHashtable::NumOtherKeys;
 using RawHashtable::NumShuffledKeys;
-using RawHashtable::OneOpSizeArgs;
-using RawHashtable::OpSeqSizeArgs;
+using RawHashtable::SizeArgs;
 
 // This map has an intentional inlining blocker to avoid code growth. However,
 // both Abseil and LLVM's maps don't have this and at least on AArch64 both
@@ -82,11 +81,10 @@ struct SetWrapper<Set<KT, MinSmallSize>> {
 };
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, KT)                       \
-  BENCHMARK(NAME<Set<KT>>)->Apply(OneOpSizeArgs);                 \
-  BENCHMARK(NAME<absl::flat_hash_set<KT>>)->Apply(OneOpSizeArgs); \
-  BENCHMARK(NAME<llvm::DenseSet<KT, CarbonHashingDenseInfo<KT>>>) \
-      ->Apply(OneOpSizeArgs)
+#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, KT)                  \
+  BENCHMARK(NAME<Set<KT>>)->Apply(SizeArgs);                 \
+  BENCHMARK(NAME<absl::flat_hash_set<KT>>)->Apply(SizeArgs); \
+  BENCHMARK(NAME<llvm::DenseSet<KT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
 #define MAP_BENCHMARK_ONE_OP(NAME) MAP_BENCHMARK_ONE_OP_SIZE(NAME, int*)
@@ -167,11 +165,10 @@ static void BM_SetEraseInsertHitPtr(benchmark::State& s) {
 MAP_BENCHMARK_ONE_OP(BM_SetEraseInsertHitPtr);
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT)                       \
-  BENCHMARK(NAME<Set<KT>>)->Apply(OpSeqSizeArgs);                 \
-  BENCHMARK(NAME<absl::flat_hash_set<KT>>)->Apply(OpSeqSizeArgs); \
-  BENCHMARK(NAME<llvm::DenseSet<KT, CarbonHashingDenseInfo<KT>>>) \
-      ->Apply(OpSeqSizeArgs)
+#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT)                  \
+  BENCHMARK(NAME<Set<KT>>)->Apply(SizeArgs);                 \
+  BENCHMARK(NAME<absl::flat_hash_set<KT>>)->Apply(SizeArgs); \
+  BENCHMARK(NAME<llvm::DenseSet<KT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
 #define MAP_BENCHMARK_OP_SEQ(NAME) MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int*)
