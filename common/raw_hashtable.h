@@ -997,7 +997,7 @@ template <typename LookupKeyT>
 RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
   // We collect the probed elements in a small vector for re-insertion. It is
-  // tempting to re-use the already allocated storage, but doing so appears to
+  // tempting to reuse the already allocated storage, but doing so appears to
   // be a (very slight) performance regression. These are relatively rare and
   // storing them into the existing storage creates stores to the same regions
   // of memory we're reading. Moreover, it requires moving both the key and the
