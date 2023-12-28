@@ -7,8 +7,9 @@
 
 #include <benchmark/benchmark.h>
 #include <sys/types.h>
-#include <set>
+
 #include <map>
+#include <set>
 #include <vector>
 
 #include "absl/random/random.h"
@@ -146,7 +147,8 @@ inline auto HitArgs(benchmark::internal::Benchmark* b) -> void {
 
   // For sizes >= 64 we first use the power of two which will have a low load
   // factor, and then target exactly at our max load factor.
-  std::vector<ssize_t> large_sizes = {64, 1 << 8, 1 << 12, 1 << 16, 1 << 20, 1 << 24};
+  std::vector<ssize_t> large_sizes = {64,      1 << 8,  1 << 12,
+                                      1 << 16, 1 << 20, 1 << 24};
   for (auto i : llvm::seq<int>(0, large_sizes.size())) {
     ssize_t s = large_sizes[i];
     large_sizes.push_back(s - (s / 8));

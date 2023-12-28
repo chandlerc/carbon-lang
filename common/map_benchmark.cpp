@@ -15,9 +15,9 @@
 namespace Carbon {
 namespace {
 
+using RawHashtable::CarbonHashDI;
 using RawHashtable::GetKeysAndHitKeys;
 using RawHashtable::GetKeysAndMissKeys;
-using RawHashtable::CarbonHashDI;
 using RawHashtable::HitArgs;
 using RawHashtable::MissArgs;
 
@@ -137,7 +137,7 @@ static void BM_MapContainsHit(benchmark::State& s) {
       // blocking the loop from being optimized away and avoiding disruption of
       // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
-      
+
       bool result = m.BenchContains(lookup_keys[i]);
       CARBON_DCHECK(result);
       // We use the lookup success to step through keys, establishing a

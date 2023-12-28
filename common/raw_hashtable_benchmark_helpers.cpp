@@ -4,7 +4,6 @@
 
 #include "common/raw_hashtable_benchmark_helpers.h"
 
-
 namespace Carbon::RawHashtable {
 
 static std::vector<llvm::StringRef> raw_str_keys = [] {
@@ -63,9 +62,7 @@ static std::vector<int*> raw_ptr_keys = [] {
   return keys;
 }();
 
-auto BuildRawPtrKeys() -> llvm::ArrayRef<int*> {
-  return raw_ptr_keys;
-}
+auto BuildRawPtrKeys() -> llvm::ArrayRef<int*> { return raw_ptr_keys; }
 
 static std::vector<int> raw_int_keys = [] {
   std::vector<int> keys;
@@ -75,8 +72,6 @@ static std::vector<int> raw_int_keys = [] {
   return keys;
 }();
 
-auto BuildRawIntKeys() -> llvm::ArrayRef<int> {
-  return raw_int_keys;
-}
+auto BuildRawIntKeys() -> llvm::ArrayRef<int> { return raw_int_keys; }
 
 }  // namespace Carbon::RawHashtable
