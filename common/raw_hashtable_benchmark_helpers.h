@@ -23,9 +23,9 @@
 
 namespace Carbon::RawHashtable {
 
-// We want to support benchmarking with 1M keys plus up to 1k "other" keys (for
+// We want to support benchmarking with 1M keys plus up to 256 "other" keys (for
 // misses).
-constexpr ssize_t NumOtherKeys = 1 << 10;
+constexpr ssize_t NumOtherKeys = 1 << 8;
 constexpr ssize_t MaxNumKeys = (1 << 24) + NumOtherKeys;
 
 auto BuildRawStrKeys() -> llvm::ArrayRef<llvm::StringRef>;
@@ -160,8 +160,8 @@ inline auto HitArgs(benchmark::internal::Benchmark* b) -> void {
     // Once the sizes are more than 4x the 1k minimum lookup buffer size, also
     // include 50% and 100% lookup buffer sizes.
     if (s >= (4 << 10)) {
+      b->Args({s, s / 4});
       b->Args({s, s / 2});
-      b->Args({s, s});
     }
   }
 }
