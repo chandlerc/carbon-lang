@@ -7,6 +7,9 @@
 
 #include <benchmark/benchmark.h>
 #include <sys/types.h>
+#include <set>
+#include <map>
+#include <vector>
 
 #include "absl/random/random.h"
 #include "common/check.h"
@@ -24,37 +27,94 @@ namespace Carbon::RawHashtable {
 constexpr ssize_t NumOtherKeys = 1 << 10;
 constexpr ssize_t MaxNumKeys = (1 << 24) + NumOtherKeys;
 
-auto BuildStrKeys(ssize_t size) -> llvm::ArrayRef<llvm::StringRef>;
-auto BuildPtrKeys(ssize_t size) -> llvm::ArrayRef<int*>;
-auto BuildIntKeys(ssize_t size) -> llvm::ArrayRef<int>;
+auto BuildRawStrKeys() -> llvm::ArrayRef<llvm::StringRef>;
+auto BuildRawPtrKeys() -> llvm::ArrayRef<int*>;
+auto BuildRawIntKeys() -> llvm::ArrayRef<int>;
 
 template <typename T>
-auto BuildKeys(ssize_t size) -> llvm::ArrayRef<T> {
-  CARBON_CHECK(size <= MaxNumKeys);
+auto BuildRawKeys() -> llvm::ArrayRef<T> {
   if constexpr (std::is_same_v<T, llvm::StringRef>) {
-    return BuildStrKeys(size);
+    return BuildRawStrKeys();
   } else if constexpr (std::is_pointer_v<T>) {
-    return BuildPtrKeys(size);
+    return BuildRawPtrKeys();
   } else {
-    return BuildIntKeys(size);
+    return BuildRawIntKeys();
   }
 }
-
-// 64k shuffled keys to avoid any easily detectable pattern.
-constexpr ssize_t NumShuffledKeys = 64 << 10;
 
 template <typename T>
-[[clang::noinline]] auto BuildShuffledKeys(llvm::ArrayRef<T> keys)
-    -> llvm::SmallVector<T> {
-  llvm::SmallVector<T> shuffled_keys;
-  for ([[maybe_unused]] ssize_t i : llvm::seq<ssize_t>(0, NumShuffledKeys)) {
-    shuffled_keys.push_back(keys[i % keys.size()]);
+auto GetKeysImpl(ssize_t size) -> llvm::ArrayRef<T> {
+  // The raw keys aren't shuffled and round-robin through the sizes. We want to
+  // keep the distribution of sizes extremely consistent so that we can compare
+  // between two runs, even for small sizes. So for a given size we always take
+  // the leading sequence from the raw keys for that size and then shuffle the
+  // keys in that sequence to end up with a random sequence of keys. We store
+  // each of these shuffled sequences in a map to avoid repeatedly computing
+  // these on each benchmark run.
+  static std::map<ssize_t, std::vector<T>> shuffled_keys_by_size;
+
+  std::vector<T>& shuffled_keys = shuffled_keys_by_size[size];
+  if (static_cast<ssize_t>(shuffled_keys.size()) != size) {
+    llvm::ArrayRef<T> raw_keys = BuildRawKeys<T>();
+    shuffled_keys.assign(raw_keys.begin(), raw_keys.begin() + size);
+    std::shuffle(shuffled_keys.begin(), shuffled_keys.end(), absl::BitGen());
+    CARBON_CHECK(static_cast<ssize_t>(shuffled_keys.size()) == size);
   }
-  std::shuffle(shuffled_keys.begin(), shuffled_keys.end(), absl::BitGen());
-  return shuffled_keys;
+
+  return llvm::ArrayRef(shuffled_keys);
 }
 
-inline auto SizeArgs(benchmark::internal::Benchmark* b) -> void {
+template <typename T>
+auto GetMissKeysImpl() -> llvm::ArrayRef<T> {
+  // The raw keys aren't shuffled and round-robin through the sizes. We want to
+  // keep the distribution of sizes extremely consistent so that we can compare
+  // between two runs, even for small sizes. So for a given size we always take
+  // the leading sequence from the raw keys for that size and then shuffle the
+  // keys in that sequence to end up with a random sequence of keys. We store
+  // each of these shuffled sequences in a map to avoid repeatedly computing
+  // these on each benchmark run.
+  static std::vector<T> miss_keys = [] {
+    std::vector<T> keys;
+    llvm::ArrayRef<T> raw_keys = BuildRawKeys<T>().take_back(NumOtherKeys);
+    keys.assign(raw_keys.begin(), raw_keys.end());
+    std::shuffle(keys.begin(), keys.end(), absl::BitGen());
+    return keys;
+  }();
+
+  return llvm::ArrayRef(miss_keys);
+}
+
+template <typename T>
+auto GetKeysAndMissKeys(ssize_t size)
+    -> std::pair<llvm::ArrayRef<T>, llvm::ArrayRef<T>> {
+  CARBON_CHECK(size <= MaxNumKeys);
+  return {GetKeysImpl<T>(size), GetMissKeysImpl<T>()};
+}
+
+template <typename T>
+auto GetKeysAndHitKeys(ssize_t size, ssize_t lookup_keys_size)
+    -> std::pair<llvm::ArrayRef<T>, llvm::ArrayRef<T>> {
+  CARBON_CHECK(size <= MaxNumKeys);
+  CARBON_CHECK(lookup_keys_size <= MaxNumKeys);
+
+  static std::map<ssize_t, std::vector<T>> lookup_keys_by_size;
+  std::vector<T>& lookup_keys = lookup_keys_by_size[size];
+  if (static_cast<ssize_t>(lookup_keys.size()) != lookup_keys_size) {
+    llvm::ArrayRef<T> raw_keys = BuildRawKeys<T>();
+    lookup_keys.reserve(lookup_keys_size);
+    for (ssize_t i : llvm::seq<ssize_t>(0, lookup_keys_size)) {
+      lookup_keys.push_back(raw_keys[i % size]);
+    }
+    std::shuffle(lookup_keys.begin(), lookup_keys.end(), absl::BitGen());
+  }
+
+  return {GetKeysImpl<T>(size), llvm::ArrayRef(lookup_keys)};
+}
+
+inline auto MissArgs(benchmark::internal::Benchmark* b) -> void {
+  // Benchmarks for "miss" operations only have one parameter -- the size of the
+  // table. These benchmarks use a fixed 1k set of extra keys for each miss
+  // operation.
   b->DenseRange(1, 4, 1);
   b->Arg(8);
   b->Arg(16);
@@ -68,6 +128,39 @@ inline auto SizeArgs(benchmark::internal::Benchmark* b) -> void {
   }
   for (auto s : large_sizes) {
     b->Arg(s - (s / 8));
+  }
+}
+
+inline auto HitArgs(benchmark::internal::Benchmark* b) -> void {
+  // There are two parameters for benchmarks of "hit" operations. The first is
+  // the size of the hashtable itself. The second is the size of a buffer of
+  // random keys actually in the hashtable to use for the operations.
+  //
+  // For small sizes, we use a fixed 1k lookup key count. This is enough to
+  // avoid patterns of queries training the branch predictor just from the keys
+  // themselves, while small enough to avoid significant L1 cache pressure.
+  b->ArgsProduct({benchmark::CreateDenseRange(1, 4, 1), {1 << 10}});
+  b->Args({8, 1 << 10});
+  b->Args({16, 1 << 10});
+  b->Args({32, 1 << 10});
+
+  // For sizes >= 64 we first use the power of two which will have a low load
+  // factor, and then target exactly at our max load factor.
+  std::vector<ssize_t> large_sizes = {64, 1 << 8, 1 << 12, 1 << 16, 1 << 20, 1 << 24};
+  for (auto i : llvm::seq<int>(0, large_sizes.size())) {
+    ssize_t s = large_sizes[i];
+    large_sizes.push_back(s - (s / 8));
+  }
+
+  for (auto s : large_sizes) {
+    b->Args({s, 1 << 10});
+
+    // Once the sizes are more than 4x the 1k minimum lookup buffer size, also
+    // include 50% and 100% lookup buffer sizes.
+    if (s >= (4 << 10)) {
+      b->Args({s, s / 2});
+      b->Args({s, s});
+    }
   }
 }
 

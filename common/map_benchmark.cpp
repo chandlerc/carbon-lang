@@ -15,12 +15,11 @@
 namespace Carbon {
 namespace {
 
-using RawHashtable::BuildKeys;
-using RawHashtable::BuildShuffledKeys;
+using RawHashtable::GetKeysAndHitKeys;
+using RawHashtable::GetKeysAndMissKeys;
 using RawHashtable::CarbonHashDI;
-using RawHashtable::NumOtherKeys;
-using RawHashtable::NumShuffledKeys;
-using RawHashtable::SizeArgs;
+using RawHashtable::HitArgs;
+using RawHashtable::MissArgs;
 
 template <typename MapT>
 struct MapWrapper {
@@ -107,17 +106,17 @@ auto MakeValue2() -> T {
 }
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, KT, VT)                  \
-  BENCHMARK(NAME<Map<KT, VT>>)->Apply(SizeArgs);                 \
-  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(SizeArgs); \
-  BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
+#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, KT, VT)        \
+  BENCHMARK(NAME<Map<KT, VT>>)->Apply(APPLY);                 \
+  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(APPLY); \
+  BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashDI<KT>>>)->Apply(APPLY)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_ONE_OP(NAME)                       \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, int, int);             \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, int*, int*);           \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, int, llvm::StringRef); \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, llvm::StringRef, int);
+#define MAP_BENCHMARK_ONE_OP(NAME, APPLY)                       \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int, int);             \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int*, int*);           \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int, llvm::StringRef); \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, llvm::StringRef, int);
 
 template <typename MapT>
 static void BM_MapContainsHit(benchmark::State& s) {
@@ -125,28 +124,30 @@ static void BM_MapContainsHit(benchmark::State& s) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, VT());
   }
-  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(keys);
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    bool result = m.BenchContains(shuffled_keys[i]);
-    CARBON_DCHECK(result);
-    // We use the lookup success to step through keys, establishing a dependency
-    // between each lookup and allowing us to measure latency rather than
-    // throughput.
-    i = (i + static_cast<ssize_t>(result)) & (NumShuffledKeys - 1);
-    // We block optimizing `i` as that has proven both more effective at
-    // blocking the loop from being optimized away and avoiding disruption of
-    // the generated code that we're benchmarking.
-    benchmark::DoNotOptimize(i);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      // We block optimizing `i` as that has proven both more effective at
+      // blocking the loop from being optimized away and avoiding disruption of
+      // the generated code that we're benchmarking.
+      benchmark::DoNotOptimize(i);
+      
+      bool result = m.BenchContains(lookup_keys[i]);
+      CARBON_DCHECK(result);
+      // We use the lookup success to step through keys, establishing a
+      // dependency between each lookup and allowing us to measure latency
+      // rather than throughput.
+      i += static_cast<ssize_t>(result);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapContainsHit);
+MAP_BENCHMARK_ONE_OP(BM_MapContainsHit, HitArgs);
 
 template <typename MapT>
 static void BM_MapContainsMiss(benchmark::State& s) {
@@ -154,23 +155,30 @@ static void BM_MapContainsMiss(benchmark::State& s) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0) + NumOtherKeys);
-  for (auto k : keys.slice(0, s.range(0))) {
+  auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(s.range(0));
+  for (auto k : keys) {
     m.BenchInsert(k, VT());
   }
-  llvm::SmallVector<KT> shuffled_keys =
-      BuildShuffledKeys(keys.slice(s.range(0)));
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    bool result = m.BenchContains(shuffled_keys[i]);
-    CARBON_DCHECK(!result);
-    i = (i + static_cast<ssize_t>(!result)) & (NumShuffledKeys - 1);
-    benchmark::DoNotOptimize(i);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      // We block optimizing `i` as that has proven both more effective at
+      // blocking the loop from being optimized away and avoiding disruption of
+      // the generated code that we're benchmarking.
+      benchmark::DoNotOptimize(i);
+
+      bool result = m.BenchContains(lookup_keys[i]);
+      CARBON_DCHECK(!result);
+      // We use the lookup success to step through keys, establishing a
+      // dependency between each lookup and allowing us to measure latency
+      // rather than throughput.
+      i += static_cast<ssize_t>(!result);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapContainsMiss);
+MAP_BENCHMARK_ONE_OP(BM_MapContainsMiss, MissArgs);
 
 template <typename MapT>
 static void BM_MapLookupHit(benchmark::State& s) {
@@ -178,22 +186,27 @@ static void BM_MapLookupHit(benchmark::State& s) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, VT());
   }
-  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(keys);
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    VT* value = m.BenchLookup(shuffled_keys[i]);
-    CARBON_DCHECK(value != nullptr);
-    i = (i + static_cast<ssize_t>(value != nullptr)) & (NumShuffledKeys - 1);
-    benchmark::DoNotOptimize(i);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      // We block optimizing `i` as that has proven both more effective at
+      // blocking the loop from being optimized away and avoiding disruption of
+      // the generated code that we're benchmarking.
+      benchmark::DoNotOptimize(i);
+
+      VT* value = m.BenchLookup(lookup_keys[i]);
+      CARBON_DCHECK(value != nullptr);
+      i += static_cast<ssize_t>(value != nullptr);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapLookupHit);
+MAP_BENCHMARK_ONE_OP(BM_MapLookupHit, HitArgs);
 
 template <typename MapT>
 static void BM_MapLookupMiss(benchmark::State& s) {
@@ -201,23 +214,27 @@ static void BM_MapLookupMiss(benchmark::State& s) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0) + NumOtherKeys);
-  for (auto k : keys.slice(0, s.range(0))) {
+  auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(s.range(0));
+  for (auto k : keys) {
     m.BenchInsert(k, VT());
   }
-  llvm::SmallVector<KT> shuffled_keys =
-      BuildShuffledKeys(keys.slice(s.range(0)));
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    VT* value = m.BenchLookup(shuffled_keys[i]);
-    CARBON_DCHECK(value == nullptr);
-    i = (i + static_cast<ssize_t>(value == nullptr)) & (NumOtherKeys - 1);
-    benchmark::DoNotOptimize(i);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      // We block optimizing `i` as that has proven both more effective at
+      // blocking the loop from being optimized away and avoiding disruption of
+      // the generated code that we're benchmarking.
+      benchmark::DoNotOptimize(i);
+
+      VT* value = m.BenchLookup(lookup_keys[i]);
+      CARBON_DCHECK(value == nullptr);
+      i += static_cast<ssize_t>(value == nullptr);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapLookupMiss);
+MAP_BENCHMARK_ONE_OP(BM_MapLookupMiss, MissArgs);
 
 template <typename MapT>
 static void BM_MapUpdateHit(benchmark::State& s) {
@@ -225,23 +242,29 @@ static void BM_MapUpdateHit(benchmark::State& s) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, VT());
   }
-  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(keys);
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    benchmark::ClobberMemory();
-    bool inserted = m.BenchUpdate(shuffled_keys[i], MakeValue2<VT>());
-    CARBON_DCHECK(!inserted);
-    benchmark::DoNotOptimize(inserted);
-    i = (i + static_cast<ssize_t>(!inserted)) & (NumShuffledKeys - 1);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      // We block optimizing `i` as that has proven both more effective at
+      // blocking the loop from being optimized away and avoiding disruption of
+      // the generated code that we're benchmarking.
+      benchmark::DoNotOptimize(i);
+      benchmark::ClobberMemory();
+
+      bool inserted = m.BenchUpdate(lookup_keys[i], MakeValue2<VT>());
+      CARBON_DCHECK(!inserted);
+      benchmark::DoNotOptimize(inserted);
+      i += static_cast<ssize_t>(!inserted);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapUpdateHit);
+MAP_BENCHMARK_ONE_OP(BM_MapUpdateHit, HitArgs);
 
 template <typename MapT>
 static void BM_MapEraseUpdateHit(benchmark::State& s) {
@@ -249,24 +272,31 @@ static void BM_MapEraseUpdateHit(benchmark::State& s) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, VT());
   }
-  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(keys);
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    m.BenchErase(shuffled_keys[i]);
-    benchmark::ClobberMemory();
-    bool inserted = m.BenchUpdate(shuffled_keys[i], MakeValue2<VT>());
-    CARBON_DCHECK(inserted);
-    i = (i + static_cast<ssize_t>(inserted)) & (NumShuffledKeys - 1);
-    benchmark::DoNotOptimize(i);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      // We block optimizing `i` as that has proven both more effective at
+      // blocking the loop from being optimized away and avoiding disruption of
+      // the generated code that we're benchmarking.
+      benchmark::DoNotOptimize(i);
+
+      m.BenchErase(lookup_keys[i]);
+      benchmark::ClobberMemory();
+
+      bool inserted = m.BenchUpdate(lookup_keys[i], MakeValue2<VT>());
+      CARBON_DCHECK(inserted);
+      i += static_cast<ssize_t>(inserted);
+      benchmark::DoNotOptimize(i);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit);
+MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit, HitArgs);
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT, VT)                  \
@@ -286,20 +316,16 @@ static void BM_MapInsertSeq(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
-  MapWrapperT m;
-  llvm::ArrayRef<KT> raw_keys = BuildKeys<KT>(s.range(0));
-  // We want to permute the keys so they're not in any particular order, but not
-  // generate a full shuffled set. Note that the branch predictor is likely to
-  // still be able to learn the complete pattern of branches inserted for very
-  // small key ranges.
-  llvm::SmallVector<KT> keys(raw_keys.begin(), raw_keys.end());
-  std::shuffle(keys.begin(), keys.end(), absl::BitGen());
+  constexpr ssize_t LookupKeysSize = 1 << 10;
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), LookupKeysSize);
 
-  // Now build a large shuffled set of keys (with duplicates) we'll use at the
-  // end.
-  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(raw_keys);
+  // Note that we don't force batches that use all the lookup keys because
+  // there's no difference in cache usage by covering all the different lookup
+  // keys.
   ssize_t i = 0;
   for (auto _ : s) {
+    benchmark::DoNotOptimize(i);
+
     MapWrapperT m;
     for (auto k : keys) {
       bool inserted = m.BenchInsert(k, MakeValue2<VT>());
@@ -307,12 +333,11 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     }
 
     // Now insert a final random repeated key.
-    bool inserted = m.BenchInsert(shuffled_keys[i], MakeValue2<VT>());
+    bool inserted = m.BenchInsert(lookup_keys[i], MakeValue2<VT>());
     CARBON_DCHECK(!inserted) << "Must already be in the map!";
 
     // Rotate through the shuffled keys.
-    i = (i + static_cast<ssize_t>(inserted)) & (NumShuffledKeys - 1);
-    benchmark::DoNotOptimize(i);
+    i = (i + static_cast<ssize_t>(!inserted)) & (LookupKeysSize - 1);
   }
 
   // It can be easier in some cases to think of this as a key-throughput rate of
@@ -345,7 +370,7 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     // RawHashtable::DumpHashStatistics(raw_keys);
   }
 }
-MAP_BENCHMARK_OP_SEQ(BM_MapInsertSeq);
+MAP_BENCHMARK_ONE_OP(BM_MapInsertSeq, MissArgs);
 
 }  // namespace
 }  // namespace Carbon
