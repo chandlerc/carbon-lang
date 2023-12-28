@@ -140,7 +140,7 @@ inline auto HitArgs(benchmark::internal::Benchmark* b) -> void {
   // For small sizes, we use a fixed 1k lookup key count. This is enough to
   // avoid patterns of queries training the branch predictor just from the keys
   // themselves, while small enough to avoid significant L1 cache pressure.
-  b->ArgsProduct({benchmark::CreateDenseRange(1, 4, 1), {1 << 10}});
+  b->ArgsProduct({benchmark::CreateDenseRange(1, 4, 1), {NumOtherKeys}});
   b->Args({8, NumOtherKeys});
   b->Args({16, NumOtherKeys});
   b->Args({32, NumOtherKeys});
