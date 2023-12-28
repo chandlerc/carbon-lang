@@ -141,9 +141,9 @@ inline auto HitArgs(benchmark::internal::Benchmark* b) -> void {
   // avoid patterns of queries training the branch predictor just from the keys
   // themselves, while small enough to avoid significant L1 cache pressure.
   b->ArgsProduct({benchmark::CreateDenseRange(1, 4, 1), {1 << 10}});
-  b->Args({8, 1 << 10});
-  b->Args({16, 1 << 10});
-  b->Args({32, 1 << 10});
+  b->Args({8, NumOtherKeys});
+  b->Args({16, NumOtherKeys});
+  b->Args({32, NumOtherKeys});
 
   // For sizes >= 64 we first use the power of two which will have a low load
   // factor, and then target exactly at our max load factor.
@@ -155,7 +155,7 @@ inline auto HitArgs(benchmark::internal::Benchmark* b) -> void {
   }
 
   for (auto s : large_sizes) {
-    b->Args({s, 1 << 10});
+    b->Args({s, NumOtherKeys});
 
     // Once the sizes are more than 4x the 1k minimum lookup buffer size, also
     // include 50% and 100% lookup buffer sizes.
