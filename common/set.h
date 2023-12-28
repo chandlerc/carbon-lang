@@ -146,7 +146,7 @@ class Set : public SetBase<InputKeyT> {
   using LookupResult = typename BaseT::LookupResult;
   using InsertResult = typename BaseT::InsertResult;
 
-  Set() : BaseT(SmallSize, small_storage()) {}
+  Set();
   Set(const Set& arg) : Set() {
     arg.ForEach([this](KeyT& k) { insert(k); });
   }
@@ -173,27 +173,27 @@ template <typename InputKeyT>
 template <typename LookupKeyT>
 auto SetView<InputKeyT>::Contains(LookupKeyT lookup_key) const -> bool {
   RawHashtable::Prefetch(this->storage_);
-  return this->LookupIndexHashed(lookup_key) != nullptr;
+  return this->LookupIndexHashed(lookup_key).second != nullptr;
 }
 
 template <typename KT>
 template <typename LookupKeyT>
 auto SetView<KT>::Lookup(LookupKeyT lookup_key) const -> LookupResult {
   RawHashtable::Prefetch(this->storage_);
-  EntryT* entry = this->LookupIndexHashed(lookup_key);
-  if (!entry) {
+  auto [group, entry] = this->LookupIndexHashed(lookup_key);
+  if (entry == nullptr) {
     return LookupResult();
   }
 
+  return LookupResult(&entry->key);
   return LookupResult(&entry->key);
 }
 
 template <typename KT>
 template <typename CallbackT>
 void SetView<KT>::ForEach(CallbackT callback) {
-  this->ForEachIndex(
-      [callback](EntryT* entries, ssize_t i) { callback(entries[i].key); },
-      [](auto...) {});
+  this->ForEachIndex([callback](EntryT& entry) { callback(entry.key); },
+                     [](auto...) {});
 }
 
 template <typename KT>
@@ -203,23 +203,22 @@ auto SetBase<KT>::Insert(
     typename std::__type_identity<llvm::function_ref<
         auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>>::type insert_cb)
     -> InsertResult {
-  auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
+  auto [group, entry] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
-  if (LLVM_LIKELY(!inserted)) {
+  if (LLVM_LIKELY(group == nullptr)) {
     return InsertResult(false, entry->key);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  KeyT* k = &entry->key;
-  k = insert_cb(lookup_key, k);
+  KeyT* k = insert_cb(lookup_key, &entry->key);
   return InsertResult(true, *k);
 }
 
 template <typename KeyT>
 template <typename LookupKeyT>
 auto SetBase<KeyT>::Erase(LookupKeyT lookup_key) -> bool {
-  return this->EraseKey(lookup_key) >= 0;
+  return this->EraseKey(lookup_key).second != nullptr;
 }
 
 template <typename KeyT>
@@ -228,12 +227,16 @@ void SetBase<KeyT>::Clear() {
 }
 
 template <typename KeyT, ssize_t SmallSize>
+Set<KeyT, SmallSize>::Set()
+    : BaseT(SmallSizeStorageT::SmallNumGroups, small_storage()) {}
+
+template <typename KeyT, ssize_t SmallSize>
 void Set<KeyT, SmallSize>::Reset() {
   this->DestroyImpl();
 
   // Re-initialize the whole thing.
-  CARBON_DCHECK(this->small_size() == SmallSize);
-  this->Init(SmallSize, small_storage());
+  CARBON_DCHECK(this->small_size() == SmallSizeStorageT::SmallNumGroups);
+  this->Init(SmallSizeStorageT::SmallNumGroups, small_storage());
 }
 
 }  // namespace Carbon

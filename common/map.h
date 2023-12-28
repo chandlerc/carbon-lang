@@ -201,7 +201,7 @@ class Map : public MapBase<InputKeyT, InputValueT> {
   using LookupKVResult = typename BaseT::LookupKVResult;
   using InsertKVResult = typename BaseT::InsertKVResult;
 
-  Map() : BaseT(SmallSize, small_storage()) {}
+  Map();
   Map(const Map& arg) : Map() {
     arg.ForEach([this](KeyT& k, ValueT& v) { insert(k, v); });
   }
@@ -229,18 +229,19 @@ template <typename LookupKeyT>
 auto MapView<InputKeyT, InputValueT>::Contains(LookupKeyT lookup_key) const
     -> bool {
   RawHashtable::Prefetch(this->storage_);
-  return this->LookupIndexHashed(lookup_key) != nullptr;
+  return this->LookupIndexHashed(lookup_key).second != nullptr;
 }
 
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::Lookup(LookupKeyT lookup_key) const -> LookupKVResult {
   RawHashtable::Prefetch(this->storage_);
-  EntryT* entry = this->LookupIndexHashed(lookup_key);
+  auto [group, entry] = this->LookupIndexHashed(lookup_key);
   if (!entry) {
     return LookupKVResult(nullptr, nullptr);
   }
 
+  return LookupKVResult(&entry->key, &entry->value);
   return LookupKVResult(&entry->key, &entry->value);
 }
 
@@ -255,10 +256,7 @@ template <typename KT, typename VT>
 template <typename CallbackT>
 void MapView<KT, VT>::ForEach(CallbackT callback) {
   this->ForEachIndex(
-      [this, callback](EntryT* /*entries*/, ssize_t i) {
-        EntryT& entry = this->entries()[i];
-        callback(entry.key, entry.value);
-      },
+      [callback](EntryT& entry) { callback(entry.key, entry.value); },
       [](auto...) {});
 }
 
@@ -305,11 +303,10 @@ template <typename LookupKeyT, typename InsertCallbackT>
                                lookup_key, std::declval<void*>(),
                                std::declval<void*>()))>,
         InsertKVResult> {
-  auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
+  auto [group, entry] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
-  // EntryT& entry = this->entries()[index];
 
-  if (LLVM_LIKELY(!inserted)) {
+  if (LLVM_LIKELY(group == nullptr)) {
     return InsertKVResult(false, entry->key, entry->value);
   }
 
@@ -318,7 +315,6 @@ template <typename LookupKeyT, typename InsertCallbackT>
   KeyT* k;
   ValueT* v;
   std::tie(k, v) = insert_cb(lookup_key, &entry->key, &entry->value);
-  // this->groups_ptr()[index] = control_byte;
   return InsertKVResult(true, *k, *v);
 }
 
@@ -382,11 +378,10 @@ template <typename LookupKeyT, typename InsertCallbackT,
                                std::declval<KeyT&>(),
                                std::declval<ValueT&>()))>,
         InsertKVResult> {
-  auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
+  auto [group, entry] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
-  // EntryT& entry = this->entries()[index];
 
-  if (LLVM_LIKELY(!inserted)) {
+  if (LLVM_LIKELY(group == nullptr)) {
     KeyT* k = &entry->key;
     ValueT* v = &entry->value;
     std::tie(k, v) = update_cb(*k, *v);
@@ -398,14 +393,13 @@ template <typename LookupKeyT, typename InsertCallbackT,
   KeyT* k;
   ValueT* v;
   std::tie(k, v) = insert_cb(lookup_key, &entry->key, &entry->value);
-  // this->groups_ptr()[index] = control_byte;
   return InsertKVResult(true, *k, *v);
 }
 
 template <typename KeyT, typename ValueT>
 template <typename LookupKeyT>
 auto MapBase<KeyT, ValueT>::Erase(LookupKeyT lookup_key) -> bool {
-  return this->EraseKey(lookup_key);
+  return this->EraseKey(lookup_key).second != nullptr;
 }
 
 template <typename KeyT, typename ValueT>
@@ -414,12 +408,16 @@ void MapBase<KeyT, ValueT>::Clear() {
 }
 
 template <typename KeyT, typename ValueT, ssize_t SmallSize>
+Map<KeyT, ValueT, SmallSize>::Map()
+    : BaseT(SmallSizeStorageT::SmallNumGroups, small_storage()) {}
+
+template <typename KeyT, typename ValueT, ssize_t SmallSize>
 void Map<KeyT, ValueT, SmallSize>::Reset() {
   this->DestroyImpl();
 
   // Re-initialize the whole thing.
-  CARBON_DCHECK(this->small_size() == SmallSize);
-  this->Init(SmallSize, small_storage());
+  CARBON_DCHECK(this->small_size() == SmallSizeStorageT::SmallNumGroups);
+  this->Init(SmallSizeStorageT::SmallNumGroups, small_storage());
 }
 
 }  // namespace Carbon
