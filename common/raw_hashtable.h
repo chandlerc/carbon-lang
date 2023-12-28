@@ -1213,7 +1213,7 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
   Group::MatchedRange deleted_matched_range;
 
   auto return_insert_at_index =
-      [&](ssize_t index) -> std::pair<uint32_t, ssize_t> {
+      [&](ssize_t index) -> std::pair<ssize_t, uint8_t> {
     // We'll need to insert at this index so set the control group byte to the
     // proper value.
     return {index, control_byte};
