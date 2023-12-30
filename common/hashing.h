@@ -49,7 +49,7 @@ class HashCode : public Printable<HashCode> {
   // useful when using the hash code to index a hash table. It prioritizes
   // computing the index from the bits in the hash code with the highest
   // entropy.
-  constexpr auto ExtractIndex(ssize_t size) -> ssize_t;
+  constexpr auto ExtractIndex() -> ssize_t;
 
   // Extracts an index and a fixed `N`-bit tag from the hash code.
   //
@@ -59,7 +59,7 @@ class HashCode : public Printable<HashCode> {
   // The index will be in the range [0, `size`). The `size` must be a power of
   // two, and `N` must be in the range [1, 32].
   template <int N>
-  constexpr auto ExtractIndexAndTag(ssize_t size)
+  constexpr auto ExtractIndexAndTag()
       -> std::pair<ssize_t, uint32_t>;
 
   // Extract the full 64-bit hash code as an integer.
@@ -550,19 +550,16 @@ inline auto HashValue(const T& value) -> HashCode {
   return HashValue(value, Hasher::StaticRandomData[7]);
 }
 
-inline constexpr auto HashCode::ExtractIndex(ssize_t size) -> ssize_t {
-  CARBON_DCHECK(llvm::isPowerOf2_64(size));
-  return value_ & (size - 1);
+inline constexpr auto HashCode::ExtractIndex() -> ssize_t {
+  return value_;
 }
 
 template <int N>
-inline constexpr auto HashCode::ExtractIndexAndTag(ssize_t size)
+inline constexpr auto HashCode::ExtractIndexAndTag()
     -> std::pair<ssize_t, uint32_t> {
   static_assert(N >= 1);
   static_assert(N <= 32);
-  CARBON_DCHECK(llvm::isPowerOf2_64(size));
-  CARBON_DCHECK(1LL << (64 - N) >= size) << "Not enough bits for size and tag!";
-  return {static_cast<ssize_t>((value_ >> N) & (size - 1)),
+  return {static_cast<ssize_t>(value_ >> N),
           static_cast<uint32_t>(value_ & ((1U << (N + 1)) - 1))};
 }
 

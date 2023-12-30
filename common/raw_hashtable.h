@@ -83,7 +83,12 @@ class BitIndexRange {
     auto operator*() -> ssize_t& {
       CARBON_DCHECK(mask_ != 0) << "Cannot get an index from a zero mask!";
       __builtin_assume(mask_ != 0);
-      index_ = static_cast<size_t>(llvm::countr_zero(mask_)) >> Shift;
+      ssize_t bit_count = static_cast<size_t>(llvm::countr_zero(mask_));
+      if constexpr (Shift > 0) {
+        CARBON_DCHECK((bit_count & ((static_cast<MaskT>(1) << Shift) - 1)) == 0);
+        __builtin_assume((bit_count & ((static_cast<MaskT>(1) << Shift) - 1)) == 0);
+      }
+      index_ = bit_count >> Shift;
       return index_;
     }
 
@@ -201,6 +206,7 @@ struct NeonGroup {
   static constexpr uint8_t Deleted = 1;
 
   static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
+  static constexpr uint64_t LSBs = 0x0101'0101'0101'0101ULL;
 
   using MatchedRange = BitIndexRange<uint64_t, /*Shift=*/3>;
 
@@ -233,13 +239,13 @@ struct NeonGroup {
     auto match_byte_vec = vdup_n_u8(match_byte);
     auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
     uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-    return MatchedRange(mask & MSBs);
+    return MatchedRange(mask & LSBs);
   }
 
   auto MatchEmpty() const -> MatchedRange {
     auto match_byte_cmp_vec = vceqz_u8(byte_vec);
     uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-    return MatchedRange(mask & MSBs);
+    return MatchedRange(mask & LSBs);
   }
 
   auto MatchDeleted() const -> MatchedRange { return Match(Deleted); }
@@ -247,7 +253,7 @@ struct NeonGroup {
   auto MatchPresent() const -> MatchedRange {
     // Just directly extract the bytes as the MSB already marks presence.
     uint64_t mask = vreinterpret_u64_u8(byte_vec)[0];
-    return MatchedRange(mask & MSBs);
+    return MatchedRange((mask >> 7) & LSBs);
   }
 };
 #endif
@@ -826,7 +832,7 @@ auto RawHashtableViewBase<KeyT>::LookupIndexHashed(LookupKeyT lookup_key) const
   }
   uint8_t* groups = groups_ptr();
   HashCode hash = HashValue(lookup_key, ComputeSeed());
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(local_size);
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
   uint8_t control_byte = ComputeControlByte(tag);
   // ssize_t hash_index = ComputeHashIndex(hash, groups);
 
@@ -899,8 +905,8 @@ auto RawHashtableViewBase<InputKeyT>::CountProbedKeys() const -> ssize_t {
     for (ssize_t byte_index : present_matched_range) {
       ssize_t index = group_index + byte_index;
       HashCode hash = HashValue(keys[index], ComputeSeed());
-      ssize_t hash_index =
-          hash.ExtractIndexAndTag<7>(local_size).first & ~GroupMask;
+      ssize_t hash_index = hash.ExtractIndexAndTag<7>().first &
+                           ComputeProbeMaskFromSize(local_size);
       count += static_cast<ssize_t>(hash_index != group_index);
     }
   }
@@ -913,7 +919,7 @@ template <typename LookupKeyT>
     LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
   uint8_t* groups = groups_ptr();
   HashCode hash = HashValue(lookup_key, ComputeSeed());
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(size());
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
   uint8_t control_byte = ComputeControlByte(tag);
 
   for (ProbeSequence s(hash_index, size());; s.step()) {
@@ -1079,16 +1085,16 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
       CARBON_DCHECK(new_groups[old_index] == old_groups[old_index]);
       CARBON_DCHECK(new_groups[old_index | old_size] == old_groups[old_index]);
       HashCode hash = HashValue(old_keys[old_index], ComputeSeed());
-      ssize_t old_hash_index =
-          hash.ExtractIndexAndTag<7>(old_size).first & ~GroupMask;
+      ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
+                               ComputeProbeMaskFromSize(old_size);
       if (LLVM_UNLIKELY(old_hash_index != group_index)) {
         probed_indices.push_back(old_index);
         new_groups[old_index] = Group::Empty;
         new_groups[old_index | old_size] = Group::Empty;
         continue;
       }
-      ssize_t new_index =
-          hash.ExtractIndexAndTag<7>(new_size).first & ~GroupMask;
+      ssize_t new_index = hash.ExtractIndexAndTag<7>().first &
+                          ComputeProbeMaskFromSize(new_size);
       CARBON_DCHECK(new_index == old_hash_index ||
                     new_index == (old_hash_index | old_size));
       new_index += byte_index;
@@ -1202,7 +1208,7 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
   uint8_t* groups = this->groups_ptr();
 
   HashCode hash = HashValue(lookup_key, ComputeSeed());
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>(this->size());
+  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
   uint8_t control_byte = ComputeControlByte(tag);
 
   // We re-purpose the empty control byte to signal no insert is needed to the
