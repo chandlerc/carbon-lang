@@ -81,6 +81,7 @@ class BitIndexRange {
       return mask_ == rhs.mask_;
     }
 
+
     auto operator*() -> ssize_t& {
       CARBON_DCHECK(mask_ != 0) << "Cannot get an index from a zero mask!";
       __builtin_assume(mask_ != 0);
@@ -221,7 +222,11 @@ struct NeonGroup {
 
   using MatchRange = BitIndexRange<uint64_t, /*Shift=*/3>;
 
-  uint8x8_t byte_vec = {};
+  union {
+    uint8_t bytes[8];
+    uint8x8_t byte_vec;
+    uint64_t byte_int;
+  };
 
   static auto Load(uint8_t* groups, ssize_t index) -> NeonGroup {
     NeonGroup g;
@@ -231,6 +236,28 @@ struct NeonGroup {
 
   auto Store(uint8_t* groups, ssize_t index) const -> void {
     vst1_u8(groups + index, byte_vec);
+  }
+
+  static auto LoadVec(const uint8_t* metadata) -> NeonGroup {
+    NeonGroup g;
+    g.byte_vec = vld1_u8(metadata);
+    CARBON_DCHECK(g.byte_int == LoadInt(metadata).byte_int);
+    return g;
+  }
+
+  static auto LoadInt(const uint8_t* metadata) -> NeonGroup {
+    NeonGroup g;
+    memcpy(&g.byte_int, metadata, sizeof(g));
+    return g;
+  }
+
+  auto StoreVec(uint8_t* metadata) const -> void {
+    vst1_u8(metadata, byte_vec);
+    CARBON_DCHECK(byte_int == LoadInt(metadata).byte_int);
+  }
+
+  auto StoreInt(uint8_t* metadata) const -> void {
+    memcpy(metadata, &byte_int, sizeof(*this));
   }
 
   auto ClearDeleted() -> void {
@@ -243,11 +270,19 @@ struct NeonGroup {
 
   template <int Index>
   auto Set(uint8_t byte) -> void {
-    byte_vec = vset_lane_u8(byte, byte_vec, Index);
+    // The byte indices are reversed in Neon.
+    constexpr int ReverseIndex = 8 - Index;
+    byte_vec = vset_lane_u8(byte, byte_vec, ReverseIndex);
+  }
+
+  auto SetEmpty(uint8_t byte, ssize_t index) -> void {
+    CARBON_DCHECK((byte_int & (static_cast<uint64_t>(0xff) << (index << 3))) == 0);
+    byte_int |= static_cast<uint64_t>(byte) << (index << 3);
   }
 
   auto Set(uint8_t byte, ssize_t index) -> void {
-    std::memcpy(reinterpret_cast<std::byte*>(&byte_vec) + index, &byte, 1);
+    byte_int &= ~(static_cast<uint64_t>(0xff) << (index << 3));
+    byte_int |= static_cast<uint64_t>(byte) << (index << 3);
   }
 
   auto Match(uint8_t match_byte) const -> MatchRange {
@@ -272,8 +307,7 @@ struct NeonGroup {
 
   auto MatchPresent() const -> MatchRange {
     // Just directly extract the bytes as the MSB already marks presence.
-    uint64_t mask = vreinterpret_u64_u8(byte_vec)[0];
-    return MatchRange((mask >> 7) & LSBs);
+    return MatchRange((byte_int & MSBs) >> 7);
   }
 };
 #endif
@@ -534,7 +568,7 @@ struct StorageEntry<KeyT, void> {
 
 template <typename KeyT, typename ValueT>
 struct StorageGroup {
-  Group group;
+  uint8_t metadata[GroupSize];
 
   StorageEntry<KeyT, ValueT> entries[GroupSize];
 };
@@ -844,7 +878,8 @@ auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
   do {
     ssize_t group_index = s.getIndex();
     GroupT& g = local_groups[group_index];
-    auto control_byte_matched_range = g.group.Match(control_byte);
+    auto metadata = Group::LoadVec(g.metadata);
+    auto control_byte_matched_range = metadata.Match(control_byte);
     if (LLVM_LIKELY(control_byte_matched_range)) {
       auto byte_it = control_byte_matched_range.begin();
       auto byte_end = control_byte_matched_range.end();
@@ -860,7 +895,7 @@ auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
 
     // We failed to find a matching entry in this bucket, so check if there are
     // empty slots and we're done probing.
-    auto empty_byte_matched_range = g.group.MatchEmpty();
+    auto empty_byte_matched_range = metadata.MatchEmpty();
     if (LLVM_LIKELY(empty_byte_matched_range)) {
       return {&g, nullptr};
     }
@@ -877,7 +912,7 @@ RawHashtableViewBase<InputKeyT, InputValueT>::ForEachIndex(
   GroupT* local_groups = groups();
   ssize_t local_size = size();
   for (GroupT& g : llvm::MutableArrayRef(local_groups, local_size)) {
-    auto present_matched_range = g.group.MatchPresent();
+    auto present_matched_range = Group::LoadInt(g.metadata).MatchPresent();
     for (ssize_t byte_index : present_matched_range) {
       entry_callback(g.entries[byte_index]);
     }
@@ -894,7 +929,7 @@ auto RawHashtableViewBase<InputKeyT, InputValueT>::CountProbedKeys() const
   ssize_t count = 0;
   for (auto [group_index, g] :
        llvm::enumerate(llvm::ArrayRef(local_groups, local_size))) {
-    auto present_matched_range = g.group.MatchPresent();
+    auto present_matched_range = Group::LoadInt(g.metadata).MatchPresent();
     for (ssize_t byte_index : present_matched_range) {
       HashCode hash = HashValue(g.entries[byte_index].key, ComputeSeed());
       ssize_t hash_index = hash.ExtractIndexAndTag<7>().first &
@@ -922,10 +957,12 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIntoEmptyIndex(
   for (ProbeSequence s(hash_index, size());; s.step()) {
     ssize_t group_index = s.getIndex();
     GroupT& g = local_groups[group_index];
+    auto metadata = Group::LoadVec(g.metadata);
 
-    if (auto empty_matched_range = g.group.MatchEmpty()) {
+    if (auto empty_matched_range = metadata.MatchEmpty()) {
       ssize_t index = *empty_matched_range.begin();
-      g.group.Set(control_byte, index);
+      metadata.SetEmpty(control_byte, index);
+      metadata.StoreInt(g.metadata);
       return {&g, &g.entries[index]};
     }
 
@@ -975,13 +1012,15 @@ auto RawHashtableBase<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
   //
   // If we mark the slot as empty, we'll also need to increase the growth
   // budget.
-  auto empty_matched_range = group->group.MatchEmpty();
+  auto metadata = Group::LoadVec(group->metadata);
+  auto empty_matched_range = metadata.MatchEmpty();
   if (empty_matched_range) {
-    group->group.Set(Group::Empty, index);
+    metadata.Set(Group::Empty, index);
     ++this->growth_budget_;
   } else {
-    group->group.Set(Group::Deleted, index);
+    metadata.Set(Group::Deleted, index);
   }
+  metadata.StoreInt(group->metadata);
 
   if constexpr (!EntryT::IsTriviallyDestructible) {
     entry->Destroy();
@@ -1024,14 +1063,12 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   llvm::MutableArrayRef<GroupT> old_groups(this->groups(), old_size);
 
 #ifndef NDEBUG
-  ssize_t debug_empty_count = std::accumulate(
-      old_groups.begin(), old_groups.end(), 0,
-      [](ssize_t init, const GroupT& g) {
-        auto empty_match = g.group.MatchEmpty();
-        auto deleted_match = g.group.MatchDeleted();
-        return init + std::distance(empty_match.begin(), empty_match.end()) +
-               std::distance(deleted_match.begin(), deleted_match.end());
-      });
+  ssize_t debug_empty_count =
+      std::accumulate(old_groups.begin(), old_groups.end(), 0,
+                      [](ssize_t init, const GroupT& g) {
+                        return init + llvm::count(g.metadata, Group::Empty) +
+                               llvm::count(g.metadata, Group::Deleted);
+                      });
   CARBON_DCHECK(debug_empty_count >=
                 (old_size * GroupSize - GrowthThresholdForSize(old_size)))
       << "debug_empty_count: " << debug_empty_count << ", size: " << old_size;
@@ -1069,66 +1106,71 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   ssize_t count = 0;
   for (ssize_t group_index = 0; group_index < old_size; ++group_index) {
     GroupT& old_g = old_groups[group_index];
-    Group metadata = old_g.group;
     GroupT& new_g_a = new_groups[group_index];
     GroupT& new_g_b = new_groups[group_index | old_size];
-    metadata.ClearDeleted();
-    new_g_a.group = metadata;
-    new_g_b.group = metadata;
-    auto present_matched_range = metadata.MatchPresent();
-    for (ssize_t byte_index : present_matched_range) {
-      ++count;
-      HashCode hash = HashValue(old_g.entries[byte_index].key, ComputeSeed());
-      ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
-                               ComputeProbeMaskFromSize(old_size);
-      if (LLVM_UNLIKELY(old_hash_index != group_index)) {
-        probed_indices.push_back(&old_g.entries[byte_index]);
-        new_g_a.group.Set(Group::Empty, byte_index);
-        new_g_b.group.Set(Group::Empty, byte_index);
+    llvm::MutableArrayRef entries = old_g.entries;
+    uint64_t metadata = Group::LoadInt(old_g.metadata).byte_int;
+    uint64_t metadata_mask = 0xff;
+    auto metadata_a = metadata;
+    auto metadata_b = metadata;
+    for (ssize_t byte_index = 0; byte_index < GroupSize;
+         ++byte_index, metadata_mask <<= 8) {
+      if ((metadata & metadata_mask) == Group::Empty) {
         continue;
       }
-      ssize_t new_index = hash.ExtractIndexAndTag<7>().first &
-                          ComputeProbeMaskFromSize(new_size);
-      ssize_t new_index = hash.ExtractIndexAndTag<7>().first &
-                          ComputeProbeMaskFromSize(new_size);
-      CARBON_DCHECK(new_index == old_hash_index ||
-                    new_index == (old_hash_index | old_size));
-      // new_index += byte_index;
-      //  Toggle the newly added bit of the index to get to the other possible
-      //  target index.
-      new_groups[new_index ^ old_size].group.Set(Group::Empty, byte_index);
+      if ((metadata & metadata_mask) == Group::Deleted) {
+        metadata_a &= ~metadata_mask;
+        metadata_b &= ~metadata_mask;
+        continue;
+      }
+      ++count;
+      HashCode hash = HashValue(entries[byte_index].key, ComputeSeed());
+      ssize_t hash_index = hash.ExtractIndexAndTag<7>().first;
+      ssize_t old_index = hash_index & ComputeProbeMaskFromSize(old_size);
+      if (LLVM_UNLIKELY(old_index != group_index)) {
+        probed_indices.push_back(&entries[byte_index]);
+        metadata_a &= ~metadata_mask;
+        metadata_b &= ~metadata_mask;
+        continue;
+      }
+      ssize_t new_index = hash_index & ComputeProbeMaskFromSize(new_size);
+      CARBON_DCHECK(new_index == old_index ||
+                    new_index == (old_index | old_size));
+      bool same_index = new_index == old_index;
+      (same_index ? metadata_b : metadata_a) &= ~metadata_mask;
 
       // If we need to explicitly move (and destroy) the key or value, do so
       // here where we already know its target.
       if constexpr (!EntryT::IsTriviallyRelocatable) {
-        old_g.entries[byte_index].Move(
-            new_groups[new_index].entries[byte_index]);
+        entries[byte_index].Move(
+            (same_index ? new_g_a : new_g_b).entries[byte_index]);
       }
     }
 
-    // If the keys or values are trivially relocatable, we do a bulk memcpy of
-    // them into place. This will copy them into both possible locations, which
-    // is fine. One will be empty and clobbered if reused or ignored. The other
-    // will be the one used. This might seem like it needs it to be valid for us
-    // to create two copies, but it doesn't. This produces the exact same
-    // storage as copying the storage into the wrong location first, and then
-    // again into the correct location. Only one is live and only one is
-    // destroyed.
     if constexpr (EntryT::IsTriviallyRelocatable) {
+      // If the keys or values are trivially relocatable, we do a bulk memcpy of
+      // them into place. This will copy them into both possible locations,
+      // which is fine. One will be empty and clobbered if reused or ignored.
+      // The other will be the one used. This might seem like it needs it to be
+      // valid for us to create two copies, but it doesn't. This produces the
+      // exact same storage as copying the storage into the wrong location
+      // first, and then again into the correct location. Only one is live and
+      // only one is destroyed.
       memcpy(new_g_a.entries, old_g.entries, GroupSize * sizeof(EntryT));
       memcpy(new_g_b.entries, old_g.entries, GroupSize * sizeof(EntryT));
     }
+    memcpy(new_g_a.metadata, &metadata_a, sizeof(metadata_a));
+    memcpy(new_g_b.metadata, &metadata_b, sizeof(metadata_b));
   }
 #ifndef NDEBUG
+  CARBON_DCHECK(debug_empty_count == (old_size * GroupSize - count));
   ssize_t new_empty_count = std::accumulate(
       new_groups.begin(), new_groups.end(), 0,
       [](ssize_t init, const GroupT& g) {
-        auto empty_match = g.group.MatchEmpty();
-        return init + std::distance(empty_match.begin(), empty_match.end());
+        return init + llvm::count(g.metadata, Group::Empty);
       });
   CARBON_DCHECK((count - static_cast<ssize_t>(probed_indices.size())) ==
                 (new_size * GroupSize - new_empty_count));
-  CARBON_DCHECK(debug_empty_count == (old_size * GroupSize - count));
   CARBON_DCHECK(new_empty_count ==
                 debug_empty_count +
                     static_cast<ssize_t>(probed_indices.size()) +
@@ -1146,8 +1188,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   new_empty_count = std::accumulate(
       new_groups.begin(), new_groups.end(), 0,
       [](ssize_t init, const GroupT& g) {
-        auto empty_match = g.group.MatchEmpty();
-        return init + std::distance(empty_match.begin(), empty_match.end());
+        return init + llvm::count(g.metadata, Group::Empty);
       });
   CARBON_DCHECK(count == (new_size * GroupSize - new_empty_count));
 #endif
@@ -1169,7 +1210,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   // return that index for use.
   --this->growth_budget_;
   return this->InsertIntoEmptyIndex(lookup_key);
-}
+  }
 
 // Tries to insert the given lookup key into the map. Returns three pieces of
 // data compressed into two registers (in order to avoid an in-memory return).
@@ -1185,7 +1226,8 @@ template <typename LookupKeyT>
 //[[clang::noinline]]
 auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     LookupKeyT lookup_key) -> std::pair<GroupT*, EntryT*> {
-  if (LLVM_UNLIKELY(this->size() == 0)) {
+  ssize_t local_size = this->size();
+  if (LLVM_UNLIKELY(local_size == 0)) {
     this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
     --this->growth_budget_;
     return {this->InsertIntoEmptyIndex(lookup_key), true};
@@ -1194,7 +1236,6 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
   GroupT* local_groups = this->groups();
 
   HashCode hash = HashValue(lookup_key, ComputeSeed());
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
   uint8_t control_byte = ComputeControlByte(tag);
 
@@ -1212,11 +1253,11 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
   for (ProbeSequence s(hash_index, this->size());; s.step()) {
     ssize_t group_index = s.getIndex();
     GroupT& g = local_groups[group_index];
+    Group metadata = Group::LoadVec(g.metadata);
 
-    auto control_byte_matched_range = g.group.Match(control_byte);
-    auto empty_matched_range = g.group.MatchEmpty();
+    auto control_byte_matched_range = metadata.Match(control_byte);
+    auto empty_matched_range = metadata.MatchEmpty();
     if (control_byte_matched_range) {
-      EntryT* group_entries = &local_entries[group_index];
       auto byte_it = control_byte_matched_range.begin();
       auto byte_end = control_byte_matched_range.end();
       do {
@@ -1230,11 +1271,9 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     }
 
     // Track the first group with a deleted entry that we could insert over.
-    if (!group_with_deleted) {
-      deleted_matched_range = g.group.MatchDeleted();
-      if (deleted_matched_range) {
-        group_with_deleted = &g;
-      }
+    if (!deleted_matched_range) {
+      deleted_matched_range = metadata.MatchDeleted();
+      group_with_deleted = &g;
     }
 
     // We failed to find a matching entry in this bucket, so check if there are
@@ -1249,9 +1288,12 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     // so just bail. We want to ensure building up a table is fast so we
     // de-prioritize this a bit. In practice this doesn't have too much of an
     // effect.
-    if (LLVM_UNLIKELY(group_with_deleted)) {
-      return return_insert_at_index(group_with_deleted,
-                                    *deleted_matched_range.begin());
+    if (LLVM_UNLIKELY(deleted_matched_range)) {
+      ssize_t index = *deleted_matched_range.begin();
+      auto deleted_metadata = Group::LoadInt(group_with_deleted->metadata);
+      deleted_metadata.Set(control_byte, index);
+      deleted_metadata.StoreInt(group_with_deleted->metadata);
+      return {group_with_deleted, &group_with_deleted->entries[index]};
     }
 
     // We're going to need to grow by inserting into an empty slot. Check that
@@ -1263,7 +1305,10 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     }
 
     --this->growth_budget_;
-    return return_insert_at_index(&g, *empty_matched_range.begin());
+    ssize_t index = *empty_matched_range.begin();
+    metadata.SetEmpty(control_byte, index);
+    metadata.StoreInt(g.metadata);
+    return {&g, &g.entries[index]};
   }
 
   CARBON_FATAL() << "We should never finish probing without finding the entry "
@@ -1280,7 +1325,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::ClearImpl() -> void {
       },
       [](GroupT& g) {
         // Clear the group.
-        std::memset(&g.group, Group::Empty, GroupSize);
+        std::memset(g.metadata, Group::Empty, GroupSize);
       });
   this->growth_budget_ = GrowthThresholdForSize(this->size());
 }
