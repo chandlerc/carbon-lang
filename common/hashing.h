@@ -59,8 +59,7 @@ class HashCode : public Printable<HashCode> {
   // The index will be in the range [0, `size`). The `size` must be a power of
   // two, and `N` must be in the range [1, 32].
   template <int N>
-  constexpr auto ExtractIndexAndTag()
-      -> std::pair<ssize_t, uint32_t>;
+  constexpr auto ExtractIndexAndTag() -> std::pair<ssize_t, uint32_t>;
 
   // Extract the full 64-bit hash code as an integer.
   //
@@ -550,9 +549,7 @@ inline auto HashValue(const T& value) -> HashCode {
   return HashValue(value, Hasher::StaticRandomData[7]);
 }
 
-inline constexpr auto HashCode::ExtractIndex() -> ssize_t {
-  return value_;
-}
+inline constexpr auto HashCode::ExtractIndex() -> ssize_t { return value_; }
 
 template <int N>
 inline constexpr auto HashCode::ExtractIndexAndTag()

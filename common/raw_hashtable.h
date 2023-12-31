@@ -85,8 +85,10 @@ class BitIndexRange {
       __builtin_assume(mask_ != 0);
       ssize_t bit_count = static_cast<size_t>(llvm::countr_zero(mask_));
       if constexpr (Shift > 0) {
-        CARBON_DCHECK((bit_count & ((static_cast<MaskT>(1) << Shift) - 1)) == 0);
-        __builtin_assume((bit_count & ((static_cast<MaskT>(1) << Shift) - 1)) == 0);
+        CARBON_DCHECK((bit_count & ((static_cast<MaskT>(1) << Shift) - 1)) ==
+                      0);
+        __builtin_assume((bit_count & ((static_cast<MaskT>(1) << Shift) - 1)) ==
+                         0);
       }
       index_ = bit_count >> Shift;
       return index_;
@@ -1215,8 +1217,8 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
   // caller. This is guaranteed to not be a control byte we're inserting.
   constexpr uint8_t NoInsertNeeded = Group::Empty;
 
-  ssize_t group_with_deleted_index = -1;
-  Group::MatchedRange deleted_matched_range;
+  ssize_t group_with_deleted_index;
+  Group::MatchedRange deleted_matched_range = {};
 
   auto return_insert_at_index =
       [&](ssize_t index) -> std::pair<ssize_t, uint8_t> {
@@ -1244,11 +1246,9 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     }
 
     // Track the first group with a deleted entry that we could insert over.
-    if (group_with_deleted_index < 0) {
+    if (deleted_matched_range) {
       deleted_matched_range = g.MatchDeleted();
-      if (deleted_matched_range) {
-        group_with_deleted_index = group_index;
-      }
+      group_with_deleted_index = group_index;
     }
 
     // We failed to find a matching entry in this bucket, so check if there are
@@ -1263,7 +1263,7 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     // so just bail. We want to ensure building up a table is fast so we
     // de-prioritize this a bit. In practice this doesn't have too much of an
     // effect.
-    if (LLVM_UNLIKELY(group_with_deleted_index >= 0)) {
+    if (LLVM_UNLIKELY(deleted_matched_range)) {
       return return_insert_at_index(group_with_deleted_index +
                                     *deleted_matched_range.begin());
     }
