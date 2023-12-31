@@ -1078,31 +1078,50 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
        group_index += GroupSize) {
     auto g = RawHashtable::Group::Load(old_groups, group_index);
     g.ClearDeleted();
+    auto present_matched_range = g.MatchPresent();
+#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
+    uint64_t low_g = vreinterpret_u64_u8(g.byte_vec)[0];
+    uint64_t high_g = low_g;
+#else
     g.Store(new_groups, group_index);
     g.Store(new_groups, group_index | old_size);
-    auto present_matched_range = g.MatchPresent();
+#endif
     for (ssize_t byte_index : present_matched_range) {
       ++count;
       ssize_t old_index = group_index + byte_index;
+#if !CARBON_USE_NEON_SIMD_CONTROL_GROUP
       CARBON_DCHECK(new_groups[old_index] == old_groups[old_index]);
       CARBON_DCHECK(new_groups[old_index | old_size] == old_groups[old_index]);
+#endif
       HashCode hash = HashValue(old_keys[old_index], ComputeSeed());
       ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
                                ComputeProbeMaskFromSize(old_size);
       if (LLVM_UNLIKELY(old_hash_index != group_index)) {
         probed_indices.push_back(old_index);
+#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
+        low_g &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
+        high_g &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
+#else
         new_groups[old_index] = Group::Empty;
         new_groups[old_index | old_size] = Group::Empty;
+#endif
         continue;
       }
       ssize_t new_index = hash.ExtractIndexAndTag<7>().first &
                           ComputeProbeMaskFromSize(new_size);
       CARBON_DCHECK(new_index == old_hash_index ||
                     new_index == (old_hash_index | old_size));
-      new_index += byte_index;
       // Toggle the newly added bit of the index to get to the other possible
       // target index.
+#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
+      (new_index == old_hash_index ? high_g : low_g) &=
+          ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
+
+      new_index += byte_index;
+#else
+      new_index += byte_index;
       new_groups[new_index ^ old_size] = Group::Empty;
+#endif
 
       // If we need to explicitly move (and destroy) the key or value, do so
       // here where we already know its target.
@@ -1115,6 +1134,10 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
         old_values[old_index].~ValueT();
       }
     }
+#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
+    memcpy(new_groups + group_index, &low_g, GroupSize);
+    memcpy(new_groups + (group_index | old_size), &high_g, GroupSize);
+#endif
   }
   CARBON_DCHECK((count - static_cast<ssize_t>(probed_indices.size())) ==
                 (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
