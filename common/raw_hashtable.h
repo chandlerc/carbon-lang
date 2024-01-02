@@ -1076,13 +1076,17 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   ssize_t count = 0;
   for (ssize_t group_index = 0; group_index < old_size;
        group_index += GroupSize) {
+#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
+    uint64_t low_g;
+    memcpy(&low_g, old_groups + group_index, GroupSize);
+    uint64_t present_mask = (low_g >> 7) & Group::LSBs;
+    low_g &= (low_g >> 7) | ~Group::LSBs;
+    uint64_t high_g = low_g;
+    auto present_matched_range = Group::MatchedRange(present_mask);
+#else
     auto g = RawHashtable::Group::Load(old_groups, group_index);
     g.ClearDeleted();
     auto present_matched_range = g.MatchPresent();
-#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-    uint64_t low_g = vreinterpret_u64_u8(g.byte_vec)[0];
-    uint64_t high_g = low_g;
-#else
     g.Store(new_groups, group_index);
     g.Store(new_groups, group_index | old_size);
 #endif
