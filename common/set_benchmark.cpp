@@ -180,7 +180,7 @@ MAP_BENCHMARK_ONE_OP(BM_SetEraseInsertHitPtr, HitArgs);
 #define MAP_BENCHMARK_OP_SEQ(NAME) MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int*)
 
 template <typename SetT>
-static void BM_SetInsertPtrSeq(benchmark::State& s) {
+static void BM_SetInsertSeq(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   constexpr ssize_t LookupKeysSize = 1 << 8;
@@ -236,7 +236,7 @@ static void BM_SetInsertPtrSeq(benchmark::State& s) {
     // RawHashtable::DumpHashStatistics(raw_keys);
   }
 }
-MAP_BENCHMARK_OP_SEQ(BM_SetInsertPtrSeq);
+MAP_BENCHMARK_OP_SEQ(BM_SetInsertSeq);
 
 }  // namespace
 }  // namespace Carbon
