@@ -1273,7 +1273,7 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     }
 
     // Track the first group with a deleted entry that we could insert over.
-    if (deleted_matched_range) {
+    if (!deleted_matched_range) {
       deleted_matched_range = g.MatchDeleted();
       group_with_deleted_index = group_index;
     }
