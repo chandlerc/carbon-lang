@@ -112,7 +112,7 @@ auto GetKeysAndHitKeys(ssize_t size, ssize_t lookup_keys_size)
   return {GetKeysImpl<T>(size), llvm::ArrayRef(lookup_keys)};
 }
 
-inline auto MissArgs(benchmark::internal::Benchmark* b) -> void {
+inline auto SizeArgs(benchmark::internal::Benchmark* b) -> void {
   // Benchmarks for "miss" operations only have one parameter -- the size of the
   // table. These benchmarks use a fixed 1k set of extra keys for each miss
   // operation.

@@ -10,7 +10,6 @@
 #include "common/map.h"
 #include "common/raw_hashtable_benchmark_helpers.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallVector.h"
 
 namespace Carbon {
 namespace {
@@ -19,7 +18,7 @@ using RawHashtable::CarbonHashDI;
 using RawHashtable::GetKeysAndHitKeys;
 using RawHashtable::GetKeysAndMissKeys;
 using RawHashtable::HitArgs;
-using RawHashtable::MissArgs;
+using RawHashtable::SizeArgs;
 
 template <typename MapT>
 struct MapWrapper {
@@ -178,7 +177,7 @@ static void BM_MapContainsMiss(benchmark::State& s) {
     }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapContainsMiss, MissArgs);
+MAP_BENCHMARK_ONE_OP(BM_MapContainsMiss, SizeArgs);
 
 template <typename MapT>
 static void BM_MapLookupHit(benchmark::State& s) {
@@ -234,7 +233,7 @@ static void BM_MapLookupMiss(benchmark::State& s) {
     }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapLookupMiss, MissArgs);
+MAP_BENCHMARK_ONE_OP(BM_MapLookupMiss, SizeArgs);
 
 template <typename MapT>
 static void BM_MapUpdateHit(benchmark::State& s) {
@@ -316,7 +315,7 @@ static void BM_MapInsertSeq(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
-  constexpr ssize_t LookupKeysSize = 1 << 10;
+  constexpr ssize_t LookupKeysSize = 1 << 8;
   auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), LookupKeysSize);
 
   // Note that we don't force batches that use all the lookup keys because
@@ -362,7 +361,7 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     // display the probe count of this benchmark *parameter*, not the probe
     // count that resulted from the number of iterations. That means we use the
     // normal counter API without flags.
-    s.counters["NumProbed"] = benchmark::Counter(map.CountProbedKeys());
+    s.counters["Probed"] = map.CountProbedKeys();
 
     // Uncomment this call to print out statistics about the index-collisions
     // among these keys for debugging:
@@ -370,7 +369,7 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     // RawHashtable::DumpHashStatistics(raw_keys);
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_MapInsertSeq, MissArgs);
+MAP_BENCHMARK_ONE_OP(BM_MapInsertSeq, SizeArgs);
 
 }  // namespace
 }  // namespace Carbon

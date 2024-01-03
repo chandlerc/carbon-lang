@@ -8,16 +8,14 @@
 #include "common/raw_hashtable_benchmark_helpers.h"
 #include "common/set.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SmallVector.h"
 
 namespace Carbon {
 namespace {
 
-using RawHashtable::BuildKeys;
-using RawHashtable::BuildShuffledKeys;
 using RawHashtable::CarbonHashDI;
-using RawHashtable::NumOtherKeys;
-using RawHashtable::NumShuffledKeys;
+using RawHashtable::GetKeysAndHitKeys;
+using RawHashtable::GetKeysAndMissKeys;
+using RawHashtable::HitArgs;
 using RawHashtable::SizeArgs;
 
 // This map has an intentional inlining blocker to avoid code growth. However,
@@ -47,7 +45,6 @@ struct SetWrapper {
   CARBON_ARM64_NOINLINE
   auto BenchInsert(KeyT k) -> bool {
     auto result = M.insert(k);
-    benchmark::DoNotOptimize(result.second);
     return result.second;
   }
 
@@ -71,7 +68,6 @@ struct SetWrapper<Set<KT, MinSmallSize>> {
 
   auto BenchInsert(KeyT k) -> bool {
     auto result = M.Insert(k);
-    benchmark::DoNotOptimize(result.is_inserted());
     return result.is_inserted();
   }
 
@@ -81,88 +77,98 @@ struct SetWrapper<Set<KT, MinSmallSize>> {
 };
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, KT)                  \
-  BENCHMARK(NAME<Set<KT>>)->Apply(SizeArgs);                 \
-  BENCHMARK(NAME<absl::flat_hash_set<KT>>)->Apply(SizeArgs); \
-  BENCHMARK(NAME<llvm::DenseSet<KT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
+#define MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, KT)        \
+  BENCHMARK(NAME<Set<KT>>)->Apply(APPLY);                 \
+  BENCHMARK(NAME<absl::flat_hash_set<KT>>)->Apply(APPLY); \
+  BENCHMARK(NAME<llvm::DenseSet<KT, CarbonHashDI<KT>>>)->Apply(APPLY)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_ONE_OP(NAME) MAP_BENCHMARK_ONE_OP_SIZE(NAME, int*)
+#define MAP_BENCHMARK_ONE_OP(NAME, APPLY) \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int*)
 
 template <typename SetT>
 static void BM_SetContainsHitPtr(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   SetWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
     m.BenchInsert(k);
   }
-  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(keys);
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    bool result = m.BenchContains(shuffled_keys[i]);
-    CARBON_DCHECK(result);
-    // We use the lookup success to step through keys, establishing a dependency
-    // between each lookup and allowing us to measure latency rather than
-    // throughput.
-    i = (i + static_cast<ssize_t>(result)) & (NumShuffledKeys - 1);
-    // We block optimizing `i` as that has proven both more effective at
-    // blocking the loop from being optimized away and avoiding disruption of
-    // the generated code that we're benchmarking.
-    benchmark::DoNotOptimize(i);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      // We block optimizing `i` as that has proven both more effective at
+      // blocking the loop from being optimized away and avoiding disruption of
+      // the generated code that we're benchmarking.
+      benchmark::DoNotOptimize(i);
+
+      bool result = m.BenchContains(lookup_keys[i]);
+      CARBON_DCHECK(result);
+      // We use the lookup success to step through keys, establishing a
+      // dependency between each lookup and allowing us to measure latency
+      // rather than throughput.
+      i += static_cast<ssize_t>(result);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_SetContainsHitPtr);
+MAP_BENCHMARK_ONE_OP(BM_SetContainsHitPtr, HitArgs);
 
 template <typename SetT>
 static void BM_SetContainsMissPtr(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   SetWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0) + NumOtherKeys);
-  for (auto k : keys.slice(0, s.range(0))) {
+  auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(s.range(0));
+  for (auto k : keys) {
     m.BenchInsert(k);
   }
-  llvm::SmallVector<KT> shuffled_keys =
-      BuildShuffledKeys(keys.slice(s.range(0)));
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    bool result = m.BenchContains(shuffled_keys[i]);
-    CARBON_DCHECK(!result);
-    i = (i + static_cast<ssize_t>(!result)) & (NumShuffledKeys - 1);
-    benchmark::DoNotOptimize(i);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      benchmark::DoNotOptimize(i);
+
+      bool result = m.BenchContains(lookup_keys[i]);
+      CARBON_DCHECK(!result);
+      i += static_cast<ssize_t>(!result);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_SetContainsMissPtr);
+MAP_BENCHMARK_ONE_OP(BM_SetContainsMissPtr, SizeArgs);
 
 template <typename SetT>
 static void BM_SetEraseInsertHitPtr(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   SetWrapperT m;
-  llvm::ArrayRef<KT> keys = BuildKeys<KT>(s.range(0));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
     m.BenchInsert(k);
   }
-  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(keys);
-  ssize_t i = 0;
+  ssize_t lookup_keys_size = lookup_keys.size();
 
   m.CreateView();
-  for (auto _ : s) {
-    m.BenchErase(shuffled_keys[i]);
-    benchmark::ClobberMemory();
-    bool inserted = m.BenchInsert(shuffled_keys[i]);
-    CARBON_DCHECK(inserted);
-    i = (i + static_cast<ssize_t>(inserted)) & (NumShuffledKeys - 1);
-    benchmark::DoNotOptimize(i);
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      // We block optimizing `i` as that has proven both more effective at
+      // blocking the loop from being optimized away and avoiding disruption of
+      // the generated code that we're benchmarking.
+      benchmark::DoNotOptimize(i);
+
+      m.BenchErase(lookup_keys[i]);
+      benchmark::ClobberMemory();
+
+      bool inserted = m.BenchInsert(lookup_keys[i]);
+      CARBON_DCHECK(inserted);
+      i += static_cast<ssize_t>(inserted);
+    }
   }
 }
-MAP_BENCHMARK_ONE_OP(BM_SetEraseInsertHitPtr);
+MAP_BENCHMARK_ONE_OP(BM_SetEraseInsertHitPtr, HitArgs);
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT)                  \
@@ -177,19 +183,15 @@ template <typename SetT>
 static void BM_SetInsertPtrSeq(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
-  llvm::ArrayRef<KT> raw_keys = BuildKeys<KT>(s.range(0));
-  // We want to permute the keys so they're not in any particular order, but not
-  // generate a full shuffled set. Note that the branch predictor is likely to
-  // still be able to learn the complete pattern of branches inserted for very
-  // small key ranges.
-  llvm::SmallVector<KT> keys(raw_keys.begin(), raw_keys.end());
-  std::shuffle(keys.begin(), keys.end(), absl::BitGen());
+  constexpr ssize_t LookupKeysSize = 1 << 8;
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), LookupKeysSize);
 
   // Now build a large shuffled set of keys (with duplicates) we'll use at the
   // end.
-  llvm::SmallVector<KT> shuffled_keys = BuildShuffledKeys(raw_keys);
   ssize_t i = 0;
   for (auto _ : s) {
+    benchmark::DoNotOptimize(i);
+
     SetWrapperT m;
     for (auto k : keys) {
       bool inserted = m.BenchInsert(k);
@@ -197,12 +199,11 @@ static void BM_SetInsertPtrSeq(benchmark::State& s) {
     }
 
     // Now insert a final random repeated key.
-    bool inserted = m.BenchInsert(shuffled_keys[i]);
+    bool inserted = m.BenchInsert(lookup_keys[i]);
     CARBON_DCHECK(!inserted) << "Must already be in the map!";
 
     // Rotate through the shuffled keys.
-    i = (i + static_cast<ssize_t>(inserted)) & (NumShuffledKeys - 1);
-    benchmark::DoNotOptimize(i);
+    i = (i + static_cast<ssize_t>(inserted)) & (LookupKeysSize - 1);
   }
 
   // It can be easier in some cases to think of this as a key-throughput rate of
