@@ -99,7 +99,7 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
     if (!result) {
       return false;
     }
-    return ValueToBool(result.value()); 
+    return ValueToBool(result.value());
   }
 
   auto BenchInsert(KeyT k, ValueT v) -> bool {
