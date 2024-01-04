@@ -20,6 +20,31 @@ using RawHashtable::GetKeysAndMissKeys;
 using RawHashtable::HitArgs;
 using RawHashtable::SizeArgs;
 
+// Helper to synthesize some value of one of the three types we use as value
+// types.
+template <typename T>
+auto MakeValue2() -> T {
+  if constexpr (std::is_same_v<T, llvm::StringRef>) {
+    return "abc";
+  } else if constexpr (std::is_pointer_v<T>) {
+    static std::remove_pointer_t<T> x;
+    return &x;
+  } else {
+    return 42;
+  }
+}
+
+template <typename T>
+auto ValueToBool(T value) -> bool {
+  if constexpr (std::is_same_v<T, llvm::StringRef>) {
+    return value.size() > 0;
+  } else if constexpr (std::is_pointer_v<T>) {
+    return value != nullptr;
+  } else {
+    return value != 0;
+  }
+}
+
 template <typename MapT>
 struct MapWrapper {
   static constexpr bool IsCarbonMap = false;
@@ -32,13 +57,12 @@ struct MapWrapper {
 
   auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
 
-  auto BenchLookup(KeyT k) -> ValueT* {
+  auto BenchLookup(KeyT k) -> bool {
     auto it = M.find(k);
     if (it == M.end()) {
-      return nullptr;
+      return false;
     }
-    ValueT* v = &it->second;
-    return v;
+    return ValueToBool(it->second);
   }
 
   auto BenchInsert(KeyT k, ValueT v) -> bool {
@@ -68,12 +92,15 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
 
   void CreateView() { MV = M; }
 
-  auto BenchLookup(KeyT k) -> ValueT* {
-    ValueT* v = MV[k];
-    return v;
-  }
-
   auto BenchContains(KeyT k) -> bool { return MV.Contains(k); }
+
+  auto BenchLookup(KeyT k) -> bool {
+    auto result = MV.Lookup(k);
+    if (!result) {
+      return false;
+    }
+    return ValueToBool(result.value()); 
+  }
 
   auto BenchInsert(KeyT k, ValueT v) -> bool {
     auto result = M.Insert(k, v);
@@ -89,20 +116,6 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
 
   auto CountProbedKeys() const -> ssize_t { return M.CountProbedKeys(); }
 };
-
-// Helper to synthesize some value of one of the three types we use as value
-// types.
-template <typename T>
-auto MakeValue2() -> T {
-  if constexpr (std::is_same_v<T, llvm::StringRef>) {
-    return "abc";
-  } else if constexpr (std::is_pointer_v<T>) {
-    static std::remove_pointer_t<T> x;
-    return &x;
-  } else {
-    return 42;
-  }
-}
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, KT, VT)        \
@@ -199,41 +212,13 @@ static void BM_MapLookupHit(benchmark::State& s) {
       // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
 
-      VT* value = m.BenchLookup(lookup_keys[i]);
-      CARBON_DCHECK(value != nullptr);
-      i += static_cast<ssize_t>(value != nullptr);
+      bool result = m.BenchLookup(lookup_keys[i]);
+      CARBON_DCHECK(!result);
+      i += static_cast<ssize_t>(!result);
     }
   }
 }
 MAP_BENCHMARK_ONE_OP(BM_MapLookupHit, HitArgs);
-
-template <typename MapT>
-static void BM_MapLookupMiss(benchmark::State& s) {
-  using MapWrapperT = MapWrapper<MapT>;
-  using KT = typename MapWrapperT::KeyT;
-  using VT = typename MapWrapperT::ValueT;
-  MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(s.range(0));
-  for (auto k : keys) {
-    m.BenchInsert(k, VT());
-  }
-  ssize_t lookup_keys_size = lookup_keys.size();
-
-  m.CreateView();
-  while (s.KeepRunningBatch(lookup_keys_size)) {
-    for (ssize_t i = 0; i < lookup_keys_size;) {
-      // We block optimizing `i` as that has proven both more effective at
-      // blocking the loop from being optimized away and avoiding disruption of
-      // the generated code that we're benchmarking.
-      benchmark::DoNotOptimize(i);
-
-      VT* value = m.BenchLookup(lookup_keys[i]);
-      CARBON_DCHECK(value == nullptr);
-      i += static_cast<ssize_t>(value == nullptr);
-    }
-  }
-}
-MAP_BENCHMARK_ONE_OP(BM_MapLookupMiss, SizeArgs);
 
 template <typename MapT>
 static void BM_MapUpdateHit(benchmark::State& s) {
