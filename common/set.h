@@ -205,20 +205,16 @@ auto SetBase<KT>::Insert(
     typename std::__type_identity<llvm::function_ref<
         auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>>::type insert_cb)
     -> InsertResult {
-  ssize_t index;
-  uint8_t control_byte;
-  std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
-  CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
-  if (LLVM_LIKELY(control_byte == 0)) {
-    return InsertResult(false, this->entries()[index].key);
+  auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
+  CARBON_DCHECK(entry) << "Should always result in a valid index.";
+  if (LLVM_LIKELY(!inserted)) {
+    return InsertResult(false, entry->key);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  uint8_t* byte_ptr = &this->groups_ptr()[index];
-  KeyT* k = &this->entries()[index].key;
+  KeyT* k = &entry->key;
   k = insert_cb(lookup_key, k);
-  *byte_ptr = control_byte;
   return InsertResult(true, *k);
 }
 
