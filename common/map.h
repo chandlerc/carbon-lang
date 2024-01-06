@@ -306,22 +306,20 @@ template <typename LookupKeyT, typename InsertCallbackT>
                                lookup_key, std::declval<void*>(),
                                std::declval<void*>()))>,
         InsertKVResult> {
-  ssize_t index;
-  uint8_t control_byte;
-  std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
-  CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
-  EntryT& entry = this->entries()[index];
+  auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
+  CARBON_DCHECK(entry) << "Should always result in a valid index.";
+  // EntryT& entry = this->entries()[index];
 
-  if (LLVM_LIKELY(control_byte == 0)) {
-    return InsertKVResult(false, entry.key, entry.value);
+  if (LLVM_LIKELY(!inserted)) {
+    return InsertKVResult(false, entry->key, entry->value);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
   KeyT* k;
   ValueT* v;
-  std::tie(k, v) = insert_cb(lookup_key, &entry.key, &entry.value);
-  this->groups_ptr()[index] = control_byte;
+  std::tie(k, v) = insert_cb(lookup_key, &entry->key, &entry->value);
+  // this->groups_ptr()[index] = control_byte;
   return InsertKVResult(true, *k, *v);
 }
 
@@ -385,15 +383,13 @@ template <typename LookupKeyT, typename InsertCallbackT,
                                std::declval<KeyT&>(),
                                std::declval<ValueT&>()))>,
         InsertKVResult> {
-  ssize_t index;
-  uint8_t control_byte;
-  std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
-  CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
-  EntryT& entry = this->entries()[index];
+  auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
+  CARBON_DCHECK(entry) << "Should always result in a valid index.";
+  // EntryT& entry = this->entries()[index];
 
-  if (LLVM_LIKELY(control_byte == 0)) {
-    KeyT* k = &entry.key;
-    ValueT* v = &entry.value;
+  if (LLVM_LIKELY(!inserted)) {
+    KeyT* k = &entry->key;
+    ValueT* v = &entry->value;
     std::tie(k, v) = update_cb(*k, *v);
     return InsertKVResult(false, *k, *v);
   }
@@ -402,8 +398,8 @@ template <typename LookupKeyT, typename InsertCallbackT,
       << "Growth budget shouldn't have gone negative!";
   KeyT* k;
   ValueT* v;
-  std::tie(k, v) = insert_cb(lookup_key, &entry.key, &entry.value);
-  this->groups_ptr()[index] = control_byte;
+  std::tie(k, v) = insert_cb(lookup_key, &entry->key, &entry->value);
+  // this->groups_ptr()[index] = control_byte;
   return InsertKVResult(true, *k, *v);
 }
 

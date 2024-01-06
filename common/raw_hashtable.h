@@ -721,17 +721,15 @@ class RawHashtableBase {
   void Init(ssize_t init_size, Storage* init_storage);
 
   template <typename LookupKeyT>
-  auto InsertIntoEmptyIndex(LookupKeyT lookup_key)
-      -> std::pair<ssize_t, uint8_t>;
+  auto InsertIntoEmptyIndex(LookupKeyT lookup_key) -> EntryT*;
 
   template <typename LookupKeyT>
   auto EraseKey(LookupKeyT lookup_key) -> ssize_t;
 
   template <typename LookupKeyT>
-  auto GrowRehashAndInsertIndex(LookupKeyT lookup_key)
-      -> std::pair<ssize_t, uint8_t>;
+  auto GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> EntryT*;
   template <typename LookupKeyT>
-  auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t>;
+  auto InsertIndexHashed(LookupKeyT lookup_key) -> std::pair<EntryT*, bool>;
 
   auto ClearImpl() -> void;
   auto DestroyImpl() -> void;
@@ -913,11 +911,12 @@ template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 [[clang::noinline]] auto
 RawHashtableBase<InputKeyT, InputValueT>::InsertIntoEmptyIndex(
-    LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
-  uint8_t* groups = groups_ptr();
+    LookupKeyT lookup_key) -> EntryT* {
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
   uint8_t control_byte = ComputeControlByte(tag);
+  uint8_t* groups = groups_ptr();
+  EntryT* local_entries = entries();
 
   for (ProbeSequence s(hash_index, size());; s.step()) {
     ssize_t group_index = s.getIndex();
@@ -925,7 +924,8 @@ RawHashtableBase<InputKeyT, InputValueT>::InsertIntoEmptyIndex(
 
     if (auto empty_matched_range = g.MatchEmpty()) {
       ssize_t index = group_index + *empty_matched_range.begin();
-      return {index, control_byte};
+      groups[index] = control_byte;
+      return &local_entries[index];
     }
 
     // Otherwise we continue probing.
@@ -998,7 +998,7 @@ template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 [[clang::noinline]] auto
 RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
-    LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
+    LookupKeyT lookup_key) -> EntryT* {
   // We collect the probed elements in a small vector for re-insertion. It is
   // tempting to reuse the already allocated storage, but doing so appears to
   // be a (very slight) performance regression. These are relatively rare and
@@ -1156,10 +1156,8 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     // We may end up needing to do a sequence of re-inserts, swapping out keys
     // and values each time, so we enter a loop here and break out of it for the
     // simple cases of re-inserting into a genuinely empty slot.
-    auto [new_index, control_byte] =
-        this->InsertIntoEmptyIndex(old_entries[old_index].key);
-    old_entries[old_index].Move(new_entries[new_index]);
-    new_groups[new_index] = control_byte;
+    EntryT* new_entry = this->InsertIntoEmptyIndex(old_entries[old_index].key);
+    old_entries[old_index].Move(*new_entry);
   }
   CARBON_DCHECK(count ==
                 (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
@@ -1196,11 +1194,11 @@ template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 //[[clang::noinline]]
 auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
-    LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
+    LookupKeyT lookup_key) -> std::pair<EntryT*, bool> {
   if (LLVM_UNLIKELY(this->size() == 0)) {
     this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
     --this->growth_budget_;
-    return this->InsertIntoEmptyIndex(lookup_key);
+    return {this->InsertIntoEmptyIndex(lookup_key), true};
   }
 
   uint8_t* groups = this->groups_ptr();
@@ -1211,19 +1209,20 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
 
   // We re-purpose the empty control byte to signal no insert is needed to the
   // caller. This is guaranteed to not be a control byte we're inserting.
-  constexpr uint8_t NoInsertNeeded = Group::Empty;
+  // constexpr uint8_t NoInsertNeeded = Group::Empty;
 
   ssize_t group_with_deleted_index;
   Group::MatchRange deleted_matched_range = {};
 
-  auto return_insert_at_index =
-      [&](ssize_t index) -> std::pair<ssize_t, uint8_t> {
+  EntryT* local_entries = this->entries();
+
+  auto return_insert_at_index = [&](ssize_t index) -> std::pair<EntryT*, bool> {
     // We'll need to insert at this index so set the control group byte to the
     // proper value.
-    return {index, control_byte};
+    groups[index] = control_byte;
+    return {&local_entries[index], true};
   };
 
-  EntryT* local_entries = this->entries();
   for (ProbeSequence s(hash_index, this->size());; s.step()) {
     ssize_t group_index = s.getIndex();
     auto g = Group::Load(groups, group_index);
@@ -1236,7 +1235,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
       do {
         ssize_t index = group_index + *byte_it;
         if (LLVM_LIKELY(local_entries[index].key == lookup_key)) {
-          return {index, NoInsertNeeded};
+          return {&local_entries[index], false};
         }
         ++byte_it;
       } while (LLVM_UNLIKELY(byte_it != byte_end));
@@ -1270,7 +1269,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     // empty slot. Without the growth budget we'll have to completely rehash and
     // so we can just bail here.
     if (LLVM_UNLIKELY(this->growth_budget_ == 0)) {
-      return this->GrowRehashAndInsertIndex(lookup_key);
+      return {this->GrowRehashAndInsertIndex(lookup_key), true};
     }
 
     --this->growth_budget_;
