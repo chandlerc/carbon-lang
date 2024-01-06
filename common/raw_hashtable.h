@@ -629,7 +629,7 @@ class RawHashtableViewBase {
   }
 
   template <typename LookupKeyT>
-  auto LookupIndexHashed(LookupKeyT lookup_key) const -> ssize_t;
+  auto LookupIndexHashed(LookupKeyT lookup_key) const -> EntryT*;
 
   template <typename IndexCallbackT, typename GroupCallbackT>
   void ForEachIndex(IndexCallbackT index_callback,
@@ -724,7 +724,7 @@ class RawHashtableBase {
   auto InsertIntoEmptyIndex(LookupKeyT lookup_key) -> EntryT*;
 
   template <typename LookupKeyT>
-  auto EraseKey(LookupKeyT lookup_key) -> ssize_t;
+  auto EraseKey(LookupKeyT lookup_key) -> bool;
 
   template <typename LookupKeyT>
   auto GrowRehashAndInsertIndex(LookupKeyT lookup_key) -> EntryT*;
@@ -819,16 +819,15 @@ inline auto ComputeControlByte(size_t tag) -> uint8_t {
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
-    LookupKeyT lookup_key) const -> ssize_t {
+    LookupKeyT lookup_key) const -> EntryT* {
   ssize_t local_size = size();
   if (LLVM_UNLIKELY(local_size == 0)) {
-    return -1;
+    return nullptr;
   }
   uint8_t* groups = groups_ptr();
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
   uint8_t control_byte = ComputeControlByte(tag);
-  // ssize_t hash_index = ComputeHashIndex(hash, groups);
 
   EntryT* local_entries = entries();
   ProbeSequence s(hash_index, local_size);
@@ -841,9 +840,10 @@ auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
       auto byte_end = control_byte_matched_range.end();
       do {
         ssize_t index = group_index + *byte_it;
-        if (LLVM_LIKELY(local_entries[index].key == lookup_key)) {
-          __builtin_assume(index >= 0);
-          return index;
+        EntryT* entry = &local_entries[index];
+        if (LLVM_LIKELY(entry->key == lookup_key)) {
+          __builtin_assume(entry != nullptr);
+          return entry;
         }
         ++byte_it;
       } while (LLVM_UNLIKELY(byte_it != byte_end));
@@ -853,7 +853,7 @@ auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
     // empty slots and we're done probing.
     auto empty_byte_matched_range = g.MatchEmpty();
     if (LLVM_LIKELY(empty_byte_matched_range)) {
-      return -1;
+      return nullptr;
     }
 
     s.step();
@@ -957,10 +957,10 @@ void RawHashtableBase<InputKeyT, InputValueT>::Init(ssize_t init_size,
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 auto RawHashtableBase<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
-    -> ssize_t {
-  ssize_t index = impl_view_.LookupIndexHashed(lookup_key);
-  if (index < 0) {
-    return index;
+    -> bool {
+  EntryT* entry = impl_view_.LookupIndexHashed(lookup_key);
+  if (!entry) {
+    return false;
   }
 
   // If there are empty slots in this group then nothing will probe past this
@@ -972,6 +972,8 @@ auto RawHashtableBase<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
   // If we mark the slot as empty, we'll also need to increase the growth
   // budget.
   uint8_t* groups = this->groups_ptr();
+  EntryT* local_entries = entries();
+  ssize_t index = entry - local_entries;
   ssize_t group_index = index & ~GroupMask;
   auto g = Group::Load(groups, group_index);
   auto empty_matched_range = g.MatchEmpty();
@@ -983,10 +985,10 @@ auto RawHashtableBase<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
   }
 
   if constexpr (!EntryT::IsTriviallyDestructible) {
-    this->entries()[index].Destroy();
+    entry->Destroy();
   }
 
-  return index;
+  return true;
 }
 
 template <typename InputKeyT, typename InputValueT>

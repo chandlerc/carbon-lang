@@ -229,20 +229,19 @@ template <typename LookupKeyT>
 auto MapView<InputKeyT, InputValueT>::Contains(LookupKeyT lookup_key) const
     -> bool {
   RawHashtable::Prefetch(this->storage_);
-  return this->LookupIndexHashed(lookup_key) >= 0;
+  return this->LookupIndexHashed(lookup_key) != nullptr;
 }
 
 template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::Lookup(LookupKeyT lookup_key) const -> LookupKVResult {
   RawHashtable::Prefetch(this->storage_);
-  ssize_t index = this->LookupIndexHashed(lookup_key);
-  if (index < 0) {
+  EntryT* entry = this->LookupIndexHashed(lookup_key);
+  if (!entry) {
     return LookupKVResult(nullptr, nullptr);
   }
 
-  EntryT& entry = this->entries()[index];
-  return LookupKVResult(&entry.key, &entry.value);
+  return LookupKVResult(&entry->key, &entry->value);
 }
 
 template <typename KT, typename VT>
@@ -406,7 +405,7 @@ template <typename LookupKeyT, typename InsertCallbackT,
 template <typename KeyT, typename ValueT>
 template <typename LookupKeyT>
 auto MapBase<KeyT, ValueT>::Erase(LookupKeyT lookup_key) -> bool {
-  return this->EraseKey(lookup_key) >= 0;
+  return this->EraseKey(lookup_key);
 }
 
 template <typename KeyT, typename ValueT>

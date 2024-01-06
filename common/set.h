@@ -5,8 +5,6 @@
 #ifndef CARBON_COMMON_SET_H_
 #define CARBON_COMMON_SET_H_
 
-#include <tuple>
-
 #include "common/check.h"
 #include "common/raw_hashtable.h"
 #include "llvm/Support/Compiler.h"
@@ -175,19 +173,19 @@ template <typename InputKeyT>
 template <typename LookupKeyT>
 auto SetView<InputKeyT>::Contains(LookupKeyT lookup_key) const -> bool {
   RawHashtable::Prefetch(this->storage_);
-  return this->LookupIndexHashed(lookup_key) >= 0;
+  return this->LookupIndexHashed(lookup_key) != nullptr;
 }
 
 template <typename KT>
 template <typename LookupKeyT>
 auto SetView<KT>::Lookup(LookupKeyT lookup_key) const -> LookupResult {
   RawHashtable::Prefetch(this->storage_);
-  ssize_t index = this->LookupIndexHashed(lookup_key);
-  if (index < 0) {
+  EntryT* entry = this->LookupIndexHashed(lookup_key);
+  if (!entry) {
     return LookupResult();
   }
 
-  return LookupResult(&this->entries()[index].key);
+  return LookupResult(&entry->key);
 }
 
 template <typename KT>
