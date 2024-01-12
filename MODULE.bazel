@@ -22,7 +22,6 @@ http_archive = use_repo_rule(
 )
 
 bazel_dep(name = "bazel_skylib", version = "1.5.0")
-
 bazel_dep(
     name = "abseil-cpp",
     version = "20230802.0",
@@ -34,8 +33,8 @@ bazel_dep(
 archive_override(
     module_name = "abseil-cpp",
     integrity = "sha256-VsCGJVyQL8Zwn6ONUvnNNXQUA2ddUi3FVgI9fLKy5hk=",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/41a2a2555588253dce0e10db4c545463c4a64731.zip"],
     strip_prefix = "abseil-cpp-41a2a2555588253dce0e10db4c545463c4a64731",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/41a2a2555588253dce0e10db4c545463c4a64731.zip"],
 )
 
 bazel_dep(

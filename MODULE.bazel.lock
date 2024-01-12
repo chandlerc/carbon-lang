@@ -1,6 +1,6 @@
 {
   "lockFileVersion": 3,
-  "moduleFileHash": "b699a3ab06fc0d2cf934d0d52d7c4d89980b8b81bf48677f3c391c6549da5dc0",
+  "moduleFileHash": "b23bdf583acdfe56e27c4694d7822c31680669bd1203f0fd6e2d6a76c04394b5",
   "flags": {
     "cmdRegistries": [
       "https://bcr.bazel.build/"
@@ -56,7 +56,7 @@
               "devDependency": false,
               "location": {
                 "file": "@@//:MODULE.bazel",
-                "line": 69,
+                "line": 68,
                 "column": 13
               }
             },
@@ -79,7 +79,7 @@
               "devDependency": false,
               "location": {
                 "file": "@@//:MODULE.bazel",
-                "line": 79,
+                "line": 78,
                 "column": 13
               }
             },
@@ -105,7 +105,7 @@
               "devDependency": false,
               "location": {
                 "file": "@@//:MODULE.bazel",
-                "line": 119,
+                "line": 118,
                 "column": 13
               }
             }
@@ -119,7 +119,7 @@
           "usingModule": "<root>",
           "location": {
             "file": "@@//:MODULE.bazel",
-            "line": 88,
+            "line": 87,
             "column": 35
           },
           "imports": {
@@ -136,7 +136,7 @@
           "usingModule": "<root>",
           "location": {
             "file": "@@//:MODULE.bazel",
-            "line": 134,
+            "line": 133,
             "column": 29
           },
           "imports": {
@@ -153,7 +153,7 @@
           "usingModule": "<root>",
           "location": {
             "file": "@@//:MODULE.bazel",
-            "line": 146,
+            "line": 145,
             "column": 23
           },
           "imports": {
@@ -169,7 +169,7 @@
               "devDependency": false,
               "location": {
                 "file": "@@//:MODULE.bazel",
-                "line": 147,
+                "line": 146,
                 "column": 17
               }
             }
@@ -183,7 +183,7 @@
           "usingModule": "<root>",
           "location": {
             "file": "@@//:MODULE.bazel",
-            "line": 153,
+            "line": 152,
             "column": 20
           },
           "imports": {
@@ -201,7 +201,7 @@
               "devDependency": false,
               "location": {
                 "file": "@@//:MODULE.bazel",
-                "line": 154,
+                "line": 153,
                 "column": 10
               }
             }
