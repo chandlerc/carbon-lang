@@ -256,6 +256,7 @@ cc_library(
         ":raw_hashtable",
         ":set",
         "@com_github_google_benchmark//:benchmark",
+        "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/random",
         "@llvm-project//llvm:Support",

@@ -9,9 +9,9 @@
 #include <sys/types.h>
 
 #include <map>
-#include <set>
 #include <vector>
 
+#include "absl/base/no_destructor.h"
 #include "absl/random/random.h"
 #include "common/check.h"
 #include "common/hashing.h"
@@ -52,15 +52,16 @@ auto GetKeysImpl(ssize_t size) -> llvm::ArrayRef<T> {
   // keys in that sequence to end up with a random sequence of keys. We store
   // each of these shuffled sequences in a map to avoid repeatedly computing
   // these on each benchmark run.
-  static std::map<ssize_t, std::vector<T>> shuffled_keys_by_size;
+  static absl::NoDestructor<std::map<ssize_t, std::vector<T>>>
+      shuffled_keys_by_size;
 
-  std::vector<T>& shuffled_keys = shuffled_keys_by_size[size];
-  if (static_cast<ssize_t>(shuffled_keys.size()) != size) {
+  std::vector<T>& shuffled_keys = (*shuffled_keys_by_size)[size];
+  if (shuffled_keys.empty()) {
     llvm::ArrayRef<T> raw_keys = BuildRawKeys<T>();
     shuffled_keys.assign(raw_keys.begin(), raw_keys.begin() + size);
     std::shuffle(shuffled_keys.begin(), shuffled_keys.end(), absl::BitGen());
-    CARBON_CHECK(static_cast<ssize_t>(shuffled_keys.size()) == size);
   }
+  CARBON_CHECK(static_cast<ssize_t>(shuffled_keys.size()) == size);
 
   return llvm::ArrayRef(shuffled_keys);
 }
@@ -74,22 +75,22 @@ auto GetMissKeysImpl() -> llvm::ArrayRef<T> {
   // keys in that sequence to end up with a random sequence of keys. We store
   // each of these shuffled sequences in a map to avoid repeatedly computing
   // these on each benchmark run.
-  static std::vector<T> miss_keys = [] {
+  static absl::NoDestructor<std::vector<T>> miss_keys([] {
     std::vector<T> keys;
     llvm::ArrayRef<T> raw_keys = BuildRawKeys<T>().take_back(NumOtherKeys);
     keys.assign(raw_keys.begin(), raw_keys.end());
     std::shuffle(keys.begin(), keys.end(), absl::BitGen());
     return keys;
-  }();
+  }());
 
-  return llvm::ArrayRef(miss_keys);
+  return llvm::ArrayRef(*miss_keys);
 }
 
 template <typename T>
 auto GetKeysAndMissKeys(ssize_t size)
     -> std::pair<llvm::ArrayRef<T>, llvm::ArrayRef<T>> {
   CARBON_CHECK(size <= MaxNumKeys);
-  return {GetKeysImpl<T>(size), GetMissKeysImpl<T>()};
+  return {BuildRawKeys<T>().slice(0, size), GetMissKeysImpl<T>()};
 }
 
 template <typename T>
@@ -98,9 +99,23 @@ auto GetKeysAndHitKeys(ssize_t size, ssize_t lookup_keys_size)
   CARBON_CHECK(size <= MaxNumKeys);
   CARBON_CHECK(lookup_keys_size <= MaxNumKeys);
 
-  static std::map<ssize_t, std::vector<T>> lookup_keys_by_size;
-  std::vector<T>& lookup_keys = lookup_keys_by_size[size];
-  if (static_cast<ssize_t>(lookup_keys.size()) != lookup_keys_size) {
+  // See if we can just use a run of the keys for the lookup keys. It's tempting
+  // to just extract a subsequence of the shuffled keys, but that can lead to a
+  // skewed distribution of sizes in the lookup keys. Instead, we want to use a
+  // sub-prefix of the underlying keys. We can do this by just re-using the
+  // caching keys implementation.
+  if (lookup_keys_size < size) {
+    return {BuildRawKeys<T>().slice(0, size), GetKeysImpl<T>(lookup_keys_size)};
+  }
+
+  // Otherwise we'll need to build and cache a custom sequence of lookup keys
+  // expanded to have duplicates.
+  static absl::NoDestructor<
+      std::map<std::pair<ssize_t, ssize_t>, std::vector<T>>>
+      expanded_lookup_keys;
+  std::vector<T>& lookup_keys =
+      (*expanded_lookup_keys)[{size, lookup_keys_size}];
+  if (lookup_keys.empty()) {
     llvm::ArrayRef<T> raw_keys = BuildRawKeys<T>();
     lookup_keys.reserve(lookup_keys_size);
     for (ssize_t i : llvm::seq<ssize_t>(0, lookup_keys_size)) {
@@ -108,8 +123,9 @@ auto GetKeysAndHitKeys(ssize_t size, ssize_t lookup_keys_size)
     }
     std::shuffle(lookup_keys.begin(), lookup_keys.end(), absl::BitGen());
   }
+  CARBON_CHECK(static_cast<ssize_t>(lookup_keys.size()) == lookup_keys_size);
 
-  return {GetKeysImpl<T>(size), llvm::ArrayRef(lookup_keys)};
+  return {BuildRawKeys<T>().slice(0, size), llvm::ArrayRef(lookup_keys)};
 }
 
 inline auto SizeArgs(benchmark::internal::Benchmark* b) -> void {
