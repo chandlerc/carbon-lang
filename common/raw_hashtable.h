@@ -81,7 +81,6 @@ class BitIndexRange {
       return mask_ == rhs.mask_;
     }
 
-
     auto operator*() -> ssize_t& {
       CARBON_DCHECK(mask_ != 0) << "Cannot get an index from a zero mask!";
       __builtin_assume(mask_ != 0);
@@ -276,7 +275,8 @@ struct NeonGroup {
   }
 
   auto SetEmpty(uint8_t byte, ssize_t index) -> void {
-    CARBON_DCHECK((byte_int & (static_cast<uint64_t>(0xff) << (index << 3))) == 0);
+    CARBON_DCHECK((byte_int & (static_cast<uint64_t>(0xff) << (index << 3))) ==
+                  0);
     byte_int |= static_cast<uint64_t>(byte) << (index << 3);
   }
 
@@ -1164,11 +1164,11 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   }
 #ifndef NDEBUG
   CARBON_DCHECK(debug_empty_count == (old_size * GroupSize - count));
-  ssize_t new_empty_count = std::accumulate(
-      new_groups.begin(), new_groups.end(), 0,
-      [](ssize_t init, const GroupT& g) {
-        return init + llvm::count(g.metadata, Group::Empty);
-      });
+  ssize_t new_empty_count =
+      std::accumulate(new_groups.begin(), new_groups.end(), 0,
+                      [](ssize_t init, const GroupT& g) {
+                        return init + llvm::count(g.metadata, Group::Empty);
+                      });
   CARBON_DCHECK((count - static_cast<ssize_t>(probed_indices.size())) ==
                 (new_size * GroupSize - new_empty_count));
   CARBON_DCHECK(new_empty_count ==
@@ -1185,11 +1185,11 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     old_entry->Move(*new_entry);
   }
 #ifndef NDEBUG
-  new_empty_count = std::accumulate(
-      new_groups.begin(), new_groups.end(), 0,
-      [](ssize_t init, const GroupT& g) {
-        return init + llvm::count(g.metadata, Group::Empty);
-      });
+  new_empty_count =
+      std::accumulate(new_groups.begin(), new_groups.end(), 0,
+                      [](ssize_t init, const GroupT& g) {
+                        return init + llvm::count(g.metadata, Group::Empty);
+                      });
   CARBON_DCHECK(count == (new_size * GroupSize - new_empty_count));
 #endif
   this->growth_budget_ -= count;
@@ -1210,7 +1210,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
   // return that index for use.
   --this->growth_budget_;
   return this->InsertIntoEmptyIndex(lookup_key);
-  }
+}
 
 // Tries to insert the given lookup key into the map. Returns three pieces of
 // data compressed into two registers (in order to avoid an in-memory return).
