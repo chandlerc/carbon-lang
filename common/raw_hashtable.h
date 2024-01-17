@@ -83,14 +83,19 @@ class BitIndexRange {
     auto operator*() -> ssize_t& {
       CARBON_DCHECK(mask_ != 0) << "Cannot get an index from a zero mask!";
       __builtin_assume(mask_ != 0);
-      ssize_t bit_count = static_cast<size_t>(llvm::countr_zero(mask_));
+      index_ = static_cast<size_t>(llvm::countr_zero(mask_));
       if constexpr (Shift > 0) {
-        CARBON_DCHECK((bit_count & ((static_cast<MaskT>(1) << Shift) - 1)) ==
+        // We need to shift the index. However, we ensure that only zeros are
+        // shifted off here and leave an optimizer hint about that. The index
+        // will often be scaled by the user of this and we want that scale to
+        // fold with the right shift whenever it can. That means we need the
+        // optimizer to know there weren't low one-bites being shifted off here.
+        CARBON_DCHECK((index_ & ((static_cast<MaskT>(1) << Shift) - 1)) ==
                       0);
-        __builtin_assume((bit_count & ((static_cast<MaskT>(1) << Shift) - 1)) ==
+        __builtin_assume((index_ & ((static_cast<MaskT>(1) << Shift) - 1)) ==
                          0);
+        index_ >>= Shift;
       }
-      index_ = bit_count >> Shift;
       return index_;
     }
 
