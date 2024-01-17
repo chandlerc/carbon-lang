@@ -1230,8 +1230,8 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
 // that seems to result in good code.
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-[[clang::noinline]] auto
-RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
+//[[clang::noinline]]
+auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     LookupKeyT lookup_key) -> std::pair<ssize_t, uint8_t> {
   if (LLVM_UNLIKELY(this->size() == 0)) {
     this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
