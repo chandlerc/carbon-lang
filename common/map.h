@@ -96,16 +96,17 @@ class MapBase
    public:
     InsertKVResult() = default;
     explicit InsertKVResult(bool inserted, KeyT& key, ValueT& value)
-        : key_and_inserted_(&key, inserted), value_(&value) {}
+        : key_(&key), value_(&value), inserted_(inserted) {}
 
-    auto is_inserted() const -> bool { return key_and_inserted_.getInt(); }
+    auto is_inserted() const -> bool { return inserted_; }
 
-    auto key() const -> KeyT& { return *key_and_inserted_.getPointer(); }
+    auto key() const -> KeyT& { return *key_; }
     auto value() const -> ValueT& { return *value_; }
 
    private:
-    llvm::PointerIntPair<KeyT*, 1, bool> key_and_inserted_;
+    KeyT* key_;
     ValueT* value_;
+    bool inserted_;
   };
 
   // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
