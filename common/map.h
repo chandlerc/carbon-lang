@@ -12,7 +12,6 @@
 
 #include "common/check.h"
 #include "common/raw_hashtable.h"
-#include "llvm/ADT/PointerIntPair.h"
 #include "llvm/Support/Compiler.h"
 
 namespace Carbon {
@@ -133,88 +132,50 @@ class MapBase
   }
 
   template <typename LookupKeyT>
-  auto Insert(
-      LookupKeyT lookup_key,
-      typename std::__type_identity<llvm::function_ref<
-          std::pair<KeyT*, ValueT*>(LookupKeyT lookup_key, void* key_storage,
-                                    void* value_storage)>>::type insert_cb)
-      -> InsertKVResult;
-
-  template <typename LookupKeyT>
-  auto Insert(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult {
-    return Insert(lookup_key,
-                  [&new_v](LookupKeyT lookup_key, void* key_storage,
-                           void* value_storage) -> std::pair<KeyT*, ValueT*> {
-                    KeyT* k = new (key_storage) KeyT(lookup_key);
-                    auto* v = new (value_storage) ValueT(std::move(new_v));
-                    return {k, v};
-                  });
-  }
+  auto Insert(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
 
   template <typename LookupKeyT, typename ValueCallbackT>
-  auto Insert(LookupKeyT lookup_key, ValueCallbackT value_cb) ->
-      typename std::enable_if<
-          !std::is_same<ValueT, ValueCallbackT>::value &&
-              std::is_same<ValueT,
-                           decltype(std::declval<ValueCallbackT>()())>::value,
+  auto
+  Insert(LookupKeyT lookup_key, ValueCallbackT value_cb) -> std::enable_if_t<
+      !std::is_same_v<ValueT, ValueCallbackT> &&
+          std::is_same_v<ValueT, decltype(std::declval<ValueCallbackT>()())>,
+      InsertKVResult>;
 
-          InsertKVResult>::type {
-    return Insert(
-        lookup_key,
-        [&value_cb](LookupKeyT lookup_key, void* key_storage,
-                    void* value_storage) -> std::pair<KeyT*, ValueT*> {
-          KeyT* k = new (key_storage) KeyT(lookup_key);
-          auto* v = new (value_storage) ValueT(value_cb());
-          return {k, v};
-        });
-  }
+  template <typename LookupKeyT, typename InsertCallbackT>
+  auto Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
+      -> std::enable_if_t<
+          !std::is_same_v<ValueT, InsertCallbackT> &&
+              std::is_same_v<std::pair<KeyT*, ValueT*>,
+                             decltype(std::declval<InsertCallbackT>()(
+                                 lookup_key, std::declval<void*>(),
+                                 std::declval<void*>()))>,
+          InsertKVResult>;
 
   template <typename LookupKeyT>
-  auto Update(
-      LookupKeyT lookup_key,
-      typename std::__type_identity<llvm::function_ref<
-          std::pair<KeyT*, ValueT*>(LookupKeyT lookup_key, void* key_storage,
-                                    void* value_storage)>>::type insert_cb,
-      llvm::function_ref<ValueT&(KeyT& key, ValueT& value)> update_cb)
-      -> InsertKVResult;
+  auto Update(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
 
   template <typename LookupKeyT, typename ValueCallbackT>
-  auto Update(LookupKeyT lookup_key, ValueCallbackT value_cb) ->
-      typename std::enable_if<
-          !std::is_same<ValueT, ValueCallbackT>::value &&
-              std::is_same<ValueT,
-                           decltype(std::declval<ValueCallbackT>()())>::value,
+  auto
+  Update(LookupKeyT lookup_key, ValueCallbackT value_cb) -> std::enable_if_t<
+      !std::is_same_v<ValueT, ValueCallbackT> &&
+          std::is_same_v<ValueT, decltype(std::declval<ValueCallbackT>()())>,
+      InsertKVResult>;
 
-          InsertKVResult>::type {
-    return Update(
-        lookup_key,
-        [&value_cb](LookupKeyT lookup_key, void* key_storage,
-                    void* value_storage) -> std::pair<KeyT*, ValueT*> {
-          KeyT* k = new (key_storage) KeyT(lookup_key);
-          auto* v = new (value_storage) ValueT(value_cb());
-          return {k, v};
-        },
-        [&value_cb](KeyT& /*Key*/, ValueT& value) -> ValueT& {
-          value.~ValueT();
-          return *new (&value) ValueT(value_cb());
-        });
-  }
-
-  template <typename LookupKeyT>
-  auto Update(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult {
-    return Update(
-        lookup_key,
-        [&new_v](LookupKeyT lookup_key, void* key_storage,
-                 void* value_storage) -> std::pair<KeyT*, ValueT*> {
-          KeyT* k = new (key_storage) KeyT(lookup_key);
-          auto* v = new (value_storage) ValueT(std::move(new_v));
-          return {k, v};
-        },
-        [&new_v](KeyT& /*Key*/, ValueT& value) -> ValueT& {
-          value.~ValueT();
-          return *new (&value) ValueT(std::move(new_v));
-        });
-  }
+  template <typename LookupKeyT, typename InsertCallbackT,
+            typename UpdateCallbackT>
+  auto Update(LookupKeyT lookup_key, InsertCallbackT insert_cb,
+              UpdateCallbackT update_cb)
+      -> std::enable_if_t<
+          !std::is_same_v<ValueT, InsertCallbackT> &&
+              std::is_same_v<std::pair<KeyT*, ValueT*>,
+                             decltype(std::declval<InsertCallbackT>()(
+                                 lookup_key, std::declval<void*>(),
+                                 std::declval<void*>()))> &&
+              std::is_same_v<std::pair<KeyT*, ValueT*>,
+                             decltype(std::declval<UpdateCallbackT>()(
+                                 std::declval<KeyT&>(),
+                                 std::declval<ValueT&>()))>,
+          InsertKVResult>;
 
   template <typename LookupKeyT>
   auto Erase(LookupKeyT lookup_key) -> bool;
@@ -305,11 +266,47 @@ void MapView<KT, VT>::ForEach(CallbackT callback) {
 
 template <typename KT, typename VT>
 template <typename LookupKeyT>
-auto MapBase<KT, VT>::Insert(
-    LookupKeyT lookup_key,
-    typename std::__type_identity<llvm::function_ref<std::pair<KeyT*, ValueT*>(
-        LookupKeyT lookup_key, void* key_storage, void* value_storage)>>::type
-        insert_cb) -> InsertKVResult {
+[[clang::always_inline]] auto MapBase<KT, VT>::Insert(LookupKeyT lookup_key,
+                                                      ValueT new_v)
+    -> InsertKVResult {
+  return Insert(lookup_key,
+                [&new_v](LookupKeyT lookup_key, void* key_storage,
+                         void* value_storage) -> std::pair<KeyT*, ValueT*> {
+                  KeyT* k = new (key_storage) KeyT(lookup_key);
+                  auto* v = new (value_storage) ValueT(std::move(new_v));
+                  return {k, v};
+                });
+}
+
+template <typename KT, typename VT>
+template <typename LookupKeyT, typename ValueCallbackT>
+[[clang::always_inline]] auto MapBase<KT, VT>::Insert(LookupKeyT lookup_key,
+                                                      ValueCallbackT value_cb)
+    -> std::enable_if_t<
+        !std::is_same_v<ValueT, ValueCallbackT> &&
+            std::is_same_v<ValueT, decltype(std::declval<ValueCallbackT>()())>,
+
+        InsertKVResult> {
+  return Insert(lookup_key,
+                [&value_cb](LookupKeyT lookup_key, void* key_storage,
+                            void* value_storage) -> std::pair<KeyT*, ValueT*> {
+                  KeyT* k = new (key_storage) KeyT(lookup_key);
+                  auto* v = new (value_storage) ValueT(value_cb());
+                  return {k, v};
+                });
+}
+
+template <typename KT, typename VT>
+template <typename LookupKeyT, typename InsertCallbackT>
+[[clang::always_inline]] auto MapBase<KT, VT>::Insert(LookupKeyT lookup_key,
+                                                      InsertCallbackT insert_cb)
+    -> std::enable_if_t<
+        !std::is_same_v<ValueT, InsertCallbackT> &&
+            std::is_same_v<std::pair<KeyT*, ValueT*>,
+                           decltype(std::declval<InsertCallbackT>()(
+                               lookup_key, std::declval<void*>(),
+                               std::declval<void*>()))>,
+        InsertKVResult> {
   ssize_t index;
   uint8_t control_byte;
   std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
@@ -330,21 +327,73 @@ auto MapBase<KT, VT>::Insert(
 
 template <typename KT, typename VT>
 template <typename LookupKeyT>
-auto MapBase<KT, VT>::Update(
-    LookupKeyT lookup_key,
-    typename std::__type_identity<llvm::function_ref<std::pair<KeyT*, ValueT*>(
-        LookupKeyT lookup_key, void* key_storage, void* value_storage)>>::type
-        insert_cb,
-    llvm::function_ref<ValueT&(KeyT& key, ValueT& value)> update_cb)
+[[clang::always_inline]] auto MapBase<KT, VT>::Update(LookupKeyT lookup_key,
+                                                      ValueT new_v)
     -> InsertKVResult {
+  return Update(
+      lookup_key,
+      [&new_v](LookupKeyT lookup_key, void* key_storage,
+               void* value_storage) -> std::pair<KeyT*, ValueT*> {
+        auto* k = new (key_storage) KeyT(lookup_key);
+        auto* v = new (value_storage) ValueT(std::move(new_v));
+        return {k, v};
+      },
+      [&new_v](KeyT& key, ValueT& value) -> std::pair<KeyT*, ValueT*> {
+        value.~ValueT();
+        auto* v = new (&value) ValueT(std::move(new_v));
+        return {&key, v};
+      });
+}
+
+template <typename KT, typename VT>
+template <typename LookupKeyT, typename ValueCallbackT>
+[[clang::always_inline]] auto MapBase<KT, VT>::Update(LookupKeyT lookup_key,
+                                                      ValueCallbackT value_cb)
+    -> std::enable_if_t<
+        !std::is_same_v<ValueT, ValueCallbackT> &&
+            std::is_same_v<ValueT, decltype(std::declval<ValueCallbackT>()())>,
+        InsertKVResult> {
+  return Update(
+      lookup_key,
+      [&value_cb](LookupKeyT lookup_key, void* key_storage,
+                  void* value_storage) -> std::pair<KeyT*, ValueT*> {
+        auto* k = new (key_storage) KeyT(lookup_key);
+        auto* v = new (value_storage) ValueT(value_cb());
+        return {k, v};
+      },
+      [&value_cb](KeyT& key, ValueT& value) -> std::pair<KeyT*, ValueT*> {
+        value.~ValueT();
+        auto* v = new (&value) ValueT(value_cb());
+        return {&key, v};
+      });
+}
+
+template <typename KT, typename VT>
+template <typename LookupKeyT, typename InsertCallbackT,
+          typename UpdateCallbackT>
+[[clang::always_inline]] auto MapBase<KT, VT>::Update(LookupKeyT lookup_key,
+                                                      InsertCallbackT insert_cb,
+                                                      UpdateCallbackT update_cb)
+    -> std::enable_if_t<
+        !std::is_same_v<ValueT, InsertCallbackT> &&
+            std::is_same_v<std::pair<KeyT*, ValueT*>,
+                           decltype(std::declval<InsertCallbackT>()(
+                               lookup_key, std::declval<void*>(),
+                               std::declval<void*>()))> &&
+            std::is_same_v<std::pair<KeyT*, ValueT*>,
+                           decltype(std::declval<UpdateCallbackT>()(
+                               std::declval<KeyT&>(),
+                               std::declval<ValueT&>()))>,
+        InsertKVResult> {
   ssize_t index;
   uint8_t control_byte;
   std::tie(index, control_byte) = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(index >= 0) << "Should always result in a valid index.";
   if (LLVM_LIKELY(control_byte == 0)) {
-    KeyT& k = this->keys_ptr()[index];
-    ValueT& v = update_cb(k, this->values_ptr()[index]);
-    return InsertKVResult(false, k, v);
+    KeyT* k = &this->keys_ptr()[index];
+    ValueT* v = &this->values_ptr()[index];
+    std::tie(k, v) = update_cb(*k, *v);
+    return InsertKVResult(false, *k, *v);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
