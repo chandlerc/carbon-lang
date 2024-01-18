@@ -258,11 +258,11 @@ struct NeonGroup {
     byte_vec = vset_lane_u8(byte, byte_vec, Index);
   }
 
-  auto Match(uint8_t match_byte) const -> UnmaskedMatchRange {
+  auto Match(uint8_t match_byte) const -> MaskedMatchRange {
     auto match_byte_vec = vdup_n_u8(match_byte);
     auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
     uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-    return UnmaskedMatchRange(mask);
+    return MaskedMatchRange(mask & LSBs);
   }
 
   auto MatchEmpty() const -> MaskedMatchRange {
