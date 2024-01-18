@@ -66,7 +66,8 @@ constexpr ssize_t MaxGroupSize = 16;
 // introduce some variation in hashtable ordering.
 extern volatile std::byte global_addr_seed;
 
-template <typename MaskT, int Shift = 0, bool IsPreMasked = true, MaskT ZeroMask = 0>
+template <typename MaskT, int Shift = 0, bool IsPreMasked = true,
+          MaskT ZeroMask = 0>
 class BitIndexRange {
  public:
   class Iterator
@@ -90,8 +91,7 @@ class BitIndexRange {
         // will often be scaled by the user of this and we want that scale to
         // fold with the right shift whenever it can. That means we need the
         // optimizer to know there weren't low one-bites being shifted off here.
-        CARBON_DCHECK((index_ & ((static_cast<MaskT>(1) << Shift) - 1)) ==
-                      0);
+        CARBON_DCHECK((index_ & ((static_cast<MaskT>(1) << Shift) - 1)) == 0);
         __builtin_assume((index_ & ((static_cast<MaskT>(1) << Shift) - 1)) ==
                          0);
         index_ >>= Shift;
@@ -228,8 +228,10 @@ struct NeonGroup {
   static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
   static constexpr uint64_t LSBs = 0x0101'0101'0101'0101ULL;
 
-  using MaskedMatchRange = BitIndexRange<uint64_t, /*Shift=*/3, /*IsPreMasked=*/true>;
-  using UnmaskedMatchRange = BitIndexRange<uint64_t, /*Shift=*/3, /*IsPreMasked=*/false>;
+  using MaskedMatchRange =
+      BitIndexRange<uint64_t, /*Shift=*/3, /*IsPreMasked=*/true>;
+  using UnmaskedMatchRange =
+      BitIndexRange<uint64_t, /*Shift=*/3, /*IsPreMasked=*/false>;
 
   uint8x8_t byte_vec = {};
 
@@ -274,7 +276,7 @@ struct NeonGroup {
     auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
     uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
     return MaskedMatchRange(mask);
-    //return Match(Deleted);
+    // return Match(Deleted);
   }
 
   auto MatchPresent() const -> MaskedMatchRange {
