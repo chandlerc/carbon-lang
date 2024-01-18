@@ -66,7 +66,7 @@ constexpr ssize_t MaxGroupSize = 16;
 // introduce some variation in hashtable ordering.
 extern volatile std::byte global_addr_seed;
 
-template <typename MaskT, int Shift = 0, MaskT ZeroMask = 0>
+template <typename MaskT, int Shift = 0, bool IsPreMasked = true, MaskT ZeroMask = 0>
 class BitIndexRange {
  public:
   class Iterator
@@ -102,6 +102,18 @@ class BitIndexRange {
     auto operator++() -> Iterator& {
       CARBON_DCHECK(mask_ != 0) << "Must not increment past the end!";
       __builtin_assume(mask_ != 0);
+      if constexpr (Shift > 0 && !IsPreMasked) {
+        // If we're shifting the bit indices by some amount there need to be
+        // zero bits between each one. If the mask wasn't pre-masked to exactly
+        // the bit indices in question, we need to here to be able to remove the
+        // least-significant bit index on increment. This lets us avoid
+        // pre-masking when profitable and correct for the *first* bit index.
+        //
+        // The mask should have every 2^Shift bit set.
+        static constexpr uint64_t PreMask =
+            UINT64_MAX / ((1 << (1 << Shift)) - 1);
+        mask_ &= PreMask;
+      }
       mask_ &= (mask_ - 1);
       return *this;
     }
@@ -155,7 +167,8 @@ struct X86Group {
   static constexpr uint8_t Deleted = 1;
 
   using MatchedRange =
-      BitIndexRange<uint32_t, /*Shift=*/0, /*ZeroMask=*/0xFFFF0000>;
+      BitIndexRange<uint32_t, /*Shift=*/0, /*IsPreMasked=*/true,
+                    /*ZeroMask=*/0xFFFF0000>;
 
   __m128i byte_vec = {};
 
@@ -215,7 +228,8 @@ struct NeonGroup {
   static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
   static constexpr uint64_t LSBs = 0x0101'0101'0101'0101ULL;
 
-  using MatchedRange = BitIndexRange<uint64_t, /*Shift=*/3>;
+  using MaskedMatchRange = BitIndexRange<uint64_t, /*Shift=*/3, /*IsPreMasked=*/true>;
+  using UnmaskedMatchRange = BitIndexRange<uint64_t, /*Shift=*/3, /*IsPreMasked=*/false>;
 
   uint8x8_t byte_vec = {};
 
@@ -242,25 +256,31 @@ struct NeonGroup {
     byte_vec = vset_lane_u8(byte, byte_vec, Index);
   }
 
-  auto Match(uint8_t match_byte) const -> MatchedRange {
+  auto Match(uint8_t match_byte) const -> UnmaskedMatchRange {
     auto match_byte_vec = vdup_n_u8(match_byte);
     auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
     uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-    return MatchedRange(mask & LSBs);
+    return UnmaskedMatchRange(mask);
   }
 
-  auto MatchEmpty() const -> MatchedRange {
+  auto MatchEmpty() const -> MaskedMatchRange {
     auto match_byte_cmp_vec = vceqz_u8(byte_vec);
     uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-    return MatchedRange(mask & LSBs);
+    return MaskedMatchRange(mask);
   }
 
-  auto MatchDeleted() const -> MatchedRange { return Match(Deleted); }
+  auto MatchDeleted() const -> MaskedMatchRange {
+    auto match_byte_vec = vdup_n_u8(Deleted);
+    auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
+    uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
+    return MaskedMatchRange(mask);
+    //return Match(Deleted);
+  }
 
-  auto MatchPresent() const -> MatchedRange {
+  auto MatchPresent() const -> MaskedMatchRange {
     // Just directly extract the bytes as the MSB already marks presence.
     uint64_t mask = vreinterpret_u64_u8(byte_vec)[0];
-    return MatchedRange((mask >> 7) & LSBs);
+    return MaskedMatchRange((mask >> 7) & LSBs);
   }
 };
 #endif
@@ -1087,7 +1107,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     uint64_t present_mask = (low_g >> 7) & Group::LSBs;
     low_g &= (low_g >> 7) | ~Group::LSBs;
     uint64_t high_g = low_g;
-    auto present_matched_range = Group::MatchedRange(present_mask);
+    auto present_matched_range = Group::MaskedMatchRange(present_mask);
 #else
     auto g = RawHashtable::Group::Load(old_groups, group_index);
     g.ClearDeleted();
@@ -1250,7 +1270,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
   constexpr uint8_t NoInsertNeeded = Group::Empty;
 
   ssize_t group_with_deleted_index;
-  Group::MatchedRange deleted_matched_range = {};
+  Group::MaskedMatchRange deleted_matched_range = {};
 
   auto return_insert_at_index =
       [&](ssize_t index) -> std::pair<ssize_t, uint8_t> {
