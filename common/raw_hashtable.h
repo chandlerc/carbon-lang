@@ -1091,7 +1091,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     uint64_t present_mask = (low_g >> 7) & Group::LSBs;
     low_g &= (low_g >> 7) | ~Group::LSBs;
     uint64_t high_g = low_g;
-    auto present_matched_range = Group::MaskedMatchRange(present_mask);
+    auto present_matched_range = Group::MatchRange(present_mask);
 #else
     auto g = RawHashtable::Group::Load(old_groups, group_index);
     g.ClearDeleted();
