@@ -1232,12 +1232,13 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     auto control_byte_matched_range = g.Match(control_byte);
     auto empty_matched_range = g.MatchEmpty();
     if (control_byte_matched_range) {
+      EntryT* group_entries = &local_entries[group_index];
       auto byte_it = control_byte_matched_range.begin();
       auto byte_end = control_byte_matched_range.end();
       do {
-        ssize_t index = group_index + *byte_it;
-        if (LLVM_LIKELY(local_entries[index].key == lookup_key)) {
-          return {&local_entries[index], false};
+        EntryT* entry = &group_entries[*byte_it];
+        if (LLVM_LIKELY(entry->key == lookup_key)) {
+          return {entry, false};
         }
         ++byte_it;
       } while (LLVM_UNLIKELY(byte_it != byte_end));
