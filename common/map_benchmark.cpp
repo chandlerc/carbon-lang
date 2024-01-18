@@ -234,7 +234,7 @@ static void BM_MapUpdateHit(benchmark::State& s) {
 
   m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
-    for (ssize_t i = 0; i < lookup_keys_size;) {
+    for (ssize_t i = 0; i < lookup_keys_size; ++i) {
       // We block optimizing `i` as that has proven both more effective at
       // blocking the loop from being optimized away and avoiding disruption of
       // the generated code that we're benchmarking.
@@ -242,7 +242,6 @@ static void BM_MapUpdateHit(benchmark::State& s) {
 
       bool inserted = m.BenchUpdate(lookup_keys[i], MakeValue2<VT>());
       CARBON_DCHECK(!inserted);
-      i += static_cast<ssize_t>(!inserted);
     }
   }
 }
@@ -262,17 +261,17 @@ static void BM_MapEraseUpdateHit(benchmark::State& s) {
 
   m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
-    for (ssize_t i = 0; i < lookup_keys_size;) {
+    for (ssize_t i = 0; i < lookup_keys_size; ++i) {
       // We block optimizing `i` as that has proven both more effective at
       // blocking the loop from being optimized away and avoiding disruption of
       // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
 
       m.BenchErase(lookup_keys[i]);
+      benchmark::ClobberMemory();
 
       bool inserted = m.BenchUpdate(lookup_keys[i], MakeValue2<VT>());
       CARBON_DCHECK(inserted);
-      i += static_cast<ssize_t>(inserted);
     }
   }
 }
