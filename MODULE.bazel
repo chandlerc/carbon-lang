@@ -27,6 +27,16 @@ bazel_dep(
     version = "20240116.0",
     repo_name = "com_google_absl",
 )
+
+# For direct Carbon builds, use a recent commit of Abseil to pick up fixes more
+# rapidly. We're comfortable living at head.
+archive_override(
+    module_name = "abseil-cpp",
+    integrity = "sha256-VsCGJVyQL8Zwn6ONUvnNNXQUA2ddUi3FVgI9fLKy5hk=",
+    strip_prefix = "abseil-cpp-41a2a2555588253dce0e10db4c545463c4a64731",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/41a2a2555588253dce0e10db4c545463c4a64731.zip"],
+)
+
 bazel_dep(
     name = "re2",
     version = "2024-02-01",

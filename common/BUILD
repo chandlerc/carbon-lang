@@ -192,9 +192,107 @@ cc_library(
 )
 
 cc_library(
+    name = "map",
+    hdrs = ["map.h"],
+    deps = [
+        ":check",
+        ":raw_hashtable",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_test(
+    name = "map_test",
+    srcs = ["map_test.cpp"],
+    deps = [
+        ":map",
+        "//testing/base:gtest_main",
+        "//testing/base:test_raw_ostream",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_binary(
+    name = "map_benchmark",
+    testonly = 1,
+    srcs = ["map_benchmark.cpp"],
+    deps = [
+        ":map",
+        ":raw_hashtable_benchmark_helpers",
+        "@com_github_google_benchmark//:benchmark_main",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/random",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
     name = "ostream",
     hdrs = ["ostream.h"],
     deps = [
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
+    name = "raw_hashtable",
+    srcs = ["raw_hashtable.cpp"],
+    hdrs = ["raw_hashtable.h"],
+    deps = [
+        ":check",
+        ":hashing",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
+    name = "raw_hashtable_benchmark_helpers",
+    testonly = 1,
+    srcs = ["raw_hashtable_benchmark_helpers.cpp"],
+    hdrs = ["raw_hashtable_benchmark_helpers.h"],
+    deps = [
+        ":check",
+        ":hashing",
+        ":raw_hashtable",
+        ":set",
+        "@com_github_google_benchmark//:benchmark",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/hash",
+        "@com_google_absl//absl/random",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
+    name = "set",
+    hdrs = ["set.h"],
+    deps = [
+        ":check",
+        ":raw_hashtable",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_test(
+    name = "set_test",
+    srcs = ["set_test.cpp"],
+    deps = [
+        ":set",
+        "//testing/base:gtest_main",
+        "//testing/base:test_raw_ostream",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_binary(
+    name = "set_benchmark",
+    testonly = 1,
+    srcs = ["set_benchmark.cpp"],
+    deps = [
+        ":raw_hashtable_benchmark_helpers",
+        ":set",
+        "@com_github_google_benchmark//:benchmark_main",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@llvm-project//llvm:Support",
     ],
 )
