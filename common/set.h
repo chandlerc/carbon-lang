@@ -109,18 +109,10 @@ class SetBase : protected RawHashtable::RawHashtableBase<InputKeyT> {
   }
 
   template <typename LookupKeyT>
-  auto Insert(LookupKeyT lookup_key,
-              typename std::__type_identity<llvm::function_ref<
-                  auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>>::type
-                  insert_cb) -> InsertResult;
+  auto Insert(LookupKeyT lookup_key) -> InsertResult;
 
-  template <typename LookupKeyT>
-  auto Insert(LookupKeyT lookup_key) -> InsertResult {
-    return Insert(lookup_key,
-                  [](LookupKeyT lookup_key, void* key_storage) -> KeyT* {
-                    return new (key_storage) KeyT(std::move(lookup_key));
-                  });
-  }
+  template <typename LookupKeyT, typename InsertCallbackT>
+  auto Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb) -> InsertResult;
 
   template <typename LookupKeyT>
   auto Erase(LookupKeyT lookup_key) -> bool;
@@ -198,10 +190,16 @@ void SetView<KT>::ForEach(CallbackT callback) {
 
 template <typename KT>
 template <typename LookupKeyT>
-auto SetBase<KT>::Insert(
-    LookupKeyT lookup_key,
-    typename std::__type_identity<llvm::function_ref<
-        auto(LookupKeyT lookup_key, void* key_storage)->KeyT*>>::type insert_cb)
+auto SetBase<KT>::Insert(LookupKeyT lookup_key) -> InsertResult {
+  return Insert(lookup_key,
+                [](LookupKeyT lookup_key, void* key_storage) -> KeyT* {
+                  return new (key_storage) KeyT(std::move(lookup_key));
+                });
+}
+
+template <typename KT>
+template <typename LookupKeyT, typename InsertCallbackT>
+auto SetBase<KT>::Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
     -> InsertResult {
   auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
