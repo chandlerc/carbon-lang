@@ -46,8 +46,15 @@ auto ValueToBool(T value) -> bool {
 }
 
 template <typename MapT>
-struct MapWrapper {
-  static constexpr bool IsCarbonMap = false;
+struct IsCarbonMapImpl : std::false_type {};
+template <typename KT, typename VT, int MinSmallSize>
+struct IsCarbonMapImpl<Map<KT, VT, MinSmallSize>> : std::true_type {};
+
+template <typename MapT>
+static constexpr bool IsCarbonMap = IsCarbonMapImpl<MapT>::value;
+
+template <typename MapT>
+struct MapWrapperImpl {
   using KeyT = typename MapT::key_type;
   using ValueT = typename MapT::mapped_type;
 
@@ -77,9 +84,10 @@ struct MapWrapper {
   auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 
+// Explicit (partial) specialization for the Carbon map type. The core reason is
+// to switch to the Carbon Map API which is structured a bit differently.
 template <typename KT, typename VT, int MinSmallSize>
-struct MapWrapper<Map<KT, VT, MinSmallSize>> {
-  static constexpr bool IsCarbonMap = true;
+struct MapWrapperImpl<Map<KT, VT, MinSmallSize>> {
   using MapT = Map<KT, VT, MinSmallSize>;
   using KeyT = KT;
   using ValueT = VT;
@@ -109,10 +117,47 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
   auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
 };
 
+// Provide a way to override the Carbon Map specific benchmark runs with another
+// hashtable implementation. When building, you can use one of these enum names
+// in a macro define such as `-DCARBON_MAP_BENCH_OVERRIDE=Name` in order to
+// trigger a specific override for the `Map` type benchmarks. This is used to
+// get before/after runs that compare the performance of Carbon's Map versus
+// other implementations.
+enum class MapOverride {
+  Abseil,
+  LLVM,
+  LLVMAndCarbonHash,
+};
+template <typename MapT, MapOverride Override>
+struct MapWrapperOverride : MapWrapperImpl<MapT> {};
+
+template <typename KeyT, typename ValueT, int MinSmallSize>
+struct MapWrapperOverride<Map<KeyT, ValueT, MinSmallSize>, MapOverride::Abseil>
+    : MapWrapperImpl<absl::flat_hash_map<KeyT, ValueT>> {};
+
+template <typename KeyT, typename ValueT, int MinSmallSize>
+struct MapWrapperOverride<Map<KeyT, ValueT, MinSmallSize>, MapOverride::LLVM>
+    : MapWrapperImpl<llvm::DenseMap<KeyT, ValueT>> {};
+
+template <typename KeyT, typename ValueT, int MinSmallSize>
+struct MapWrapperOverride<Map<KeyT, ValueT, MinSmallSize>,
+                          MapOverride::LLVMAndCarbonHash>
+    : MapWrapperImpl<llvm::DenseMap<KeyT, ValueT, CarbonHashDI<KeyT>>> {};
+
+#ifndef CARBON_MAP_BENCH_OVERRIDE
+template <typename MapT>
+using MapWrapper = MapWrapperImpl<MapT>;
+#else
+template <typename MapT>
+using MapWrapper =
+    MapWrapperOverride<MapT, MapOverride::CARBON_MAP_BENCH_OVERRIDE>;
+#endif
+
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, KT, VT)        \
   BENCHMARK(NAME<Map<KT, VT>>)->Apply(APPLY);                 \
   BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(APPLY); \
+  BENCHMARK(NAME<llvm::DenseMap<KT, VT>>)->Apply(APPLY);      \
   BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashDI<KT>>>)->Apply(APPLY)
 // NOLINTEND(bugprone-macro-parentheses)
 
@@ -268,6 +313,7 @@ MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit, HitArgs);
 #define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT, VT)                  \
   BENCHMARK(NAME<Map<KT, VT>>)->Apply(SizeArgs);                 \
   BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(SizeArgs); \
+  BENCHMARK(NAME<llvm::DenseMap<KT, VT>>)->Apply(APPLY);         \
   BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
@@ -313,10 +359,10 @@ static void BM_MapInsertSeq(benchmark::State& s) {
       keys.size(), benchmark::Counter::kIsIterationInvariantRate);
 
   // Report some extra statistics about the Carbon type.
-  if constexpr (MapWrapperT::IsCarbonMap) {
+  if constexpr (IsCarbonMap<MapT>) {
     // Re-build a map outside of the timing loop to look at the statistics
     // rather than the timing.
-    Map<KT, VT> map;
+    MapT map;
     for (auto k : keys) {
       bool inserted = map.Insert(k, MakeValue2<VT>()).is_inserted();
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
