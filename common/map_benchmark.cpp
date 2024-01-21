@@ -53,8 +53,6 @@ struct MapWrapper {
 
   MapT M;
 
-  void CreateView() {}
-
   auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
 
   auto BenchLookup(KeyT k) -> bool {
@@ -88,14 +86,10 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
 
   MapT M;
 
-  MapView<KT, VT> MV = M;
-
-  void CreateView() { MV = M; }
-
-  auto BenchContains(KeyT k) -> bool { return MV.Contains(k); }
+  auto BenchContains(KeyT k) -> bool { return M.Contains(k); }
 
   auto BenchLookup(KeyT k) -> bool {
-    auto result = MV.Lookup(k);
+    auto result = M.Lookup(k);
     if (!result) {
       return false;
     }
@@ -113,8 +107,6 @@ struct MapWrapper<Map<KT, VT, MinSmallSize>> {
   }
 
   auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
-
-  auto CountProbedKeys() const -> ssize_t { return M.CountProbedKeys(); }
 };
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
@@ -142,7 +134,6 @@ static void BM_MapContainsHit(benchmark::State& s) {
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       // We block optimizing `i` as that has proven both more effective at
@@ -173,7 +164,6 @@ static void BM_MapContainsMiss(benchmark::State& s) {
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       // We block optimizing `i` as that has proven both more effective at
@@ -204,7 +194,6 @@ static void BM_MapLookupHit(benchmark::State& s) {
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       // We block optimizing `i` as that has proven both more effective at
@@ -232,7 +221,6 @@ static void BM_MapUpdateHit(benchmark::State& s) {
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size; ++i) {
       // We block optimizing `i` as that has proven both more effective at
@@ -259,7 +247,6 @@ static void BM_MapEraseUpdateHit(benchmark::State& s) {
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size; ++i) {
       // We block optimizing `i` as that has proven both more effective at
@@ -329,9 +316,9 @@ static void BM_MapInsertSeq(benchmark::State& s) {
   if constexpr (MapWrapperT::IsCarbonMap) {
     // Re-build a map outside of the timing loop to look at the statistics
     // rather than the timing.
-    MapWrapperT map;
+    Map<KT, VT> map;
     for (auto k : keys) {
-      bool inserted = map.BenchInsert(k, MakeValue2<VT>());
+      bool inserted = map.Insert(k, MakeValue2<VT>()).is_inserted();
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
     }
 
@@ -346,7 +333,7 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     // Uncomment this call to print out statistics about the index-collisions
     // among these keys for debugging:
     //
-    // RawHashtable::DumpHashStatistics(raw_keys);
+    // RawHashtable::DumpHashStatistics(keys);
   }
 }
 MAP_BENCHMARK_ONE_OP(BM_MapInsertSeq, SizeArgs);
