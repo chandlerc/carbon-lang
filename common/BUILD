@@ -229,7 +229,7 @@ cc_binary(
 sh_test(
     name = "map_benchmark_test",
     # The benchmark allocates a large amount of memory.
-    size = "large",
+    size = "enormous",
     # We configure the test to run quickly.
     timeout = "short",
     srcs = ["map_benchmark_test.sh"],
@@ -306,6 +306,16 @@ cc_binary(
         "@com_google_absl//absl/container:flat_hash_set",
         "@llvm-project//llvm:Support",
     ],
+)
+
+sh_test(
+    name = "set_benchmark_test",
+    # The benchmark allocates a large amount of memory.
+    size = "enormous",
+    # We configure the test to run quickly.
+    timeout = "short",
+    srcs = ["set_benchmark_test.sh"],
+    data = [":set_benchmark"],
 )
 
 cc_library(

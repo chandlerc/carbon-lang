@@ -19,11 +19,12 @@ using RawHashtable::GetKeysAndHitKeys;
 using RawHashtable::GetKeysAndMissKeys;
 using RawHashtable::HitArgs;
 using RawHashtable::SizeArgs;
+using RawHashtable::ValueToBool;
 
-// Helper to synthesize some value of one of the three types we use as value
+// Helpers to synthesize some value of one of the three types we use as value
 // types.
 template <typename T>
-auto MakeValue2() -> T {
+auto MakeValue() -> T {
   if constexpr (std::is_same_v<T, llvm::StringRef>) {
     return "abc";
   } else if constexpr (std::is_pointer_v<T>) {
@@ -33,15 +34,15 @@ auto MakeValue2() -> T {
     return 42;
   }
 }
-
 template <typename T>
-auto ValueToBool(T value) -> bool {
+auto MakeValue2() -> T {
   if constexpr (std::is_same_v<T, llvm::StringRef>) {
-    return value.size() > 0;
+    return "qux";
   } else if constexpr (std::is_pointer_v<T>) {
-    return value != nullptr;
+    static std::remove_pointer_t<T> y;
+    return &y;
   } else {
-    return value != 0;
+    return 7;
   }
 }
 
@@ -123,25 +124,25 @@ struct MapWrapperImpl<Map<KT, VT, MinSmallSize>> {
 // trigger a specific override for the `Map` type benchmarks. This is used to
 // get before/after runs that compare the performance of Carbon's Map versus
 // other implementations.
-enum class MapOverride {
+enum class SetOverride {
   Abseil,
   LLVM,
   LLVMAndCarbonHash,
 };
-template <typename MapT, MapOverride Override>
+template <typename MapT, SetOverride Override>
 struct MapWrapperOverride : MapWrapperImpl<MapT> {};
 
 template <typename KeyT, typename ValueT, int MinSmallSize>
-struct MapWrapperOverride<Map<KeyT, ValueT, MinSmallSize>, MapOverride::Abseil>
+struct MapWrapperOverride<Map<KeyT, ValueT, MinSmallSize>, SetOverride::Abseil>
     : MapWrapperImpl<absl::flat_hash_map<KeyT, ValueT>> {};
 
 template <typename KeyT, typename ValueT, int MinSmallSize>
-struct MapWrapperOverride<Map<KeyT, ValueT, MinSmallSize>, MapOverride::LLVM>
+struct MapWrapperOverride<Map<KeyT, ValueT, MinSmallSize>, SetOverride::LLVM>
     : MapWrapperImpl<llvm::DenseMap<KeyT, ValueT>> {};
 
 template <typename KeyT, typename ValueT, int MinSmallSize>
 struct MapWrapperOverride<Map<KeyT, ValueT, MinSmallSize>,
-                          MapOverride::LLVMAndCarbonHash>
+                          SetOverride::LLVMAndCarbonHash>
     : MapWrapperImpl<llvm::DenseMap<KeyT, ValueT, CarbonHashDI<KeyT>>> {};
 
 #ifndef CARBON_MAP_BENCH_OVERRIDE
@@ -165,8 +166,30 @@ using MapWrapper =
   MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int, int);             \
   MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int*, int*);           \
   MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int, llvm::StringRef); \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, llvm::StringRef, int);
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, llvm::StringRef, int)
 
+// Benchmark the minimal latency of checking if a key is contained within a map,
+// when it *is* definitely in that map. Because this is only really measuring
+// the *minimal* latency, it is more similar to a throughput benchmark.
+//
+// While this is structured to observe the latency of testing for presence of a
+// key, it is important to understand the reality of what this measures. Because
+// the boolean result testing for whether a key is in a map is fundamentally
+// provided not by accessing some data, but by branching on data to a control
+// flow path which sets the boolean to `true` or `false`, the result can be
+// speculatively provided based on predicting the conditional branch without
+// waiting for the results of the comparison to become available. And because
+// this is a small operation and we arrange for all the candidate keys to be
+// present, that branch *should* be predicted extremely well. The result is that
+// this measures the un-speculated latency of testing for presence which should
+// be small or zero. Which is why this is ultimately more similar to a
+// throughput benchmark.
+//
+// Because of these measurement oddities, the specific measurements here may not
+// be very interesting for predicting real-world performance in any way, but
+// they are useful for comparing how 'cheap' the operation is across changes to
+// the data structure or between similar data structures with similar
+// properties.
 template <typename MapT>
 static void BM_MapContainsHit(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
@@ -175,7 +198,7 @@ static void BM_MapContainsHit(benchmark::State& s) {
   MapWrapperT m;
   auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
-    m.BenchInsert(k, VT());
+    m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
@@ -197,6 +220,9 @@ static void BM_MapContainsHit(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_MapContainsHit, HitArgs);
 
+// Similar to `BM_MapContainsHit`, while this is structured as a latency
+// benchmark, the critical path is expected to be well predicted and so it
+// should turn into something closer to a throughput benchmark.
 template <typename MapT>
 static void BM_MapContainsMiss(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
@@ -205,28 +231,49 @@ static void BM_MapContainsMiss(benchmark::State& s) {
   MapWrapperT m;
   auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(s.range(0));
   for (auto k : keys) {
-    m.BenchInsert(k, VT());
+    m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
-      // We block optimizing `i` as that has proven both more effective at
-      // blocking the loop from being optimized away and avoiding disruption of
-      // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
 
       bool result = m.BenchContains(lookup_keys[i]);
       CARBON_DCHECK(!result);
-      // We use the lookup success to step through keys, establishing a
-      // dependency between each lookup and allowing us to measure latency
-      // rather than throughput.
       i += static_cast<ssize_t>(!result);
     }
   }
 }
 MAP_BENCHMARK_ONE_OP(BM_MapContainsMiss, SizeArgs);
 
+// This is a genuine latency benchmark. We lookup a key in the hashtable and use
+// the value associated with that key in the critical path of loading the next
+// iteration's key. We still ensure the keys are always present, and so we
+// generally expect the data structure branches to be well predicted. But we
+// vary the keys aggressively to avoid any prediction artifacts from repeatedly
+// examining the same key.
+//
+// This latency can be very helpful for understanding a range of data structure
+// behaviors:
+// - Many users of hashtables are directly dependent on the latency of this
+//   operation, and this micro-benchmark will reflect the expected latency for
+//   them.
+// - Showing how latency varies across different sizes of table and different
+//   fractions of the table being accessed (and thus needing space in the
+//   cache).
+//
+// However, it remains an ultimately synthetic and unrepresentative benchmark.
+// It should primarily be used to understand the relative cost of these
+// operations between versions of the data structure or between related data
+// structures.
+//
+// We vary both the number of entries in the table and the number of distinct
+// keys used when doing lookups. As the table becomes large, the latter dictates
+// the fraction of the table that will be accessed and thus the working set size
+// of the benchmark. Querying the same small number of keys in even a large
+// table doesn't actually encounter any cache pressure, so only a few of these
+// benchmarks will show any effects of the caching subsystem.
 template <typename MapT>
 static void BM_MapLookupHit(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
@@ -235,25 +282,35 @@ static void BM_MapLookupHit(benchmark::State& s) {
   MapWrapperT m;
   auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
-    m.BenchInsert(k, VT());
+    m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
-      // We block optimizing `i` as that has proven both more effective at
-      // blocking the loop from being optimized away and avoiding disruption of
-      // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
 
       bool result = m.BenchLookup(lookup_keys[i]);
-      CARBON_DCHECK(!result);
-      i += static_cast<ssize_t>(!result);
+      CARBON_DCHECK(result);
+      i += static_cast<ssize_t>(result);
     }
   }
 }
 MAP_BENCHMARK_ONE_OP(BM_MapLookupHit, HitArgs);
 
+// This is an update throughput benchmark in practice. While whether the key was
+// a hit is kept in the critical path, we only use keys that are hits and so
+// expect that to be fully predicted and speculated.
+//
+// However, we expect this fairly closely matches how user code interacts with
+// an update-style API. It will have some conditional testing (even if just an
+// assert) on whether the key was a hit and otherwise continue executing. As a
+// consequence the actual update is expected to not be in a meaningful critical
+// path.
+//
+// This still provides a basic way to measure the cost of this operation,
+// especially when comparing between implementations or across different hash
+// tables.
 template <typename MapT>
 static void BM_MapUpdateHit(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
@@ -262,15 +319,12 @@ static void BM_MapUpdateHit(benchmark::State& s) {
   MapWrapperT m;
   auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
-    m.BenchInsert(k, VT());
+    m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size; ++i) {
-      // We block optimizing `i` as that has proven both more effective at
-      // blocking the loop from being optimized away and avoiding disruption of
-      // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
 
       bool inserted = m.BenchUpdate(lookup_keys[i], MakeValue2<VT>());
@@ -280,6 +334,13 @@ static void BM_MapUpdateHit(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_MapUpdateHit, HitArgs);
 
+// Similar to the basic update benchmark, but here we first erase and then
+// insert the key. The code path will always be the same here and so we expect
+// this to largely be a throughput benchmark.
+//
+// The only difference between this code path and the above is covering both the
+// erase code sequence and the code sequence when inserting over an entry rather
+// than merely updating an already present entry.
 template <typename MapT>
 static void BM_MapEraseUpdateHit(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
@@ -288,15 +349,12 @@ static void BM_MapEraseUpdateHit(benchmark::State& s) {
   MapWrapperT m;
   auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
   for (auto k : keys) {
-    m.BenchInsert(k, VT());
+    m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size; ++i) {
-      // We block optimizing `i` as that has proven both more effective at
-      // blocking the loop from being optimized away and avoiding disruption of
-      // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
 
       m.BenchErase(lookup_keys[i]);
@@ -323,6 +381,21 @@ MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit, HitArgs);
   MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int, llvm::StringRef); \
   MAP_BENCHMARK_OP_SEQ_SIZE(NAME, llvm::StringRef, int)
 
+// This is an interesting, somewhat specialized benchmark that measures the cost
+// of inserting a sequence of key/value pairs into a table with no collisions up
+// to some size and then inserting a colliding key and throwing away the table.
+//
+// This can give an idea of the cost of building up a map of a particular size,
+// but without actually using it. Or of algorithms like cycle-detection which
+// for some reason need an associative container.
+//
+// It also covers both the insert-into-an-empty-slot code path that isn't
+// covered elsewhere, and the code path for growing a table to a larger size.
+//
+// Because this benchmark operates on whole maps, we also compute the number of
+// probed keys for Carbon's set as that is both a general reflection of the
+// efficacy of the underlying hash function, and a direct factor that drives the
+// cost of these operations.
 template <typename MapT>
 static void BM_MapInsertSeq(benchmark::State& s) {
   using MapWrapperT = MapWrapper<MapT>;
@@ -340,7 +413,7 @@ static void BM_MapInsertSeq(benchmark::State& s) {
 
     MapWrapperT m;
     for (auto k : keys) {
-      bool inserted = m.BenchInsert(k, MakeValue2<VT>());
+      bool inserted = m.BenchInsert(k, MakeValue<VT>());
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
     }
 
@@ -364,7 +437,7 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     // rather than the timing.
     MapT map;
     for (auto k : keys) {
-      bool inserted = map.Insert(k, MakeValue2<VT>()).is_inserted();
+      bool inserted = map.Insert(k, MakeValue<VT>()).is_inserted();
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
     }
 

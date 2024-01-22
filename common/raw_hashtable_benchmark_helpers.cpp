@@ -150,7 +150,7 @@ auto BuildRawPtrKeys() -> llvm::ArrayRef<int*> { return raw_ptr_keys; }
 static std::vector<int> raw_int_keys = [] {
   std::vector<int> keys;
   for (ssize_t i : llvm::seq<ssize_t>(0, MaxNumKeys)) {
-    keys.push_back(i);
+    keys.push_back(i + 1);
   }
   return keys;
 }();

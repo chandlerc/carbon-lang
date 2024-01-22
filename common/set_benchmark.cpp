@@ -17,54 +17,58 @@ using RawHashtable::GetKeysAndHitKeys;
 using RawHashtable::GetKeysAndMissKeys;
 using RawHashtable::HitArgs;
 using RawHashtable::SizeArgs;
-
-// This map has an intentional inlining blocker to avoid code growth. However,
-// both Abseil and LLVM's maps don't have this and at least on AArch64 both
-// inline heavily and show performance differences that seem entirely to stem
-// from that. We use this to block inlining on the wrapper as a way to get
-// slightly more comparable benchmark results. It's not perfect, but seems more
-// useful than the alternatives.
-#ifdef __aarch64__
-#define CARBON_ARM64_NOINLINE [[gnu::noinline]]
-#else
-#define CARBON_ARM64_NOINLINE
-#endif
+using RawHashtable::ValueToBool;
 
 template <typename SetT>
-struct SetWrapper {
+struct IsCarbonSetImpl : std::false_type {};
+template <typename KT, int MinSmallSize>
+struct IsCarbonSetImpl<Set<KT, MinSmallSize>> : std::true_type {};
+
+template <typename MapT>
+static constexpr bool IsCarbonSet = IsCarbonSetImpl<MapT>::value;
+
+template <typename SetT>
+struct SetWrapperImpl {
   static constexpr bool IsCarbonSet = false;
   using KeyT = typename SetT::key_type;
 
   SetT M;
 
-  void CreateView() {}
-
-  CARBON_ARM64_NOINLINE
   auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
 
-  CARBON_ARM64_NOINLINE
+  auto BenchLookup(KeyT k) -> bool {
+    auto it = M.find(k);
+    if (it == M.end()) {
+      return false;
+    }
+    // We expect keys to always convert to `true` so directly return that here.
+    return ValueToBool(*it);
+  }
+
   auto BenchInsert(KeyT k) -> bool {
     auto result = M.insert(k);
     return result.second;
   }
 
-  CARBON_ARM64_NOINLINE
   auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
 };
 
 template <typename KT, int MinSmallSize>
-struct SetWrapper<Set<KT, MinSmallSize>> {
-  static constexpr bool IsCarbonSet = true;
+struct SetWrapperImpl<Set<KT, MinSmallSize>> {
   using SetT = Set<KT, MinSmallSize>;
   using KeyT = KT;
 
   SetT M;
 
-  SetView<KT> MV = M;
+  auto BenchContains(KeyT k) -> bool { return M.Contains(k); }
 
-  void CreateView() { MV = M; }
-
-  auto BenchContains(KeyT k) -> bool { return MV.Contains(k); }
+  auto BenchLookup(KeyT k) -> bool {
+    auto result = M.Lookup(k);
+    if (!result) {
+      return false;
+    }
+    return ValueToBool(result.key());
+  }
 
   auto BenchInsert(KeyT k) -> bool {
     auto result = M.Insert(k);
@@ -72,20 +76,76 @@ struct SetWrapper<Set<KT, MinSmallSize>> {
   }
 
   auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
-
-  auto CountProbedKeys() const -> ssize_t { return M.CountProbedKeys(); }
 };
+
+// Provide a way to override the Carbon Set specific benchmark runs with another
+// hashtable implementation. When building, you can use one of these enum names
+// in a macro define such as `-DCARBON_SET_BENCH_OVERRIDE=Name` in order to
+// trigger a specific override for the `Set` type benchmarks. This is used to
+// get before/after runs that compare the performance of Carbon's Set versus
+// other implementations.
+enum class SetOverride {
+  Abseil,
+  LLVM,
+  LLVMAndCarbonHash,
+};
+template <typename SetT, SetOverride Override>
+struct SetWrapperOverride : SetWrapperImpl<SetT> {};
+
+template <typename KeyT, int MinSmallSize>
+struct SetWrapperOverride<Set<KeyT, MinSmallSize>, SetOverride::Abseil>
+    : SetWrapperImpl<absl::flat_hash_set<KeyT>> {};
+
+template <typename KeyT, int MinSmallSize>
+struct SetWrapperOverride<Set<KeyT, MinSmallSize>, SetOverride::LLVM>
+    : SetWrapperImpl<llvm::DenseSet<KeyT>> {};
+
+template <typename KeyT, int MinSmallSize>
+struct SetWrapperOverride<Set<KeyT, MinSmallSize>,
+                          SetOverride::LLVMAndCarbonHash>
+    : SetWrapperImpl<llvm::DenseSet<KeyT, CarbonHashDI<KeyT>>> {};
+
+#ifndef CARBON_SET_BENCH_OVERRIDE
+template <typename SetT>
+using SetWrapper = SetWrapperImpl<SetT>;
+#else
+template <typename SetT>
+using SetWrapper =
+    SetWrapperOverride<SetT, SetOverride::CARBON_SET_BENCH_OVERRIDE>;
+#endif
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, KT)        \
   BENCHMARK(NAME<Set<KT>>)->Apply(APPLY);                 \
   BENCHMARK(NAME<absl::flat_hash_set<KT>>)->Apply(APPLY); \
+  BENCHMARK(NAME<llvm::DenseSet<KT>>)->Apply(APPLY);      \
   BENCHMARK(NAME<llvm::DenseSet<KT, CarbonHashDI<KT>>>)->Apply(APPLY)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_ONE_OP(NAME, APPLY) \
-  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int*)
+#define MAP_BENCHMARK_ONE_OP(NAME, APPLY)       \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int);  \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, int*); \
+  MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, llvm::StringRef)
 
+// Benchmark the "latency" of testing for a key in a set. This always tests with
+// a key that is found.
+//
+// However, because the key is always found and because the test ultimately
+// involves conditional control flow that can be predicted, we expect modern
+// CPUs to perfectly predict the control flow here and turn the measurement from
+// one iteration to the next into a throughput measurement rather than a real
+// latency measurement.
+//
+// However, this does represent a particularly common way in which a set data
+// structure is accessed. The numbers should just be carefully interpreted in
+// the context of being more a reflection of reciprocal throughput than actual
+// latency. See the `Lookup` benchmarks for a genuine latency measure with its
+// own caveats.
+//
+// However, this does still show some interesting caching effects when querying
+// large fractions of large tables, and can give a sense of the inescapable
+// magnitude of these effects even when there is a great deal of prediction and
+// speculative execution to hide memory access latency.
 template <typename SetT>
 static void BM_SetContainsHitPtr(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
@@ -97,7 +157,6 @@ static void BM_SetContainsHitPtr(benchmark::State& s) {
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       // We block optimizing `i` as that has proven both more effective at
@@ -116,6 +175,8 @@ static void BM_SetContainsHitPtr(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_SetContainsHitPtr, HitArgs);
 
+// Benchmark the "latency" (but more likely the reciprocal throughput, see
+// comment above) of testing for a key in the set that is *not* present.
 template <typename SetT>
 static void BM_SetContainsMissPtr(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
@@ -127,7 +188,6 @@ static void BM_SetContainsMissPtr(benchmark::State& s) {
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       benchmark::DoNotOptimize(i);
@@ -140,6 +200,47 @@ static void BM_SetContainsMissPtr(benchmark::State& s) {
 }
 MAP_BENCHMARK_ONE_OP(BM_SetContainsMissPtr, SizeArgs);
 
+// A somewhat contrived latency test for the lookup code path.
+//
+// While lookups into a set are often (but not always) simply used to influence
+// control flow, that style of access produces difficult to evaluate benchmark
+// results (see the comments on the `Contains` benchmarks above).
+//
+// So here we actually access the key in the set and convert that key's value to
+// a boolean on the critical path of each iteration. This lets us have a genuine
+// latency benchmark of looking up a key in the set, at the expense of being
+// somewhat contrived. That said, for usage where the key object is queried or
+// operated on in some way once looked up in the set, this will be fairly
+// representative of the latency cost from the data structure.
+template <typename SetT>
+static void BM_SetLookupHitPtr(benchmark::State& s) {
+  using SetWrapperT = SetWrapper<SetT>;
+  using KT = typename SetWrapperT::KeyT;
+  SetWrapperT m;
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
+  for (auto k : keys) {
+    m.BenchInsert(k);
+  }
+  ssize_t lookup_keys_size = lookup_keys.size();
+
+  while (s.KeepRunningBatch(lookup_keys_size)) {
+    for (ssize_t i = 0; i < lookup_keys_size;) {
+      benchmark::DoNotOptimize(i);
+
+      bool result = m.BenchLookup(lookup_keys[i]);
+      CARBON_DCHECK(result);
+      i += static_cast<ssize_t>(result);
+    }
+  }
+}
+MAP_BENCHMARK_ONE_OP(BM_SetLookupHitPtr, HitArgs);
+
+// First erase and then insert a key.
+//
+// This provides a measure of the cost or efficiency of both the erase and
+// insertion code paths. However, we always use keys that are in the set to
+// start, and so this is expected to be perfectly predicted and not measure
+// meaningful latency.
 template <typename SetT>
 static void BM_SetEraseInsertHitPtr(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
@@ -151,12 +252,8 @@ static void BM_SetEraseInsertHitPtr(benchmark::State& s) {
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  m.CreateView();
   while (s.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
-      // We block optimizing `i` as that has proven both more effective at
-      // blocking the loop from being optimized away and avoiding disruption of
-      // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
 
       m.BenchErase(lookup_keys[i]);
@@ -174,11 +271,34 @@ MAP_BENCHMARK_ONE_OP(BM_SetEraseInsertHitPtr, HitArgs);
 #define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT)                  \
   BENCHMARK(NAME<Set<KT>>)->Apply(SizeArgs);                 \
   BENCHMARK(NAME<absl::flat_hash_set<KT>>)->Apply(SizeArgs); \
+  BENCHMARK(NAME<llvm::DenseSet<KT>>)->Apply(SizeArgs);      \
   BENCHMARK(NAME<llvm::DenseSet<KT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 
-#define MAP_BENCHMARK_OP_SEQ(NAME) MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int*)
+#define MAP_BENCHMARK_OP_SEQ(NAME)       \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int);  \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, int*); \
+  MAP_BENCHMARK_OP_SEQ_SIZE(NAME, llvm::StringRef)
 
+// This is an interesting, somewhat specialized benchmark that measures the cost
+// of inserting a sequence of keys into a set up to some size and then inserting
+// a colliding key and throwing away the set.
+//
+// This is an especially important usage pattern for sets as a large number of
+// algorithms essentially look like this, such as collision detection, cycle
+// detection, de-duplication, etc.
+//
+// It also covers both the insert-into-an-empty-slot code path that isn't
+// covered elsewhere, and the code path for growing a table to a larger size.
+//
+// This is the second most important aspect of expected set usage after testing
+// for presence. It also nicely lends itself to a single benchmark that covers
+// the total cost of this usage pattern.
+//
+// Because this benchmark operates on whole sets, we also compute the number of
+// probed keys for Carbon's set as that is both a general reflection of the
+// efficacy of the underlying hash function, and a direct factor that drives the
+// cost of these operations.
 template <typename SetT>
 static void BM_SetInsertSeq(benchmark::State& s) {
   using SetWrapperT = SetWrapper<SetT>;
@@ -213,12 +333,12 @@ static void BM_SetInsertSeq(benchmark::State& s) {
       keys.size(), benchmark::Counter::kIsIterationInvariantRate);
 
   // Report some extra statistics about the Carbon type.
-  if constexpr (SetWrapperT::IsCarbonSet) {
+  if constexpr (IsCarbonSet<SetT>) {
     // Re-build a set outside of the timing loop to look at the statistics
     // rather than the timing.
-    SetWrapperT set;
+    SetT set;
     for (auto k : keys) {
-      bool inserted = set.BenchInsert(k);
+      bool inserted = set.Insert(k).is_inserted();
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
     }
 

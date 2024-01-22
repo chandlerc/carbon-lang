@@ -8,6 +8,7 @@
 #include <benchmark/benchmark.h>
 #include <sys/types.h>
 
+#include <limits>
 #include <map>
 #include <vector>
 
@@ -126,6 +127,21 @@ auto GetKeysAndHitKeys(ssize_t size, ssize_t lookup_keys_size)
   CARBON_CHECK(static_cast<ssize_t>(lookup_keys.size()) == lookup_keys_size);
 
   return {BuildRawKeys<T>().slice(0, size), llvm::ArrayRef(lookup_keys)};
+}
+
+// Convert values used in hashtable benchmarking to a bool. This is used to form
+// dependencies between values stored in the hashtable between benchmark
+// iterations.
+template <typename T>
+auto ValueToBool(T value) -> bool {
+  if constexpr (std::is_same_v<T, llvm::StringRef>) {
+    return value.size() > 0;
+  } else if constexpr (std::is_pointer_v<T>) {
+    return value != nullptr;
+  } else {
+    // We want our keys to include `0` for integers, so use the largest value.
+    return value != std::numeric_limits<T>::max();
+  }
 }
 
 inline auto SizeArgs(benchmark::internal::Benchmark* b) -> void {
