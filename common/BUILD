@@ -226,6 +226,16 @@ cc_binary(
     ],
 )
 
+sh_test(
+    name = "map_benchmark_test",
+    # The benchmark allocates a large amount of memory.
+    size = "large",
+    # We configure the test to run quickly.
+    timeout = "short",
+    srcs = ["map_benchmark_test.sh"],
+    data = [":map_benchmark"],
+)
+
 cc_library(
     name = "ostream",
     hdrs = ["ostream.h"],
@@ -250,6 +260,7 @@ cc_library(
     testonly = 1,
     srcs = ["raw_hashtable_benchmark_helpers.cpp"],
     hdrs = ["raw_hashtable_benchmark_helpers.h"],
+    copts = ["-O2"],
     deps = [
         ":check",
         ":hashing",
