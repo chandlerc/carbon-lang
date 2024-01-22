@@ -26,6 +26,7 @@ class Map;
 template <typename InputKeyT, typename InputValueT>
 class MapView : RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT> {
   using BaseT = RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT>;
+  using EntryT = typename BaseT::EntryT;
 
  public:
   using KeyT = typename BaseT::KeyT;
@@ -34,17 +35,15 @@ class MapView : RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT> {
   class LookupKVResult {
    public:
     LookupKVResult() = default;
-    explicit LookupKVResult(KeyT* key, ValueT* value)
-        : key_(key), value_(value) {}
+    explicit LookupKVResult(EntryT* entry) : entry_(entry) {}
 
-    explicit operator bool() const { return key_ != nullptr; }
+    explicit operator bool() const { return entry_ != nullptr; }
 
-    auto key() const -> KeyT& { return *key_; }
-    auto value() const -> ValueT& { return *value_; }
+    auto key() const -> KeyT& { return entry_->key; }
+    auto value() const -> ValueT& { return entry_->value; }
 
    private:
-    KeyT* key_ = nullptr;
-    ValueT* value_;
+    EntryT* entry_ = nullptr;
   };
 
   template <typename LookupKeyT>
@@ -66,8 +65,6 @@ class MapView : RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT> {
   friend class Map;
   friend class MapBase<KeyT, ValueT>;
 
-  using EntryT = typename BaseT::EntryT;
-
   MapView() = default;
   // NOLINTNEXTLINE(google-explicit-constructor): Implicit by design.
   MapView(BaseT base) : BaseT(base) {}
@@ -80,6 +77,9 @@ class MapBase
     : protected RawHashtable::RawHashtableBase<InputKeyT, InputValueT> {
   using BaseT = RawHashtable::RawHashtableBase<InputKeyT, InputValueT>;
 
+ protected:
+  using EntryT = typename BaseT::EntryT;
+
  public:
   using KeyT = typename BaseT::KeyT;
   using ValueT = typename BaseT::ValueT;
@@ -89,17 +89,16 @@ class MapBase
   class InsertKVResult {
    public:
     InsertKVResult() = default;
-    explicit InsertKVResult(bool inserted, KeyT& key, ValueT& value)
-        : key_(&key), value_(&value), inserted_(inserted) {}
+    explicit InsertKVResult(bool inserted, EntryT& entry)
+        : entry_(&entry), inserted_(inserted) {}
 
     auto is_inserted() const -> bool { return inserted_; }
 
-    auto key() const -> KeyT& { return *key_; }
-    auto value() const -> ValueT& { return *value_; }
+    auto key() const -> KeyT& { return entry_->key; }
+    auto value() const -> ValueT& { return entry_->value; }
 
    private:
-    KeyT* key_;
-    ValueT* value_;
+    EntryT* entry_;
     bool inserted_;
   };
 
@@ -140,10 +139,7 @@ class MapBase
   auto Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
       -> std::enable_if_t<
           !std::is_same_v<ValueT, InsertCallbackT> &&
-              std::is_same_v<std::pair<KeyT*, ValueT*>,
-                             decltype(std::declval<InsertCallbackT>()(
-                                 lookup_key, std::declval<void*>(),
-                                 std::declval<void*>()))>,
+              std::is_invocable_v<InsertCallbackT, LookupKeyT, void*, void*>,
           InsertKVResult>;
 
   template <typename LookupKeyT>
@@ -162,14 +158,8 @@ class MapBase
               UpdateCallbackT update_cb)
       -> std::enable_if_t<
           !std::is_same_v<ValueT, InsertCallbackT> &&
-              std::is_same_v<std::pair<KeyT*, ValueT*>,
-                             decltype(std::declval<InsertCallbackT>()(
-                                 lookup_key, std::declval<void*>(),
-                                 std::declval<void*>()))> &&
-              std::is_same_v<std::pair<KeyT*, ValueT*>,
-                             decltype(std::declval<UpdateCallbackT>()(
-                                 std::declval<KeyT&>(),
-                                 std::declval<ValueT&>()))>,
+              std::is_invocable_v<InsertCallbackT, LookupKeyT, void*, void*> &&
+              std::is_invocable_v<UpdateCallbackT, KeyT&, ValueT&>,
           InsertKVResult>;
 
   template <typename LookupKeyT>
@@ -182,7 +172,6 @@ class MapBase
   }
 
  protected:
-  using EntryT = typename BaseT::EntryT;
   template <ssize_t SmallSize>
   using SmallStorageT = typename BaseT::template SmallStorageT<SmallSize>;
 
@@ -236,12 +225,7 @@ template <typename KT, typename VT>
 template <typename LookupKeyT>
 auto MapView<KT, VT>::Lookup(LookupKeyT lookup_key) const -> LookupKVResult {
   RawHashtable::Prefetch(this->storage_);
-  EntryT* entry = this->LookupIndexHashed(lookup_key);
-  if (!entry) {
-    return LookupKVResult(nullptr, nullptr);
-  }
-
-  return LookupKVResult(&entry->key, &entry->value);
+  return LookupKVResult(this->LookupIndexHashed(lookup_key));
 }
 
 template <typename KT, typename VT>
@@ -300,24 +284,20 @@ template <typename LookupKeyT, typename InsertCallbackT>
                                                       InsertCallbackT insert_cb)
     -> std::enable_if_t<
         !std::is_same_v<ValueT, InsertCallbackT> &&
-            std::is_same_v<std::pair<KeyT*, ValueT*>,
-                           decltype(std::declval<InsertCallbackT>()(
-                               lookup_key, std::declval<void*>(),
-                               std::declval<void*>()))>,
+            std::is_invocable_v<InsertCallbackT, LookupKeyT, void*, void*>,
         InsertKVResult> {
   auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
 
   if (LLVM_LIKELY(!inserted)) {
-    return InsertKVResult(false, entry->key, entry->value);
+    return InsertKVResult(false, *entry);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  KeyT* k;
-  ValueT* v;
-  std::tie(k, v) = insert_cb(lookup_key, &entry->key, &entry->value);
-  return InsertKVResult(true, *k, *v);
+  insert_cb(lookup_key, static_cast<void*>(&entry->key),
+            static_cast<void*>(&entry->value));
+  return InsertKVResult(true, *entry);
 }
 
 template <typename KT, typename VT>
@@ -327,16 +307,13 @@ template <typename LookupKeyT>
     -> InsertKVResult {
   return Update(
       lookup_key,
-      [&new_v](LookupKeyT lookup_key, void* key_storage,
-               void* value_storage) -> std::pair<KeyT*, ValueT*> {
-        auto* k = new (key_storage) KeyT(lookup_key);
-        auto* v = new (value_storage) ValueT(std::move(new_v));
-        return {k, v};
+      [&new_v](LookupKeyT lookup_key, void* key_storage, void* value_storage) {
+        new (key_storage) KeyT(lookup_key);
+        new (value_storage) ValueT(std::move(new_v));
       },
-      [&new_v](KeyT& key, ValueT& value) -> std::pair<KeyT*, ValueT*> {
+      [&new_v](KeyT& /*key*/, ValueT& value) {
         value.~ValueT();
-        auto* v = new (&value) ValueT(std::move(new_v));
-        return {&key, v};
+        new (&value) ValueT(std::move(new_v));
       });
 }
 
@@ -351,15 +328,13 @@ template <typename LookupKeyT, typename ValueCallbackT>
   return Update(
       lookup_key,
       [&value_cb](LookupKeyT lookup_key, void* key_storage,
-                  void* value_storage) -> std::pair<KeyT*, ValueT*> {
-        auto* k = new (key_storage) KeyT(lookup_key);
-        auto* v = new (value_storage) ValueT(value_cb());
-        return {k, v};
+                  void* value_storage) {
+        new (key_storage) KeyT(lookup_key);
+        new (value_storage) ValueT(value_cb());
       },
-      [&value_cb](KeyT& key, ValueT& value) -> std::pair<KeyT*, ValueT*> {
+      [&value_cb](KeyT& /*key*/, ValueT& value) {
         value.~ValueT();
-        auto* v = new (&value) ValueT(value_cb());
-        return {&key, v};
+        new (&value) ValueT(value_cb());
       });
 }
 
@@ -371,33 +346,23 @@ template <typename LookupKeyT, typename InsertCallbackT,
                                                       UpdateCallbackT update_cb)
     -> std::enable_if_t<
         !std::is_same_v<ValueT, InsertCallbackT> &&
-            std::is_same_v<std::pair<KeyT*, ValueT*>,
-                           decltype(std::declval<InsertCallbackT>()(
-                               lookup_key, std::declval<void*>(),
-                               std::declval<void*>()))> &&
-            std::is_same_v<std::pair<KeyT*, ValueT*>,
-                           decltype(std::declval<UpdateCallbackT>()(
-                               std::declval<KeyT&>(),
-                               std::declval<ValueT&>()))>,
+            std::is_invocable_v<InsertCallbackT, LookupKeyT, void*, void*> &&
+            std::is_invocable_v<UpdateCallbackT, KeyT&, ValueT&>,
         InsertKVResult> {
   auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
   // EntryT& entry = this->entries()[index];
 
   if (LLVM_LIKELY(!inserted)) {
-    KeyT* k = &entry->key;
-    ValueT* v = &entry->value;
-    std::tie(k, v) = update_cb(*k, *v);
-    return InsertKVResult(false, *k, *v);
+    update_cb(entry->key, entry->value);
+    return InsertKVResult(false, *entry);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  KeyT* k;
-  ValueT* v;
-  std::tie(k, v) = insert_cb(lookup_key, &entry->key, &entry->value);
-  // this->groups_ptr()[index] = control_byte;
-  return InsertKVResult(true, *k, *v);
+  insert_cb(lookup_key, static_cast<void*>(&entry->key),
+            static_cast<void*>(&entry->value));
+  return InsertKVResult(true, *entry);
 }
 
 template <typename KeyT, typename ValueT>

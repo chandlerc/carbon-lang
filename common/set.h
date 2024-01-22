@@ -112,7 +112,9 @@ class SetBase : protected RawHashtable::RawHashtableBase<InputKeyT> {
   auto Insert(LookupKeyT lookup_key) -> InsertResult;
 
   template <typename LookupKeyT, typename InsertCallbackT>
-  auto Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb) -> InsertResult;
+  auto
+  Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb) -> std::enable_if_t<
+      std::is_invocable_v<InsertCallbackT, LookupKeyT, void*>, InsertResult>;
 
   template <typename LookupKeyT>
   auto Erase(LookupKeyT lookup_key) -> bool;
@@ -192,15 +194,16 @@ template <typename KT>
 template <typename LookupKeyT>
 auto SetBase<KT>::Insert(LookupKeyT lookup_key) -> InsertResult {
   return Insert(lookup_key,
-                [](LookupKeyT lookup_key, void* key_storage) -> KeyT* {
-                  return new (key_storage) KeyT(std::move(lookup_key));
+                [](LookupKeyT lookup_key, void* key_storage) {
+                  new (key_storage) KeyT(std::move(lookup_key));
                 });
 }
 
 template <typename KT>
 template <typename LookupKeyT, typename InsertCallbackT>
 auto SetBase<KT>::Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
-    -> InsertResult {
+    -> std::enable_if_t<std::is_invocable_v<InsertCallbackT, LookupKeyT, void*>,
+                        InsertResult> {
   auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
   if (LLVM_LIKELY(!inserted)) {
@@ -209,9 +212,8 @@ auto SetBase<KT>::Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  KeyT* k = &entry->key;
-  k = insert_cb(lookup_key, k);
-  return InsertResult(true, *k);
+  insert_cb(lookup_key, static_cast<void*>(&entry->key));
+  return InsertResult(true, entry->key);
 }
 
 template <typename KeyT>
