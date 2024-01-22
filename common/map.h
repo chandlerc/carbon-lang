@@ -6,7 +6,6 @@
 #define CARBON_COMMON_MAP_H_
 
 #include <algorithm>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
