@@ -611,8 +611,7 @@ class ViewBase {
   friend class Base<KeyT, ValueT>;
 
   ViewBase() = default;
-  ViewBase(ssize_t size, Storage* storage)
-      : size_(size), storage_(storage) {}
+  ViewBase(ssize_t size, Storage* storage) : size_(size), storage_(storage) {}
 
   auto size() const -> ssize_t { return size_; }
 
@@ -862,8 +861,7 @@ auto ViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
 
 template <typename InputKeyT, typename InputValueT>
 template <typename IndexCallbackT, typename GroupCallbackT>
-[[clang::always_inline]] void
-ViewBase<InputKeyT, InputValueT>::ForEachIndex(
+[[clang::always_inline]] void ViewBase<InputKeyT, InputValueT>::ForEachIndex(
     IndexCallbackT index_callback, GroupCallbackT group_callback) {
   uint8_t* groups = groups_ptr();
   EntryT* local_entries = entries();
@@ -886,8 +884,7 @@ ViewBase<InputKeyT, InputValueT>::ForEachIndex(
 }
 
 template <typename InputKeyT, typename InputValueT>
-auto ViewBase<InputKeyT, InputValueT>::CountProbedKeys() const
-    -> ssize_t {
+auto ViewBase<InputKeyT, InputValueT>::CountProbedKeys() const -> ssize_t {
   uint8_t* groups = this->groups_ptr();
   EntryT* local_entries = this->entries();
   ssize_t local_size = this->size();
@@ -909,8 +906,7 @@ auto ViewBase<InputKeyT, InputValueT>::CountProbedKeys() const
 
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-[[clang::noinline]] auto
-Base<InputKeyT, InputValueT>::InsertIntoEmptyIndex(
+[[clang::noinline]] auto Base<InputKeyT, InputValueT>::InsertIntoEmptyIndex(
     LookupKeyT lookup_key) -> EntryT* {
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
@@ -947,7 +943,7 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
 
 template <typename InputKeyT, typename InputValueT>
 void Base<InputKeyT, InputValueT>::Init(ssize_t init_size,
-                                                    Storage* init_storage) {
+                                        Storage* init_storage) {
   size() = init_size;
   storage() = init_storage;
   std::memset(groups_ptr(), 0, init_size);
@@ -956,8 +952,7 @@ void Base<InputKeyT, InputValueT>::Init(ssize_t init_size,
 
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-auto Base<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
-    -> bool {
+auto Base<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key) -> bool {
   EntryT* entry = impl_view_.LookupIndexHashed(lookup_key);
   if (!entry) {
     return false;
@@ -998,8 +993,7 @@ Base<InputKeyT, InputValueT>::~Base() {
 
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-[[clang::noinline]] auto
-Base<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
+[[clang::noinline]] auto Base<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     LookupKeyT lookup_key) -> EntryT* {
   // We collect the probed elements in a small vector for re-insertion. It is
   // tempting to reuse the already allocated storage, but doing so appears to
@@ -1195,8 +1189,8 @@ Base<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 //[[clang::noinline]]
-auto Base<InputKeyT, InputValueT>::InsertIndexHashed(
-    LookupKeyT lookup_key) -> std::pair<EntryT*, bool> {
+auto Base<InputKeyT, InputValueT>::InsertIndexHashed(LookupKeyT lookup_key)
+    -> std::pair<EntryT*, bool> {
   CARBON_DCHECK(this->size() > 0);
 
   uint8_t* groups = this->groups_ptr();

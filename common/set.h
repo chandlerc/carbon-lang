@@ -193,10 +193,9 @@ void SetView<KT>::ForEach(CallbackT callback) {
 template <typename KT>
 template <typename LookupKeyT>
 auto SetBase<KT>::Insert(LookupKeyT lookup_key) -> InsertResult {
-  return Insert(lookup_key,
-                [](LookupKeyT lookup_key, void* key_storage) {
-                  new (key_storage) KeyT(std::move(lookup_key));
-                });
+  return Insert(lookup_key, [](LookupKeyT lookup_key, void* key_storage) {
+    new (key_storage) KeyT(std::move(lookup_key));
+  });
 }
 
 template <typename KT>
