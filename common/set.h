@@ -19,9 +19,9 @@ template <typename KeyT, ssize_t MinSmallSize>
 class Set;
 
 template <typename InputKeyT>
-class SetView : RawHashtable::RawHashtableViewBase<InputKeyT> {
+class SetView : RawHashtable::ViewBase<InputKeyT> {
  public:
-  using BaseT = RawHashtable::RawHashtableViewBase<InputKeyT>;
+  using BaseT = RawHashtable::ViewBase<InputKeyT>;
   using KeyT = typename BaseT::KeyT;
 
   class LookupResult {
@@ -52,7 +52,7 @@ class SetView : RawHashtable::RawHashtableViewBase<InputKeyT> {
   template <typename SetKeyT, ssize_t MinSmallSize>
   friend class Set;
   friend class SetBase<KeyT>;
-  friend class RawHashtable::RawHashtableBase<KeyT>;
+  friend class RawHashtable::Base<KeyT>;
 
   using EntryT = typename BaseT::EntryT;
 
@@ -64,9 +64,9 @@ class SetView : RawHashtable::RawHashtableViewBase<InputKeyT> {
 };
 
 template <typename InputKeyT>
-class SetBase : protected RawHashtable::RawHashtableBase<InputKeyT> {
+class SetBase : protected RawHashtable::Base<InputKeyT> {
  public:
-  using BaseT = RawHashtable::RawHashtableBase<InputKeyT>;
+  using BaseT = RawHashtable::Base<InputKeyT>;
   using KeyT = typename BaseT::KeyT;
   using ViewT = SetView<KeyT>;
   using LookupResult = typename ViewT::LookupResult;

@@ -547,7 +547,7 @@ constexpr auto ComputeStorageEntryOffset(ssize_t size) -> ssize_t {
 constexpr ssize_t MinAllocatedSize = std::max<ssize_t>(64, MaxGroupSize);
 
 template <typename KeyT, typename ValueT>
-constexpr static auto ComputeStorageSize(ssize_t size) -> ssize_t {
+constexpr static auto ComputeStorageSizeImpl(ssize_t size) -> ssize_t {
   return ComputeStorageEntryOffset<KeyT, ValueT>(size) +
          sizeof(StorageEntry<KeyT, ValueT>) * size;
 }
@@ -585,7 +585,7 @@ struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl : Storage {
         "Offset to keys in small size storage doesn't match computed offset!");
     static_assert(
         SmallSize == 0 || sizeof(SmallStorageImpl) ==
-                              ComputeStorageSize<KeyT, ValueT>(SmallSize),
+                              ComputeStorageSizeImpl<KeyT, ValueT>(SmallSize),
         "The small size storage needs to match the dynamically "
         "computed storage size.");
   }
@@ -599,19 +599,19 @@ struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl : Storage {
 
 // Base class that encodes either the absence of a value or a value type.
 template <typename KeyT, typename ValueT = void>
-class RawHashtableBase;
+class Base;
 
 template <typename InputKeyT, typename InputValueT = void>
-class RawHashtableViewBase {
+class ViewBase {
  protected:
   using KeyT = InputKeyT;
   using ValueT = InputValueT;
   using EntryT = StorageEntry<KeyT, ValueT>;
 
-  friend class RawHashtableBase<KeyT, ValueT>;
+  friend class Base<KeyT, ValueT>;
 
-  RawHashtableViewBase() = default;
-  RawHashtableViewBase(ssize_t size, Storage* storage)
+  ViewBase() = default;
+  ViewBase(ssize_t size, Storage* storage)
       : size_(size), storage_(storage) {}
 
   auto size() const -> ssize_t { return size_; }
@@ -642,11 +642,11 @@ class RawHashtableViewBase {
 };
 
 template <typename InputKeyT, typename InputValueT>
-class RawHashtableBase {
+class Base {
  protected:
   using KeyT = InputKeyT;
   using ValueT = InputValueT;
-  using ViewBaseT = RawHashtableViewBase<KeyT, ValueT>;
+  using ViewBaseT = ViewBase<KeyT, ValueT>;
   using EntryT = typename ViewBaseT::EntryT;
 
   template <ssize_t SmallSize>
@@ -665,7 +665,7 @@ class RawHashtableBase {
       std::is_trivially_destructible_v<ValueT>;
 
   static constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
-    return RawHashtable::ComputeStorageSize<KeyT, ValueT>(size);
+    return ComputeStorageSizeImpl<KeyT, ValueT>(size);
   }
 
   static constexpr auto ComputeStorageAlignment() -> std::align_val_t {
@@ -673,7 +673,7 @@ class RawHashtableBase {
   }
 
   static auto Allocate(ssize_t size) -> Storage* {
-    return reinterpret_cast<RawHashtable::Storage*>(__builtin_operator_new(
+    return reinterpret_cast<Storage*>(__builtin_operator_new(
         ComputeStorageSize(size), ComputeStorageAlignment(), std::nothrow_t()));
   }
 
@@ -688,7 +688,7 @@ class RawHashtableBase {
                                      ComputeStorageAlignment());
   }
 
-  RawHashtableBase(int small_size, Storage* small_storage) {
+  Base(int small_size, Storage* small_storage) {
     CARBON_CHECK(small_size >= 0);
     if (small_size > 0) {
       Init(small_size, small_storage);
@@ -701,7 +701,7 @@ class RawHashtableBase {
     }
   }
 
-  ~RawHashtableBase();
+  ~Base();
 
   // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
   operator ViewBaseT() const { return impl_view_; }
@@ -819,7 +819,7 @@ inline auto ComputeControlByte(size_t tag) -> uint8_t {
 // same perf hit as micros.
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
+auto ViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
     LookupKeyT lookup_key) const -> EntryT* {
   ssize_t local_size = size();
   CARBON_DCHECK(local_size > 0);
@@ -863,7 +863,7 @@ auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
 template <typename InputKeyT, typename InputValueT>
 template <typename IndexCallbackT, typename GroupCallbackT>
 [[clang::always_inline]] void
-RawHashtableViewBase<InputKeyT, InputValueT>::ForEachIndex(
+ViewBase<InputKeyT, InputValueT>::ForEachIndex(
     IndexCallbackT index_callback, GroupCallbackT group_callback) {
   uint8_t* groups = groups_ptr();
   EntryT* local_entries = entries();
@@ -886,7 +886,7 @@ RawHashtableViewBase<InputKeyT, InputValueT>::ForEachIndex(
 }
 
 template <typename InputKeyT, typename InputValueT>
-auto RawHashtableViewBase<InputKeyT, InputValueT>::CountProbedKeys() const
+auto ViewBase<InputKeyT, InputValueT>::CountProbedKeys() const
     -> ssize_t {
   uint8_t* groups = this->groups_ptr();
   EntryT* local_entries = this->entries();
@@ -894,7 +894,7 @@ auto RawHashtableViewBase<InputKeyT, InputValueT>::CountProbedKeys() const
   ssize_t count = 0;
   for (ssize_t group_index = 0; group_index < local_size;
        group_index += GroupSize) {
-    auto g = RawHashtable::Group::Load(groups, group_index);
+    auto g = Group::Load(groups, group_index);
     auto present_matched_range = g.MatchPresent();
     for (ssize_t byte_index : present_matched_range) {
       ssize_t index = group_index + byte_index;
@@ -910,7 +910,7 @@ auto RawHashtableViewBase<InputKeyT, InputValueT>::CountProbedKeys() const
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 [[clang::noinline]] auto
-RawHashtableBase<InputKeyT, InputValueT>::InsertIntoEmptyIndex(
+Base<InputKeyT, InputValueT>::InsertIntoEmptyIndex(
     LookupKeyT lookup_key) -> EntryT* {
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
@@ -946,7 +946,7 @@ inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
 }
 
 template <typename InputKeyT, typename InputValueT>
-void RawHashtableBase<InputKeyT, InputValueT>::Init(ssize_t init_size,
+void Base<InputKeyT, InputValueT>::Init(ssize_t init_size,
                                                     Storage* init_storage) {
   size() = init_size;
   storage() = init_storage;
@@ -956,7 +956,7 @@ void RawHashtableBase<InputKeyT, InputValueT>::Init(ssize_t init_size,
 
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
-auto RawHashtableBase<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
+auto Base<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
     -> bool {
   EntryT* entry = impl_view_.LookupIndexHashed(lookup_key);
   if (!entry) {
@@ -992,14 +992,14 @@ auto RawHashtableBase<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key)
 }
 
 template <typename InputKeyT, typename InputValueT>
-RawHashtableBase<InputKeyT, InputValueT>::~RawHashtableBase() {
+Base<InputKeyT, InputValueT>::~Base() {
   DestroyImpl();
 }
 
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 [[clang::noinline]] auto
-RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
+Base<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     LookupKeyT lookup_key) -> EntryT* {
   // We collect the probed elements in a small vector for re-insertion. It is
   // tempting to reuse the already allocated storage, but doing so appears to
@@ -1074,7 +1074,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
     uint64_t high_g = low_g;
     auto present_matched_range = Group::MatchRange(present_mask);
 #else
-    auto g = RawHashtable::Group::Load(old_groups, group_index);
+    auto g = Group::Load(old_groups, group_index);
     g.ClearDeleted();
     auto present_matched_range = g.MatchPresent();
     g.Store(new_groups, group_index);
@@ -1195,7 +1195,7 @@ RawHashtableBase<InputKeyT, InputValueT>::GrowRehashAndInsertIndex(
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 //[[clang::noinline]]
-auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
+auto Base<InputKeyT, InputValueT>::InsertIndexHashed(
     LookupKeyT lookup_key) -> std::pair<EntryT*, bool> {
   CARBON_DCHECK(this->size() > 0);
 
@@ -1280,7 +1280,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
 }
 
 template <typename InputKeyT, typename InputValueT>
-auto RawHashtableBase<InputKeyT, InputValueT>::ClearImpl() -> void {
+auto Base<InputKeyT, InputValueT>::ClearImpl() -> void {
   this->impl_view_.ForEachIndex(
       [this](EntryT* /*entries*/, ssize_t index) {
         // FIXME
@@ -1297,7 +1297,7 @@ auto RawHashtableBase<InputKeyT, InputValueT>::ClearImpl() -> void {
 }
 
 template <typename InputKeyT, typename InputValueT>
-auto RawHashtableBase<InputKeyT, InputValueT>::DestroyImpl() -> void {
+auto Base<InputKeyT, InputValueT>::DestroyImpl() -> void {
   // Nothing to do when in the un-allocated and unused state.
   if (this->size() == 0) {
     return;

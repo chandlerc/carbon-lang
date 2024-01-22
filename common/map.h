@@ -23,8 +23,8 @@ template <typename KeyT, typename ValueT, ssize_t MinSmallSize>
 class Map;
 
 template <typename InputKeyT, typename InputValueT>
-class MapView : RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT> {
-  using BaseT = RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT>;
+class MapView : RawHashtable::ViewBase<InputKeyT, InputValueT> {
+  using BaseT = RawHashtable::ViewBase<InputKeyT, InputValueT>;
   using EntryT = typename BaseT::EntryT;
 
  public:
@@ -72,9 +72,8 @@ class MapView : RawHashtable::RawHashtableViewBase<InputKeyT, InputValueT> {
 };
 
 template <typename InputKeyT, typename InputValueT>
-class MapBase
-    : protected RawHashtable::RawHashtableBase<InputKeyT, InputValueT> {
-  using BaseT = RawHashtable::RawHashtableBase<InputKeyT, InputValueT>;
+class MapBase : protected RawHashtable::Base<InputKeyT, InputValueT> {
+  using BaseT = RawHashtable::Base<InputKeyT, InputValueT>;
 
  protected:
   using EntryT = typename BaseT::EntryT;
@@ -180,9 +179,9 @@ class MapBase
 
 template <typename InputKeyT, typename InputValueT, ssize_t SmallSize = 0>
 class Map : public MapBase<InputKeyT, InputValueT> {
- public:
   using BaseT = MapBase<InputKeyT, InputValueT>;
 
+ public:
   using KeyT = typename BaseT::KeyT;
   using ValueT = typename BaseT::ValueT;
   using ViewT = MapView<KeyT, ValueT>;
