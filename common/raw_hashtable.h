@@ -689,15 +689,16 @@ class RawHashtableBase {
   }
 
   RawHashtableBase(int small_size, Storage* small_storage) {
-    Init(small_size, small_storage);
-    small_size_ = small_size;
-  }
-
-  // An internal constructor used to build temporary map base objects with a
-  // specific allocated size. This is used internally to build ephemeral maps.
-  explicit RawHashtableBase(ssize_t arg_size, Storage* arg_storage) {
-    Init(arg_size, arg_storage);
-    small_size_ = 0;
+    CARBON_CHECK(small_size >= 0);
+    if (small_size > 0) {
+      Init(small_size, small_storage);
+      small_size_ = small_size;
+    } else {
+      // Directly allocate the initial buffer so that the hashtable is never in
+      // an empty state.
+      Init(MinAllocatedSize, Allocate(MinAllocatedSize));
+      small_size_ = 0;
+    }
   }
 
   ~RawHashtableBase();
@@ -821,9 +822,8 @@ template <typename LookupKeyT>
 auto RawHashtableViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
     LookupKeyT lookup_key) const -> EntryT* {
   ssize_t local_size = size();
-  if (LLVM_UNLIKELY(local_size == 0)) {
-    return nullptr;
-  }
+  CARBON_DCHECK(local_size > 0);
+
   uint8_t* groups = groups_ptr();
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
@@ -1197,11 +1197,7 @@ template <typename LookupKeyT>
 //[[clang::noinline]]
 auto RawHashtableBase<InputKeyT, InputValueT>::InsertIndexHashed(
     LookupKeyT lookup_key) -> std::pair<EntryT*, bool> {
-  if (LLVM_UNLIKELY(this->size() == 0)) {
-    this->Init(MinAllocatedSize, Allocate(MinAllocatedSize));
-    --this->growth_budget_;
-    return {this->InsertIntoEmptyIndex(lookup_key), true};
-  }
+  CARBON_DCHECK(this->size() > 0);
 
   uint8_t* groups = this->groups_ptr();
 
