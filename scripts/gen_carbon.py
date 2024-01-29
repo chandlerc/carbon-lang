@@ -34,7 +34,7 @@ def emit_method(i: int, j: int) -> None:
     for p in range(num_params):
         param_name = random_id() + str(p)
         params += f'{"" if p == 0 else ", "}{param_name}: i32'
-    print(f"  fn {name}[self: Self]();")
+    print(f"  fn {name}[self: Self]({params});")
 
 
 def emit_class(i: int) -> None:
