@@ -45,6 +45,18 @@ class MapView : RawHashtable::ViewBase<InputKeyT, InputValueT> {
     EntryT* entry_ = nullptr;
   };
 
+  // Enable implicit conversions that add `const`-ness to either key or value
+  // type. This is always safe to do with a view. We use a template to avoid
+  // needing all 3 versions.
+  template <typename OtherKeyT, typename OtherValueT>
+  // NOLINTNEXTLINE(google-explicit-constructor)
+  MapView(MapView<OtherKeyT, OtherValueT> other_view)
+    requires(std::same_as<KeyT, OtherKeyT> ||
+             std::same_as<KeyT, const OtherKeyT>) &&
+            (std::same_as<ValueT, OtherValueT> ||
+             std::same_as<ValueT, const OtherValueT>)
+      : BaseT(other_view) {}
+
   template <typename LookupKeyT>
   auto Contains(LookupKeyT lookup_key) const -> bool;
 
@@ -63,6 +75,9 @@ class MapView : RawHashtable::ViewBase<InputKeyT, InputValueT> {
   template <typename MapKeyT, typename MapValueT, ssize_t MinSmallSize>
   friend class Map;
   friend class MapBase<KeyT, ValueT>;
+  friend class MapView<const KeyT, ValueT>;
+  friend class MapView<KeyT, const ValueT>;
+  friend class MapView<const KeyT, const ValueT>;
 
   MapView() = default;
   // NOLINTNEXTLINE(google-explicit-constructor): Implicit by design.
@@ -102,6 +117,19 @@ class MapBase : protected RawHashtable::Base<InputKeyT, InputValueT> {
 
   // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
   operator ViewT() const { return this->impl_view_; }
+
+  // We can't chain the above conversion with the conversions on `ViewT` to add
+  // const, so explicitly support adding const to produce a view here.
+  template <typename OtherKeyT, typename OtherValueT>
+  // NOLINTNEXTLINE(google-explicit-constructor)
+  operator MapView<OtherKeyT, OtherValueT>() const
+    requires(std::same_as<KeyT, OtherKeyT> ||
+             std::same_as<const KeyT, OtherKeyT>) &&
+            (std::same_as<ValueT, OtherValueT> ||
+             std::same_as<const ValueT, OtherValueT>)
+  {
+    return ViewT(*this);
+  }
 
   template <typename LookupKeyT>
   auto Contains(LookupKeyT lookup_key) const -> bool {

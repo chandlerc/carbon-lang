@@ -20,8 +20,9 @@ class Set;
 
 template <typename InputKeyT>
 class SetView : RawHashtable::ViewBase<InputKeyT> {
- public:
   using BaseT = RawHashtable::ViewBase<InputKeyT>;
+
+ public:
   using KeyT = typename BaseT::KeyT;
 
   class LookupResult {
@@ -36,6 +37,12 @@ class SetView : RawHashtable::ViewBase<InputKeyT> {
    private:
     KeyT* key_ = nullptr;
   };
+
+  // Enable implicit conversions that add `const`-ness to the key type.
+  // NOLINTNEXTLINE(google-explicit-constructor)
+  SetView(SetView<std::remove_const_t<KeyT>> other_view)
+    requires(!std::same_as<KeyT, std::remove_const_t<KeyT>>)
+      : BaseT(other_view) {}
 
   template <typename LookupKeyT>
   auto Contains(LookupKeyT lookup_key) const -> bool;
@@ -53,6 +60,7 @@ class SetView : RawHashtable::ViewBase<InputKeyT> {
   friend class Set;
   friend class SetBase<KeyT>;
   friend class RawHashtable::Base<KeyT>;
+  friend class SetView<const KeyT>;
 
   using EntryT = typename BaseT::EntryT;
 
@@ -65,8 +73,9 @@ class SetView : RawHashtable::ViewBase<InputKeyT> {
 
 template <typename InputKeyT>
 class SetBase : protected RawHashtable::Base<InputKeyT> {
- public:
   using BaseT = RawHashtable::Base<InputKeyT>;
+
+ public:
   using KeyT = typename BaseT::KeyT;
   using ViewT = SetView<KeyT>;
   using LookupResult = typename ViewT::LookupResult;
@@ -88,6 +97,11 @@ class SetBase : protected RawHashtable::Base<InputKeyT> {
 
   // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
   operator ViewT() const { return this->impl_view_; }
+
+  // We can't chain the above conversion with the conversions on `ViewT` to add
+  // const, so explicitly support adding const to produce a view here.
+  // NOLINTNEXTLINE(google-explicit-constructor): Designed to implicitly decay.
+  operator SetView<const KeyT>() const { return ViewT(*this); }
 
   template <typename LookupKeyT>
   auto Contains(LookupKeyT lookup_key) const -> bool {

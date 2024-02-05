@@ -49,6 +49,21 @@ auto MakeElements(RangeT&& range, RangeTs&&... ranges) {
   return elements;
 }
 
+TEST(SetTest, Conversions) {
+  Set<int> s;
+  ASSERT_TRUE(s.Insert(1).is_inserted());
+  ASSERT_TRUE(s.Insert(2).is_inserted());
+  ASSERT_TRUE(s.Insert(3).is_inserted());
+  ASSERT_TRUE(s.Insert(4).is_inserted());
+
+  SetView<int> sv = s;
+  SetView<const int> csv = sv;
+  SetView<const int> csv2 = s;
+  EXPECT_TRUE(sv.Contains(1));
+  EXPECT_TRUE(csv.Contains(2));
+  EXPECT_TRUE(csv2.Contains(3));
+}
+
 TEST(SetTest, Basic) {
   Set<int> s;
 

@@ -593,7 +593,7 @@ struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl : Storage {
   Group groups[SmallNumGroups];
 
   union {
-    StorageEntry<KeyT, ValueT> entries[SmallSize];
+    mutable StorageEntry<KeyT, ValueT> entries[SmallSize];
   };
 };
 
@@ -608,10 +608,27 @@ class ViewBase {
   using ValueT = InputValueT;
   using EntryT = StorageEntry<KeyT, ValueT>;
 
+  using ConstViewBaseT = ViewBase<const KeyT, const ValueT>;
+
   friend class Base<KeyT, ValueT>;
+
+  // Make more-`const` types friends to enable conversions that add `const`.
+  friend class ViewBase<const KeyT, ValueT>;
+  friend class ViewBase<KeyT, const ValueT>;
+  friend class ViewBase<const KeyT, const ValueT>;
 
   ViewBase() = default;
   ViewBase(ssize_t size, Storage* storage) : size_(size), storage_(storage) {}
+
+  // Support adding `const` to either key or value type of some other view.
+  template <typename OtherKeyT, typename OtherValueT>
+  // NOLINTNEXTLINE(google-explicit-constructor)
+  ViewBase(ViewBase<OtherKeyT, OtherValueT> other_view)
+    requires(std::same_as<KeyT, OtherKeyT> ||
+             std::same_as<KeyT, const OtherKeyT>) &&
+                (std::same_as<ValueT, OtherValueT> ||
+                 std::same_as<ValueT, const OtherValueT>)
+      : size_(other_view.size_), storage_(other_view.storage_) {}
 
   auto size() const -> ssize_t { return size_; }
 
@@ -651,7 +668,7 @@ class Base {
   template <ssize_t SmallSize>
   using SmallStorageT = SmallStorageImpl<KeyT, ValueT, SmallSize>;
 
-  static constexpr bool HasValue = !std::is_same_v<ValueT, void>;
+  static constexpr bool HasValue = !std::is_same_v<ValueT, const void>;
 
   // We have an important optimization for trivially relocatable keys. But we
   // don't have a relocatable trait (yet) so we approximate it here.

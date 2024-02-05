@@ -57,6 +57,23 @@ auto MakeKeyValues(ValueCB value_cb, RangeT&& range, RangeTs&&... ranges) {
   return elements;
 }
 
+TEST(MapTest, Conversions) {
+  Map<int, int> m;
+  ASSERT_TRUE(m.Insert(1, 101).is_inserted());
+  ASSERT_TRUE(m.Insert(2, 102).is_inserted());
+  ASSERT_TRUE(m.Insert(3, 103).is_inserted());
+  ASSERT_TRUE(m.Insert(4, 104).is_inserted());
+
+  MapView<int, int> mv = m;
+  MapView<const int, int> cmv = m;
+  MapView<int, const int> cmv2 = m;
+  MapView<const int, const int> cmv3 = m;
+  EXPECT_TRUE(mv.Contains(1));
+  EXPECT_TRUE(cmv.Contains(2));
+  EXPECT_TRUE(cmv2.Contains(3));
+  EXPECT_TRUE(cmv3.Contains(4));
+}
+
 TEST(MapTest, Basic) {
   Map<int, int> m;
 
