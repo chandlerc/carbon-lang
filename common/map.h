@@ -155,18 +155,15 @@ class MapBase : protected RawHashtable::Base<InputKeyT, InputValueT> {
   auto Insert(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
 
   template <typename LookupKeyT, typename ValueCallbackT>
-  auto
-  Insert(LookupKeyT lookup_key, ValueCallbackT value_cb) -> std::enable_if_t<
-      !std::is_same_v<ValueT, ValueCallbackT> &&
-          std::is_same_v<ValueT, decltype(std::declval<ValueCallbackT>()())>,
-      InsertKVResult>;
+  auto Insert(LookupKeyT lookup_key, ValueCallbackT value_cb) -> InsertKVResult
+    requires(!std::same_as<ValueT, ValueCallbackT> &&
+             std::same_as<ValueT, decltype(std::declval<ValueCallbackT>()())>);
 
   template <typename LookupKeyT, typename InsertCallbackT>
   auto Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
-      -> std::enable_if_t<
-          !std::is_same_v<ValueT, InsertCallbackT> &&
-              std::is_invocable_v<InsertCallbackT, LookupKeyT, void*, void*>,
-          InsertKVResult>;
+      -> InsertKVResult
+    requires(!std::same_as<ValueT, InsertCallbackT> &&
+             std::invocable<InsertCallbackT, LookupKeyT, void*, void*>);
 
   template <typename LookupKeyT>
   auto Update(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
@@ -290,11 +287,10 @@ template <typename KT, typename VT>
 template <typename LookupKeyT, typename ValueCallbackT>
 [[clang::always_inline]] auto MapBase<KT, VT>::Insert(LookupKeyT lookup_key,
                                                       ValueCallbackT value_cb)
-    -> std::enable_if_t<
-        !std::is_same_v<ValueT, ValueCallbackT> &&
-            std::is_same_v<ValueT, decltype(std::declval<ValueCallbackT>()())>,
-
-        InsertKVResult> {
+    -> InsertKVResult
+  requires(!std::same_as<ValueT, ValueCallbackT> &&
+           std::same_as<ValueT, decltype(std::declval<ValueCallbackT>()())>)
+{
   return Insert(lookup_key,
                 [&value_cb](LookupKeyT lookup_key, void* key_storage,
                             void* value_storage) -> std::pair<KeyT*, ValueT*> {
@@ -308,10 +304,10 @@ template <typename KT, typename VT>
 template <typename LookupKeyT, typename InsertCallbackT>
 [[clang::always_inline]] auto MapBase<KT, VT>::Insert(LookupKeyT lookup_key,
                                                       InsertCallbackT insert_cb)
-    -> std::enable_if_t<
-        !std::is_same_v<ValueT, InsertCallbackT> &&
-            std::is_invocable_v<InsertCallbackT, LookupKeyT, void*, void*>,
-        InsertKVResult> {
+    -> InsertKVResult
+  requires(!std::same_as<ValueT, InsertCallbackT> &&
+           std::invocable<InsertCallbackT, LookupKeyT, void*, void*>)
+{
   auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
 

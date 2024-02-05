@@ -126,9 +126,8 @@ class SetBase : protected RawHashtable::Base<InputKeyT> {
   auto Insert(LookupKeyT lookup_key) -> InsertResult;
 
   template <typename LookupKeyT, typename InsertCallbackT>
-  auto
-  Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb) -> std::enable_if_t<
-      std::is_invocable_v<InsertCallbackT, LookupKeyT, void*>, InsertResult>;
+  auto Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb) -> InsertResult
+    requires std::invocable<InsertCallbackT, LookupKeyT, void*>;
 
   template <typename LookupKeyT>
   auto Erase(LookupKeyT lookup_key) -> bool;
@@ -215,8 +214,9 @@ auto SetBase<KT>::Insert(LookupKeyT lookup_key) -> InsertResult {
 template <typename KT>
 template <typename LookupKeyT, typename InsertCallbackT>
 auto SetBase<KT>::Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
-    -> std::enable_if_t<std::is_invocable_v<InsertCallbackT, LookupKeyT, void*>,
-                        InsertResult> {
+    -> InsertResult
+  requires std::invocable<InsertCallbackT, LookupKeyT, void*>
+{
   auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
   if (LLVM_LIKELY(!inserted)) {
