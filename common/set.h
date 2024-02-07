@@ -246,7 +246,7 @@ void Set<KeyT, SmallSize>::Reset() {
 
   // Re-initialize the whole thing.
   CARBON_DCHECK(this->small_size() == SmallSize);
-  this->Init(SmallSize, small_storage());
+  this->ConstructImpl(small_storage());
 }
 
 }  // namespace Carbon

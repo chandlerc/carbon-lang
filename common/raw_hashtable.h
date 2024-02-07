@@ -704,17 +704,9 @@ class Base {
                                      ComputeStorageAlignment());
   }
 
-  Base(int small_size, Storage* small_storage) {
+  Base(int small_size, Storage* small_storage) : small_size_(small_size) {
     CARBON_CHECK(small_size >= 0);
-    if (small_size > 0) {
-      Init(small_size, small_storage);
-      small_size_ = small_size;
-    } else {
-      // Directly allocate the initial buffer so that the hashtable is never in
-      // an empty state.
-      Init(MinAllocatedSize, Allocate(MinAllocatedSize));
-      small_size_ = 0;
-    }
+    ConstructImpl(small_storage);
   }
 
   ~Base();
@@ -750,6 +742,7 @@ class Base {
 
   auto ClearImpl() -> void;
   auto DestroyImpl() -> void;
+  auto ConstructImpl(Storage* small_storage) -> void;
 
   ViewBaseT impl_view_;
   int growth_budget_;
@@ -1331,6 +1324,18 @@ auto Base<InputKeyT, InputValueT>::DestroyImpl() -> void {
   // Just deallocate the storage without updating anything when destroying the
   // object.
   Deallocate(this->storage(), this->size());
+}
+
+template <typename InputKeyT, typename InputValueT>
+auto Base<InputKeyT, InputValueT>::ConstructImpl(Storage* small_storage)
+    -> void {
+  if (small_size_ > 0) {
+    Init(small_size_, small_storage);
+  } else {
+    // Directly allocate the initial buffer so that the hashtable is never in
+    // an empty state.
+    Init(MinAllocatedSize, Allocate(MinAllocatedSize));
+  }
 }
 
 }  // namespace Carbon::RawHashtable

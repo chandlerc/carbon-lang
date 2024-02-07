@@ -7,6 +7,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <compare>
 #include <initializer_list>
 #include <type_traits>
 #include <utility>
@@ -57,8 +58,53 @@ auto MakeKeyValues(ValueCB value_cb, RangeT&& range, RangeTs&&... ranges) {
   return elements;
 }
 
-TEST(MapTest, Conversions) {
-  Map<int, int> m;
+// Non-trivial type for testing.
+struct TestData : Printable<TestData> {
+  int value;
+
+  // NOLINTNEXTLINE: google-explicit-constructor
+  TestData(int v) : value(v) {
+    CARBON_CHECK(value > 0);
+  }
+  ~TestData() {
+    CARBON_CHECK(value >= 0);
+    value = -1;
+  }
+  TestData(const TestData& other) : TestData(other.value) {}
+  TestData(TestData&& other) noexcept : TestData(other.value) {
+    other.value = 0;
+  }
+  auto Print(llvm::raw_ostream& out) const -> void {
+    out << value;
+  }
+
+  friend auto operator==(TestData lhs, TestData rhs) -> bool {
+    return lhs.value == rhs.value;
+  }
+  friend auto operator<=>(TestData lhs, TestData rhs)
+      -> std::strong_ordering {
+    return lhs.value <=> rhs.value;
+  }
+
+  friend auto CarbonHashValue(TestData data, uint64_t seed) -> HashCode {
+    return Carbon::HashValue(data.value, seed);
+  }
+};
+
+template <typename MapT>
+class MapTest : public ::testing::Test {
+  public:
+  using KeyT = MapT::KeyT;
+  using ValueT = MapT::ValueT;
+};
+
+using Types =
+    ::testing::Types<Map<int, int>, Map<int, int, 16>, Map<int, int, 64>,
+                     Map<TestData, TestData>, Map<TestData, TestData, 16>>;
+TYPED_TEST_SUITE(MapTest, Types);
+
+TYPED_TEST(MapTest, Conversions) {
+  TypeParam m;
   ASSERT_TRUE(m.Insert(1, 101).is_inserted());
   ASSERT_TRUE(m.Insert(2, 102).is_inserted());
   ASSERT_TRUE(m.Insert(3, 103).is_inserted());
@@ -74,8 +120,8 @@ TEST(MapTest, Conversions) {
   EXPECT_TRUE(cmv3.Contains(4));
 }
 
-TEST(MapTest, Basic) {
-  Map<int, int> m;
+TYPED_TEST(MapTest, Basic) {
+  TypeParam m;
 
   EXPECT_FALSE(m.Contains(42));
   EXPECT_EQ(nullptr, m[42]);
@@ -126,9 +172,27 @@ TEST(MapTest, Basic) {
       m, MakeKeyValues([](int k) { return k * 100 + 1; }, llvm::seq(1, 512)));
 }
 
-TEST(MapTest, ComplexOpSequence) {
+TYPED_TEST(MapTest, FactoryAPI) {
+  TypeParam m;
+  EXPECT_TRUE(m.Insert(1, [] { return 100; }).is_inserted());
+  ASSERT_TRUE(m.Contains(1));
+  EXPECT_EQ(100, *m[1]);
+  // Reinsertion doesn't invoke the callback.
+  EXPECT_FALSE(m.Insert(1, []() -> int {
+                  llvm_unreachable("Should never be called!");
+                }).is_inserted());
+  // Update does invoke the callback.
+  auto i_result = m.Update(1, [] { return 101; });
+  EXPECT_FALSE(i_result.is_inserted());
+  EXPECT_EQ(101, i_result.value());
+  EXPECT_EQ(101, *m[1]);
+}
+
+// This test is largely exercising the underlying `RawHashtable` implementation
+// with complex growth, erasure, and re-growth.
+TYPED_TEST(MapTest, ComplexOpSequence) {
   // Use a small size as well to cover more growth scenarios.
-  Map<int, int, 16> m;
+  TypeParam m;
 
   EXPECT_FALSE(m.Contains(42));
   EXPECT_EQ(nullptr, m[42]);
@@ -353,22 +417,6 @@ TEST(MapTest, ComplexOpSequence) {
   ExpectMapElementsAre(
       m, MakeKeyValues([](int k) { return k * 100 + 2 + (k == 93); },
                        llvm::seq(75, 102), llvm::seq(136, 175)));
-}
-
-TEST(MapTest, FactoryAPI) {
-  Map<int, int, 16> m;
-  EXPECT_TRUE(m.Insert(1, [] { return 100; }).is_inserted());
-  ASSERT_TRUE(m.Contains(1));
-  EXPECT_EQ(100, *m[1]);
-  // Reinsertion doesn't invoke the callback.
-  EXPECT_FALSE(m.Insert(1, []() -> int {
-                  llvm_unreachable("Should never be called!");
-                }).is_inserted());
-  // Update does invoke the callback.
-  auto i_result = m.Update(1, [] { return 101; });
-  EXPECT_FALSE(i_result.is_inserted());
-  EXPECT_EQ(101, i_result.value());
-  EXPECT_EQ(101, *m[1]);
 }
 
 }  // namespace
