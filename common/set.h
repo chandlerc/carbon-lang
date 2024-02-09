@@ -28,7 +28,7 @@ class SetView : RawHashtable::ViewBase<InputKeyT> {
   class LookupResult {
    public:
     LookupResult() = default;
-    explicit LookupResult(KeyT* key) : key_(key) {}
+    explicit LookupResult(KeyT& key) : key_(&key) {}
 
     explicit operator bool() const { return key_ != nullptr; }
 
@@ -192,14 +192,14 @@ auto SetView<KT>::Lookup(LookupKeyT lookup_key) const -> LookupResult {
     return LookupResult();
   }
 
-  return LookupResult(&entry->key);
+  return LookupResult(entry->key());
 }
 
 template <typename KT>
 template <typename CallbackT>
 void SetView<KT>::ForEach(CallbackT callback) {
   this->ForEachIndex(
-      [callback](EntryT* entries, ssize_t i) { callback(entries[i].key); },
+      [callback](EntryT* entries, ssize_t i) { callback(entries[i].key()); },
       [](auto...) {});
 }
 
@@ -220,13 +220,13 @@ auto SetBase<KT>::Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
   auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
   if (LLVM_LIKELY(!inserted)) {
-    return InsertResult(false, entry->key);
+    return InsertResult(false, entry->key());
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  insert_cb(lookup_key, static_cast<void*>(&entry->key));
-  return InsertResult(true, entry->key);
+  insert_cb(lookup_key, static_cast<void*>(&entry->key_storage));
+  return InsertResult(true, entry->key());
 }
 
 template <typename KeyT>

@@ -8,11 +8,15 @@
 #include <gtest/gtest.h>
 
 #include <initializer_list>
+#include <type_traits>
 #include <vector>
 
+#include "common/raw_hashtable_test_helpers.h"
+ 
 namespace Carbon {
 namespace {
 
+using RawHashtable::TestData;
 using ::testing::UnorderedElementsAreArray;
 
 template <typename SetT, typename MatcherRangeT>
@@ -49,23 +53,33 @@ auto MakeElements(RangeT&& range, RangeTs&&... ranges) {
   return elements;
 }
 
-TEST(SetTest, Conversions) {
-  Set<int> s;
+template <typename SetT>
+class SetTest: public ::testing::Test {};
+
+using Types = ::testing::Types<Set<int>, Set<int, 16>, Set<int, 128>,
+                               Set<TestData>, Set<TestData, 16>>;
+TYPED_TEST_SUITE(SetTest, Types);
+
+TYPED_TEST(SetTest, Conversions) {
+  using SetT = TypeParam;
+  using KeyT = SetT::KeyT;
+  SetT s;
   ASSERT_TRUE(s.Insert(1).is_inserted());
   ASSERT_TRUE(s.Insert(2).is_inserted());
   ASSERT_TRUE(s.Insert(3).is_inserted());
   ASSERT_TRUE(s.Insert(4).is_inserted());
 
-  SetView<int> sv = s;
-  SetView<const int> csv = sv;
-  SetView<const int> csv2 = s;
+  SetView<KeyT> sv = s;
+  SetView<const KeyT> csv = sv;
+  SetView<const KeyT> csv2 = s;
   EXPECT_TRUE(sv.Contains(1));
   EXPECT_TRUE(csv.Contains(2));
   EXPECT_TRUE(csv2.Contains(3));
 }
 
-TEST(SetTest, Basic) {
-  Set<int> s;
+TYPED_TEST(SetTest, Basic) {
+  using SetT = TypeParam;
+  SetT s;
 
   EXPECT_FALSE(s.Contains(42));
   EXPECT_TRUE(s.Insert(1).is_inserted());
@@ -96,8 +110,9 @@ TEST(SetTest, Basic) {
   ExpectSetElementsAre(s, MakeElements(llvm::seq(1, 512)));
 }
 
-TEST(SetTest, FactoryAPI) {
-  Set<int, 16> s;
+TYPED_TEST(SetTest, FactoryAPI) {
+  using SetT = TypeParam;
+  SetT s;
   EXPECT_TRUE(s.Insert(1, [](int k, void* key_storage) {
                  return new (key_storage) int(k);
                }).is_inserted());

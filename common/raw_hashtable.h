@@ -458,6 +458,14 @@ struct StorageEntry {
       IsTriviallyDestructible && std::is_trivially_move_constructible_v<KeyT> &&
       std::is_trivially_move_constructible_v<ValueT>;
 
+  auto key() -> KeyT& {
+    return *std::launder(reinterpret_cast<KeyT*>(&key_storage));
+  }
+
+  auto value() -> ValueT& {
+    return *std::launder(reinterpret_cast<ValueT*>(&value_storage));
+  }
+
   // We handle destruction and move manually as we only want to expose distinct
   // `KeyT` and `ValueT` subobjects to user code that may need to do in-place
   // construction. As a consequence, this struct only provides the storage and
@@ -466,26 +474,22 @@ struct StorageEntry {
   auto Destroy() -> void {
     static_assert(!IsTriviallyDestructible,
                   "Should never instantiate when trivial!");
-    key.~KeyT();
-    value.~ValueT();
+    key().~KeyT();
+    value().~ValueT();
   }
   auto Move(StorageEntry& new_entry) -> void {
     if constexpr (IsTriviallyRelocatable) {
       memcpy(&new_entry, this, sizeof(StorageEntry));
     } else {
-      new (&new_entry.key) KeyT(std::move(key));
-      key.~KeyT();
-      new (&new_entry.value) KeyT(std::move(value));
-      value.~ValueT();
+      new (&new_entry.key_storage) KeyT(std::move(key()));
+      key().~KeyT();
+      new (&new_entry.value_storage) KeyT(std::move(value()));
+      value().~ValueT();
     }
   }
 
-  union {
-    KeyT key;
-  };
-  union {
-    ValueT value;
-  };
+  alignas(KeyT) std::byte key_storage[sizeof(KeyT)];
+  alignas(ValueT) std::byte value_storage[sizeof(ValueT)];
 };
 
 template <typename KeyT>
@@ -496,23 +500,25 @@ struct StorageEntry<KeyT, void> {
   static constexpr bool IsTriviallyRelocatable =
       IsTriviallyDestructible && std::is_trivially_move_constructible_v<KeyT>;
 
+  auto key() -> KeyT& {
+    return *std::launder(reinterpret_cast<KeyT*>(&key_storage));
+  }
+
   auto Destroy() -> void {
     static_assert(!IsTriviallyDestructible,
                   "Should never instantiate when trivial!");
-    key.~KeyT();
+    key().~KeyT();
   }
   auto Move(StorageEntry& new_entry) -> void {
     if constexpr (IsTriviallyRelocatable) {
       memcpy(&new_entry, this, sizeof(StorageEntry));
     } else {
-      new (&new_entry.key) KeyT(std::move(key));
-      key.~KeyT();
+      new (&new_entry.key_storage) KeyT(std::move(key()));
+      key().~KeyT();
     }
   }
 
-  union {
-    KeyT key;
-  };
+  alignas(KeyT) std::byte key_storage[sizeof(KeyT)];
 };
 
 template <typename KeyT, typename ValueT>
@@ -850,7 +856,7 @@ auto ViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
       do {
         ssize_t index = group_index + *byte_it;
         EntryT* entry = &local_entries[index];
-        if (LLVM_LIKELY(entry->key == lookup_key)) {
+        if (LLVM_LIKELY(entry->key() == lookup_key)) {
           __builtin_assume(entry != nullptr);
           return entry;
         }
@@ -905,7 +911,7 @@ auto ViewBase<InputKeyT, InputValueT>::CountProbedKeys() const -> ssize_t {
     auto present_matched_range = g.MatchPresent();
     for (ssize_t byte_index : present_matched_range) {
       ssize_t index = group_index + byte_index;
-      HashCode hash = HashValue(local_entries[index].key, ComputeSeed());
+      HashCode hash = HashValue(local_entries[index].key(), ComputeSeed());
       ssize_t hash_index = hash.ExtractIndexAndTag<7>().first &
                            ComputeProbeMaskFromSize(local_size);
       count += static_cast<ssize_t>(hash_index != group_index);
@@ -1091,7 +1097,7 @@ template <typename LookupKeyT>
       CARBON_DCHECK(new_groups[old_index] == old_groups[old_index]);
       CARBON_DCHECK(new_groups[old_index | old_size] == old_groups[old_index]);
 #endif
-      HashCode hash = HashValue(old_entries[old_index].key, ComputeSeed());
+      HashCode hash = HashValue(old_entries[old_index].key(), ComputeSeed());
       ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
                                ComputeProbeMaskFromSize(old_size);
       if (LLVM_UNLIKELY(old_hash_index != group_index)) {
@@ -1162,7 +1168,8 @@ template <typename LookupKeyT>
     // We may end up needing to do a sequence of re-inserts, swapping out keys
     // and values each time, so we enter a loop here and break out of it for the
     // simple cases of re-inserting into a genuinely empty slot.
-    EntryT* new_entry = this->InsertIntoEmptyIndex(old_entries[old_index].key);
+    EntryT* new_entry =
+        this->InsertIntoEmptyIndex(old_entries[old_index].key());
     old_entries[old_index].Move(*new_entry);
   }
   CARBON_DCHECK(count ==
@@ -1237,7 +1244,7 @@ auto Base<InputKeyT, InputValueT>::InsertIndexHashed(LookupKeyT lookup_key)
       auto byte_end = control_byte_matched_range.end();
       do {
         EntryT* entry = &group_entries[*byte_it];
-        if (LLVM_LIKELY(entry->key == lookup_key)) {
+        if (LLVM_LIKELY(entry->key() == lookup_key)) {
           return {entry, false};
         }
         ++byte_it;

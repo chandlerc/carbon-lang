@@ -7,15 +7,17 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <compare>
 #include <initializer_list>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "common/raw_hashtable_test_helpers.h"
+
 namespace Carbon::Testing {
 namespace {
 
+using RawHashtable::TestData;
 using ::testing::Pair;
 using ::testing::UnorderedElementsAreArray;
 
@@ -58,45 +60,8 @@ auto MakeKeyValues(ValueCB value_cb, RangeT&& range, RangeTs&&... ranges) {
   return elements;
 }
 
-// Non-trivial type for testing.
-struct TestData : Printable<TestData> {
-  int value;
-
-  // NOLINTNEXTLINE: google-explicit-constructor
-  TestData(int v) : value(v) {
-    CARBON_CHECK(value > 0);
-  }
-  ~TestData() {
-    CARBON_CHECK(value >= 0);
-    value = -1;
-  }
-  TestData(const TestData& other) : TestData(other.value) {}
-  TestData(TestData&& other) noexcept : TestData(other.value) {
-    other.value = 0;
-  }
-  auto Print(llvm::raw_ostream& out) const -> void {
-    out << value;
-  }
-
-  friend auto operator==(TestData lhs, TestData rhs) -> bool {
-    return lhs.value == rhs.value;
-  }
-  friend auto operator<=>(TestData lhs, TestData rhs)
-      -> std::strong_ordering {
-    return lhs.value <=> rhs.value;
-  }
-
-  friend auto CarbonHashValue(TestData data, uint64_t seed) -> HashCode {
-    return Carbon::HashValue(data.value, seed);
-  }
-};
-
 template <typename MapT>
-class MapTest : public ::testing::Test {
-  public:
-  using KeyT = MapT::KeyT;
-  using ValueT = MapT::ValueT;
-};
+class MapTest : public ::testing::Test {};
 
 using Types =
     ::testing::Types<Map<int, int>, Map<int, int, 16>, Map<int, int, 64>,
@@ -104,16 +69,21 @@ using Types =
 TYPED_TEST_SUITE(MapTest, Types);
 
 TYPED_TEST(MapTest, Conversions) {
-  TypeParam m;
+  using MapT = TypeParam;
+  using KeyT = MapT::KeyT;
+  using ValueT = MapT::ValueT;
+
+  MapT m;
+
   ASSERT_TRUE(m.Insert(1, 101).is_inserted());
   ASSERT_TRUE(m.Insert(2, 102).is_inserted());
   ASSERT_TRUE(m.Insert(3, 103).is_inserted());
   ASSERT_TRUE(m.Insert(4, 104).is_inserted());
 
-  MapView<int, int> mv = m;
-  MapView<const int, int> cmv = m;
-  MapView<int, const int> cmv2 = m;
-  MapView<const int, const int> cmv3 = m;
+  MapView<KeyT, ValueT> mv = m;
+  MapView<const KeyT, ValueT> cmv = m;
+  MapView<KeyT, const ValueT> cmv2 = m;
+  MapView<const KeyT, const ValueT> cmv3 = m;
   EXPECT_TRUE(mv.Contains(1));
   EXPECT_TRUE(cmv.Contains(2));
   EXPECT_TRUE(cmv2.Contains(3));

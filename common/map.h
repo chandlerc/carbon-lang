@@ -6,6 +6,7 @@
 #define CARBON_COMMON_MAP_H_
 
 #include <algorithm>
+#include <concepts>
 #include <type_traits>
 #include <utility>
 
@@ -38,8 +39,8 @@ class MapView : RawHashtable::ViewBase<InputKeyT, InputValueT> {
 
     explicit operator bool() const { return entry_ != nullptr; }
 
-    auto key() const -> KeyT& { return entry_->key; }
-    auto value() const -> ValueT& { return entry_->value; }
+    auto key() const -> KeyT& { return entry_->key(); }
+    auto value() const -> ValueT& { return entry_->value(); }
 
    private:
     EntryT* entry_ = nullptr;
@@ -107,8 +108,8 @@ class MapBase : protected RawHashtable::Base<InputKeyT, InputValueT> {
 
     auto is_inserted() const -> bool { return inserted_; }
 
-    auto key() const -> KeyT& { return entry_->key; }
-    auto value() const -> ValueT& { return entry_->value; }
+    auto key() const -> KeyT& { return entry_->key(); }
+    auto value() const -> ValueT& { return entry_->value(); }
 
    private:
     EntryT* entry_;
@@ -154,10 +155,14 @@ class MapBase : protected RawHashtable::Base<InputKeyT, InputValueT> {
   template <typename LookupKeyT>
   auto Insert(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
 
+  // TODO: The `;` formatting below appears to be bugs in clang-format with
+  // concepts that should be filed upstream.
   template <typename LookupKeyT, typename ValueCallbackT>
   auto Insert(LookupKeyT lookup_key, ValueCallbackT value_cb) -> InsertKVResult
-    requires(!std::same_as<ValueT, ValueCallbackT> &&
-             std::same_as<ValueT, decltype(std::declval<ValueCallbackT>()())>);
+    requires(
+        !std::same_as<ValueT, ValueCallbackT> &&
+        std::convertible_to<decltype(std::declval<ValueCallbackT>()()), ValueT>)
+  ;
 
   template <typename LookupKeyT, typename InsertCallbackT>
   auto Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
@@ -170,20 +175,20 @@ class MapBase : protected RawHashtable::Base<InputKeyT, InputValueT> {
 
   template <typename LookupKeyT, typename ValueCallbackT>
   auto
-  Update(LookupKeyT lookup_key, ValueCallbackT value_cb) -> std::enable_if_t<
-      !std::is_same_v<ValueT, ValueCallbackT> &&
-          std::is_same_v<ValueT, decltype(std::declval<ValueCallbackT>()())>,
-      InsertKVResult>;
+  Update(LookupKeyT lookup_key, ValueCallbackT value_cb) -> InsertKVResult
+    requires(
+        !std::same_as<ValueT, ValueCallbackT> &&
+        std::convertible_to<decltype(std::declval<ValueCallbackT>()()), ValueT>)
+  ;
 
   template <typename LookupKeyT, typename InsertCallbackT,
             typename UpdateCallbackT>
   auto Update(LookupKeyT lookup_key, InsertCallbackT insert_cb,
               UpdateCallbackT update_cb)
-      -> std::enable_if_t<
-          !std::is_same_v<ValueT, InsertCallbackT> &&
-              std::is_invocable_v<InsertCallbackT, LookupKeyT, void*, void*> &&
-              std::is_invocable_v<UpdateCallbackT, KeyT&, ValueT&>,
-          InsertKVResult>;
+      -> InsertKVResult
+    requires(!std::same_as<ValueT, InsertCallbackT> &&
+             std::invocable<InsertCallbackT, LookupKeyT, void*, void*> &&
+             std::invocable<UpdateCallbackT, KeyT&, ValueT&>);
 
   template <typename LookupKeyT>
   auto Erase(LookupKeyT lookup_key) -> bool;
@@ -264,7 +269,7 @@ void MapView<KT, VT>::ForEach(CallbackT callback) {
   this->ForEachIndex(
       [this, callback](EntryT* /*entries*/, ssize_t i) {
         EntryT& entry = this->entries()[i];
-        callback(entry.key, entry.value);
+        callback(entry.key(), entry.value());
       },
       [](auto...) {});
 }
@@ -288,8 +293,9 @@ template <typename LookupKeyT, typename ValueCallbackT>
 [[clang::always_inline]] auto MapBase<KT, VT>::Insert(LookupKeyT lookup_key,
                                                       ValueCallbackT value_cb)
     -> InsertKVResult
-  requires(!std::same_as<ValueT, ValueCallbackT> &&
-           std::same_as<ValueT, decltype(std::declval<ValueCallbackT>()())>)
+  requires(
+      !std::same_as<ValueT, ValueCallbackT> &&
+      std::convertible_to<decltype(std::declval<ValueCallbackT>()()), ValueT>)
 {
   return Insert(lookup_key,
                 [&value_cb](LookupKeyT lookup_key, void* key_storage,
@@ -317,8 +323,8 @@ template <typename LookupKeyT, typename InsertCallbackT>
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  insert_cb(lookup_key, static_cast<void*>(&entry->key),
-            static_cast<void*>(&entry->value));
+  insert_cb(lookup_key, static_cast<void*>(&entry->key_storage),
+            static_cast<void*>(&entry->value_storage));
   return InsertKVResult(true, *entry);
 }
 
@@ -343,10 +349,11 @@ template <typename KT, typename VT>
 template <typename LookupKeyT, typename ValueCallbackT>
 [[clang::always_inline]] auto MapBase<KT, VT>::Update(LookupKeyT lookup_key,
                                                       ValueCallbackT value_cb)
-    -> std::enable_if_t<
-        !std::is_same_v<ValueT, ValueCallbackT> &&
-            std::is_same_v<ValueT, decltype(std::declval<ValueCallbackT>()())>,
-        InsertKVResult> {
+    -> InsertKVResult
+  requires(
+      !std::same_as<ValueT, ValueCallbackT> &&
+      std::convertible_to<decltype(std::declval<ValueCallbackT>()()), ValueT>)
+{
   return Update(
       lookup_key,
       [&value_cb](LookupKeyT lookup_key, void* key_storage,
@@ -366,24 +373,24 @@ template <typename LookupKeyT, typename InsertCallbackT,
 [[clang::always_inline]] auto MapBase<KT, VT>::Update(LookupKeyT lookup_key,
                                                       InsertCallbackT insert_cb,
                                                       UpdateCallbackT update_cb)
-    -> std::enable_if_t<
-        !std::is_same_v<ValueT, InsertCallbackT> &&
-            std::is_invocable_v<InsertCallbackT, LookupKeyT, void*, void*> &&
-            std::is_invocable_v<UpdateCallbackT, KeyT&, ValueT&>,
-        InsertKVResult> {
+    -> InsertKVResult
+  requires(!std::same_as<ValueT, InsertCallbackT> &&
+           std::invocable<InsertCallbackT, LookupKeyT, void*, void*> &&
+           std::invocable<UpdateCallbackT, KeyT&, ValueT&>)
+{
   auto [entry, inserted] = this->InsertIndexHashed(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
   // EntryT& entry = this->entries()[index];
 
   if (LLVM_LIKELY(!inserted)) {
-    update_cb(entry->key, entry->value);
+    update_cb(entry->key(), entry->value());
     return InsertKVResult(false, *entry);
   }
 
   CARBON_DCHECK(this->growth_budget_ >= 0)
       << "Growth budget shouldn't have gone negative!";
-  insert_cb(lookup_key, static_cast<void*>(&entry->key),
-            static_cast<void*>(&entry->value));
+  insert_cb(lookup_key, static_cast<void*>(&entry->key_storage),
+            static_cast<void*>(&entry->value_storage));
   return InsertKVResult(true, *entry);
 }
 

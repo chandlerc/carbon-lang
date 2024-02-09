@@ -206,6 +206,7 @@ cc_test(
     srcs = ["map_test.cpp"],
     deps = [
         ":map",
+        ":raw_hashtable_test_helpers",
         "//testing/base:gtest_main",
         "//testing/base:test_raw_ostream",
         "@com_google_googletest//:gtest",
@@ -260,7 +261,9 @@ cc_library(
     testonly = 1,
     srcs = ["raw_hashtable_benchmark_helpers.cpp"],
     hdrs = ["raw_hashtable_benchmark_helpers.h"],
-    copts = ["-O2"],
+    copts = [
+        "-O2",  # Always optimize to make testing benchmarks faster.
+    ],
     deps = [
         ":check",
         ":hashing",
@@ -271,6 +274,17 @@ cc_library(
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/random",
         "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
+    name = "raw_hashtable_test_helpers",
+    testonly = 1,
+    hdrs = ["raw_hashtable_test_helpers.h"],
+    deps = [
+        ":check",
+        ":ostream",
+        ":hashing",
     ],
 )
 
@@ -289,6 +303,7 @@ cc_test(
     srcs = ["set_test.cpp"],
     deps = [
         ":set",
+        ":raw_hashtable_test_helpers",
         "//testing/base:gtest_main",
         "//testing/base:test_raw_ostream",
         "@com_google_googletest//:gtest",
