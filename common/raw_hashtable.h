@@ -1037,8 +1037,10 @@ template <typename LookupKeyT>
 
 #ifndef NDEBUG
   ssize_t debug_empty_count =
-      llvm::count(llvm::ArrayRef(old_metadata, old_size), MetadataGroup::Empty) +
-      llvm::count(llvm::ArrayRef(old_metadata, old_size), MetadataGroup::Deleted);
+      llvm::count(llvm::ArrayRef(old_metadata, old_size),
+                  MetadataGroup::Empty) +
+      llvm::count(llvm::ArrayRef(old_metadata, old_size),
+                  MetadataGroup::Deleted);
   CARBON_DCHECK(debug_empty_count >=
                 (old_size - GrowthThresholdForSize(old_size)))
       << "debug_empty_count: " << debug_empty_count << ", size: " << old_size;
@@ -1096,7 +1098,8 @@ template <typename LookupKeyT>
       ssize_t old_index = group_index + byte_index;
 #if !CARBON_USE_NEON_SIMD_CONTROL_GROUP
       CARBON_DCHECK(new_metadata[old_index] == old_metadata[old_index]);
-      CARBON_DCHECK(new_metadata[old_index | old_size] == old_metadata[old_index]);
+      CARBON_DCHECK(new_metadata[old_index | old_size] ==
+                    old_metadata[old_index]);
 #endif
       HashCode hash = HashValue(old_entries[old_index].key(), ComputeSeed());
       ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
@@ -1144,10 +1147,10 @@ template <typename LookupKeyT>
                                         MetadataGroup::Empty)));
 #ifndef NDEBUG
   CARBON_DCHECK(debug_empty_count == (old_size - count));
-  CARBON_DCHECK(
-      llvm::count(llvm::ArrayRef(new_metadata, new_size), MetadataGroup::Empty) ==
-      debug_empty_count + static_cast<ssize_t>(probed_indices.size()) +
-          old_size);
+  CARBON_DCHECK(llvm::count(llvm::ArrayRef(new_metadata, new_size),
+                            MetadataGroup::Empty) ==
+                debug_empty_count +
+                    static_cast<ssize_t>(probed_indices.size()) + old_size);
 #endif
 
   // If the keys or values are trivially relocatable, we do a bulk memcpy of
