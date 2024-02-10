@@ -174,8 +174,7 @@ class MapBase : protected RawHashtable::Base<InputKeyT, InputValueT> {
   auto Update(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
 
   template <typename LookupKeyT, typename ValueCallbackT>
-  auto
-  Update(LookupKeyT lookup_key, ValueCallbackT value_cb) -> InsertKVResult
+  auto Update(LookupKeyT lookup_key, ValueCallbackT value_cb) -> InsertKVResult
     requires(
         !std::same_as<ValueT, ValueCallbackT> &&
         std::convertible_to<decltype(std::declval<ValueCallbackT>()()), ValueT>)
@@ -184,8 +183,7 @@ class MapBase : protected RawHashtable::Base<InputKeyT, InputValueT> {
   template <typename LookupKeyT, typename InsertCallbackT,
             typename UpdateCallbackT>
   auto Update(LookupKeyT lookup_key, InsertCallbackT insert_cb,
-              UpdateCallbackT update_cb)
-      -> InsertKVResult
+              UpdateCallbackT update_cb) -> InsertKVResult
     requires(!std::same_as<ValueT, InsertCallbackT> &&
              std::invocable<InsertCallbackT, LookupKeyT, void*, void*> &&
              std::invocable<UpdateCallbackT, KeyT&, ValueT&>);

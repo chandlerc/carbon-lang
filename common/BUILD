@@ -283,8 +283,8 @@ cc_library(
     hdrs = ["raw_hashtable_test_helpers.h"],
     deps = [
         ":check",
-        ":ostream",
         ":hashing",
+        ":ostream",
     ],
 )
 
@@ -302,8 +302,8 @@ cc_test(
     name = "set_test",
     srcs = ["set_test.cpp"],
     deps = [
-        ":set",
         ":raw_hashtable_test_helpers",
+        ":set",
         "//testing/base:gtest_main",
         "//testing/base:test_raw_ostream",
         "@com_google_googletest//:gtest",

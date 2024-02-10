@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "common/raw_hashtable_test_helpers.h"
- 
+
 namespace Carbon {
 namespace {
 
@@ -54,7 +54,7 @@ auto MakeElements(RangeT&& range, RangeTs&&... ranges) {
 }
 
 template <typename SetT>
-class SetTest: public ::testing::Test {};
+class SetTest : public ::testing::Test {};
 
 using Types = ::testing::Types<Set<int>, Set<int, 16>, Set<int, 128>,
                                Set<TestData>, Set<TestData, 16>>;
