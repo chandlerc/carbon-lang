@@ -158,14 +158,14 @@ struct X86Group {
 
   __m128i byte_vec = {};
 
-  static auto Load(uint8_t* groups, ssize_t index) -> X86Group {
+  static auto Load(uint8_t* metadata, ssize_t index) -> X86Group {
     X86Group g;
-    g.byte_vec = _mm_load_si128(reinterpret_cast<__m128i*>(groups + index));
+    g.byte_vec = _mm_load_si128(reinterpret_cast<__m128i*>(metadata + index));
     return g;
   }
 
-  auto Store(uint8_t* groups, ssize_t index) const -> void {
-    _mm_store_si128(reinterpret_cast<__m128i*>(groups + index), byte_vec);
+  auto Store(uint8_t* metadata, ssize_t index) const -> void {
+    _mm_store_si128(reinterpret_cast<__m128i*>(metadata + index), byte_vec);
   }
 
   template <int Index>
@@ -218,14 +218,14 @@ struct NeonGroup {
 
   uint8x8_t byte_vec = {};
 
-  static auto Load(uint8_t* groups, ssize_t index) -> NeonGroup {
+  static auto Load(uint8_t* metadata, ssize_t index) -> NeonGroup {
     NeonGroup g;
-    g.byte_vec = vld1_u8(groups + index);
+    g.byte_vec = vld1_u8(metadata + index);
     return g;
   }
 
-  auto Store(uint8_t* groups, ssize_t index) const -> void {
-    vst1_u8(groups + index, byte_vec);
+  auto Store(uint8_t* metadata, ssize_t index) const -> void {
+    vst1_u8(metadata + index, byte_vec);
   }
 
   auto ClearDeleted() -> void {
@@ -287,14 +287,14 @@ struct PortableGroup {
 
   uint64_t group = {};
 
-  static auto Load(uint8_t* groups, ssize_t index) -> PortableGroup {
+  static auto Load(uint8_t* metadata, ssize_t index) -> PortableGroup {
     PortableGroup g;
-    std::memcpy(&g.group, groups + index, sizeof(group));
+    std::memcpy(&g.group, metadata + index, sizeof(group));
     return g;
   }
 
-  auto Store(uint8_t* groups, ssize_t index) const -> void {
-    std::memcpy(groups + index, &group, sizeof(group));
+  auto Store(uint8_t* metadata, ssize_t index) const -> void {
+    std::memcpy(metadata + index, &group, sizeof(group));
   }
 
   template <int Index>
@@ -426,14 +426,14 @@ struct PortableGroup {
 };
 
 #if CARBON_USE_X86_SIMD_CONTROL_GROUP
-using Group = X86Group;
+using MetadataGroup = X86Group;
 #elif CARBON_USE_NEON_SIMD_CONTROL_GROUP
 using Group = NeonGroup;
 #else
 using Group = PortableGroup;
 #endif
 
-constexpr ssize_t GroupSize = sizeof(Group);
+constexpr ssize_t GroupSize = sizeof(MetadataGroup);
 static_assert(GroupSize <= MaxGroupSize);
 static_assert(MaxGroupSize % GroupSize == 0);
 static_assert(llvm::isPowerOf2_64(GroupSize),
@@ -523,7 +523,7 @@ struct StorageEntry<KeyT, void> {
 
 template <typename KeyT, typename ValueT>
 constexpr ssize_t StorageAlignment = std::max<ssize_t>(
-    {GroupSize, alignof(Group), alignof(StorageEntry<KeyT, ValueT>)});
+    {GroupSize, alignof(MetadataGroup), alignof(StorageEntry<KeyT, ValueT>)});
 
 struct Storage {};
 
@@ -535,7 +535,7 @@ struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl<KeyT, ValueT, 0>
     : Storage {
   SmallStorageImpl() {}
 
-  Group groups[0];
+  uint8_t metadata[0];
 
   union {
     StorageEntry<KeyT, ValueT> entries[0];
@@ -596,7 +596,7 @@ struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl : Storage {
         "computed storage size.");
   }
 
-  Group groups[SmallNumGroups];
+  alignas(MetadataGroup) uint8_t metadata[SmallNumGroups * GroupSize];
 
   union {
     mutable StorageEntry<KeyT, ValueT> entries[SmallSize];
@@ -638,7 +638,7 @@ class ViewBase {
 
   auto size() const -> ssize_t { return size_; }
 
-  auto groups_ptr() const -> uint8_t* {
+  auto metadata() const -> uint8_t* {
     return reinterpret_cast<uint8_t*>(storage_);
   }
   auto entries() const -> EntryT* {
@@ -725,7 +725,7 @@ class Base {
   auto storage() const -> Storage* { return impl_view_.storage_; }
   auto storage() -> Storage*& { return impl_view_.storage_; }
 
-  auto groups_ptr() const -> uint8_t* { return impl_view_.groups_ptr(); }
+  auto metadata() const -> uint8_t* { return impl_view_.metadata(); }
   auto entries() const -> EntryT* { return impl_view_.entries(); }
 
   auto is_small() const -> bool { return size() <= small_size(); }
@@ -759,8 +759,9 @@ inline auto ComputeProbeMaskFromSize(ssize_t size) -> size_t {
   CARBON_DCHECK(llvm::isPowerOf2_64(size))
       << "Size must be a power of two for a hashed buffer!";
   // The probe mask needs to mask down to keep the index within
-  // `groups_size`. Since `groups_size` is a power of two, this is equivalent to
-  // `groups_size - 1`.
+  // `size`. Since `size` is a power of two, this is equivalent to
+  // `size - 1`. We also mask off the low bits while here to match the size of
+  // the groups of entries.
   return (size - 1) & ~GroupMask;
 }
 
@@ -824,7 +825,7 @@ inline auto ComputeSeed() -> uint64_t {
   return reinterpret_cast<uint64_t>(&global_addr_seed);
 }
 
-inline auto ComputeControlByte(size_t tag) -> uint8_t {
+inline auto ComputeMetadataByte(size_t tag) -> uint8_t {
   // Mask one over the high bit so that engaged control bytes are easily
   // identified.
   return tag | 0b10000000;
@@ -839,20 +840,20 @@ auto ViewBase<InputKeyT, InputValueT>::LookupIndexHashed(
   ssize_t local_size = size();
   CARBON_DCHECK(local_size > 0);
 
-  uint8_t* groups = groups_ptr();
+  uint8_t* local_metadata = metadata();
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
-  uint8_t control_byte = ComputeControlByte(tag);
+  uint8_t metadata_byte = ComputeMetadataByte(tag);
 
   EntryT* local_entries = entries();
   ProbeSequence s(hash_index, local_size);
   do {
     ssize_t group_index = s.getIndex();
-    Group g = Group::Load(groups, group_index);
-    auto control_byte_matched_range = g.Match(control_byte);
-    if (LLVM_LIKELY(control_byte_matched_range)) {
-      auto byte_it = control_byte_matched_range.begin();
-      auto byte_end = control_byte_matched_range.end();
+    MetadataGroup g = MetadataGroup::Load(local_metadata, group_index);
+    auto metadata_matched_range = g.Match(metadata_byte);
+    if (LLVM_LIKELY(metadata_matched_range)) {
+      auto byte_it = metadata_matched_range.begin();
+      auto byte_end = metadata_matched_range.end();
       do {
         ssize_t index = group_index + *byte_it;
         EntryT* entry = &local_entries[index];
@@ -879,13 +880,13 @@ template <typename InputKeyT, typename InputValueT>
 template <typename IndexCallbackT, typename GroupCallbackT>
 [[clang::always_inline]] void ViewBase<InputKeyT, InputValueT>::ForEachIndex(
     IndexCallbackT index_callback, GroupCallbackT group_callback) {
-  uint8_t* groups = groups_ptr();
+  uint8_t* local_metadata = metadata();
   EntryT* local_entries = entries();
 
   ssize_t local_size = size();
   for (ssize_t group_index = 0; group_index < local_size;
        group_index += GroupSize) {
-    auto g = Group::Load(groups, group_index);
+    auto g = MetadataGroup::Load(local_metadata, group_index);
     auto present_matched_range = g.MatchPresent();
     if (!present_matched_range) {
       continue;
@@ -895,19 +896,19 @@ template <typename IndexCallbackT, typename GroupCallbackT>
       index_callback(local_entries, index);
     }
 
-    group_callback(groups, group_index);
+    group_callback(local_metadata, group_index);
   }
 }
 
 template <typename InputKeyT, typename InputValueT>
 auto ViewBase<InputKeyT, InputValueT>::CountProbedKeys() const -> ssize_t {
-  uint8_t* groups = this->groups_ptr();
+  uint8_t* local_metadata = this->metadata();
   EntryT* local_entries = this->entries();
   ssize_t local_size = this->size();
   ssize_t count = 0;
   for (ssize_t group_index = 0; group_index < local_size;
        group_index += GroupSize) {
-    auto g = Group::Load(groups, group_index);
+    auto g = MetadataGroup::Load(local_metadata, group_index);
     auto present_matched_range = g.MatchPresent();
     for (ssize_t byte_index : present_matched_range) {
       ssize_t index = group_index + byte_index;
@@ -926,17 +927,17 @@ template <typename LookupKeyT>
     LookupKeyT lookup_key) -> EntryT* {
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
-  uint8_t control_byte = ComputeControlByte(tag);
-  uint8_t* groups = groups_ptr();
+  uint8_t metadata_byte = ComputeMetadataByte(tag);
+  uint8_t* local_metadata = metadata();
   EntryT* local_entries = entries();
 
   for (ProbeSequence s(hash_index, size());; s.step()) {
     ssize_t group_index = s.getIndex();
-    auto g = Group::Load(groups, group_index);
+    auto g = MetadataGroup::Load(local_metadata, group_index);
 
     if (auto empty_matched_range = g.MatchEmpty()) {
       ssize_t index = group_index + *empty_matched_range.begin();
-      groups[index] = control_byte;
+      local_metadata[index] = metadata_byte;
       return &local_entries[index];
     }
 
@@ -947,7 +948,7 @@ template <typename LookupKeyT>
 inline auto ComputeNewSize(ssize_t old_size) -> ssize_t {
   // We want the next power of two. This should always be a power of two coming
   // in, and so we just verify that. Also verify that this doesn't overflow.
-  CARBON_DCHECK(old_size == (ssize_t)llvm::PowerOf2Ceil(old_size))
+  CARBON_DCHECK(old_size == static_cast<ssize_t>(llvm::PowerOf2Ceil(old_size)))
       << "Expected a power of two!";
   return old_size * 2;
 }
@@ -962,7 +963,7 @@ void Base<InputKeyT, InputValueT>::Init(ssize_t init_size,
                                         Storage* init_storage) {
   size() = init_size;
   storage() = init_storage;
-  std::memset(groups_ptr(), 0, init_size);
+  std::memset(metadata(), 0, init_size);
   growth_budget_ = GrowthThresholdForSize(init_size);
 }
 
@@ -982,17 +983,17 @@ auto Base<InputKeyT, InputValueT>::EraseKey(LookupKeyT lookup_key) -> bool {
   //
   // If we mark the slot as empty, we'll also need to increase the growth
   // budget.
-  uint8_t* groups = this->groups_ptr();
+  uint8_t* local_metadata = this->metadata();
   EntryT* local_entries = entries();
   ssize_t index = entry - local_entries;
   ssize_t group_index = index & ~GroupMask;
-  auto g = Group::Load(groups, group_index);
+  auto g = MetadataGroup::Load(local_metadata, group_index);
   auto empty_matched_range = g.MatchEmpty();
   if (empty_matched_range) {
-    groups[index] = Group::Empty;
+    local_metadata[index] = MetadataGroup::Empty;
     ++this->growth_budget_;
   } else {
-    groups[index] = Group::Deleted;
+    local_metadata[index] = MetadataGroup::Deleted;
   }
 
   if constexpr (!EntryT::IsTriviallyDestructible) {
@@ -1031,13 +1032,13 @@ template <typename LookupKeyT>
 
   bool old_small = this->is_small();
   Storage* old_storage = this->storage();
-  uint8_t* old_groups = this->groups_ptr();
+  uint8_t* old_metadata = this->metadata();
   EntryT* old_entries = this->entries();
 
 #ifndef NDEBUG
   ssize_t debug_empty_count =
-      llvm::count(llvm::ArrayRef(old_groups, old_size), Group::Empty) +
-      llvm::count(llvm::ArrayRef(old_groups, old_size), Group::Deleted);
+      llvm::count(llvm::ArrayRef(old_metadata, old_size), MetadataGroup::Empty) +
+      llvm::count(llvm::ArrayRef(old_metadata, old_size), MetadataGroup::Deleted);
   CARBON_DCHECK(debug_empty_count >=
                 (old_size - GrowthThresholdForSize(old_size)))
       << "debug_empty_count: " << debug_empty_count << ", size: " << old_size;
@@ -1050,7 +1051,7 @@ template <typename LookupKeyT>
   this->growth_budget_ = GrowthThresholdForSize(new_size);
 
   // Now extract the new components of the table.
-  uint8_t* new_groups = this->groups_ptr();
+  uint8_t* new_metadata = this->metadata();
   EntryT* new_entries = this->entries();
 
   // The common case, especially for large sizes, is that we double the size
@@ -1078,24 +1079,24 @@ template <typename LookupKeyT>
        group_index += GroupSize) {
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
     uint64_t low_g;
-    memcpy(&low_g, old_groups + group_index, GroupSize);
+    memcpy(&low_g, old_metadata + group_index, GroupSize);
     uint64_t present_mask = (low_g >> 7) & Group::LSBs;
     low_g &= (low_g >> 7) | ~Group::LSBs;
     uint64_t high_g = low_g;
     auto present_matched_range = Group::MatchRange(present_mask);
 #else
-    auto g = Group::Load(old_groups, group_index);
+    auto g = MetadataGroup::Load(old_metadata, group_index);
     g.ClearDeleted();
     auto present_matched_range = g.MatchPresent();
-    g.Store(new_groups, group_index);
-    g.Store(new_groups, group_index | old_size);
+    g.Store(new_metadata, group_index);
+    g.Store(new_metadata, group_index | old_size);
 #endif
     for (ssize_t byte_index : present_matched_range) {
       ++count;
       ssize_t old_index = group_index + byte_index;
 #if !CARBON_USE_NEON_SIMD_CONTROL_GROUP
-      CARBON_DCHECK(new_groups[old_index] == old_groups[old_index]);
-      CARBON_DCHECK(new_groups[old_index | old_size] == old_groups[old_index]);
+      CARBON_DCHECK(new_metadata[old_index] == old_metadata[old_index]);
+      CARBON_DCHECK(new_metadata[old_index | old_size] == old_metadata[old_index]);
 #endif
       HashCode hash = HashValue(old_entries[old_index].key(), ComputeSeed());
       ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
@@ -1106,8 +1107,8 @@ template <typename LookupKeyT>
         low_g &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
         high_g &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
 #else
-        new_groups[old_index] = Group::Empty;
-        new_groups[old_index | old_size] = Group::Empty;
+        new_metadata[old_index] = MetadataGroup::Empty;
+        new_metadata[old_index | old_size] = MetadataGroup::Empty;
 #endif
         continue;
       }
@@ -1124,7 +1125,7 @@ template <typename LookupKeyT>
       new_index += byte_index;
 #else
       new_index += byte_index;
-      new_groups[new_index ^ old_size] = Group::Empty;
+      new_metadata[new_index ^ old_size] = MetadataGroup::Empty;
 #endif
 
       // If we need to explicitly move (and destroy) the key or value, do so
@@ -1134,17 +1135,17 @@ template <typename LookupKeyT>
       }
     }
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-    memcpy(new_groups + group_index, &low_g, GroupSize);
-    memcpy(new_groups + (group_index | old_size), &high_g, GroupSize);
+    memcpy(new_metadata + group_index, &low_g, GroupSize);
+    memcpy(new_metadata + (group_index | old_size), &high_g, GroupSize);
 #endif
   }
   CARBON_DCHECK((count - static_cast<ssize_t>(probed_indices.size())) ==
-                (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
-                                        Group::Empty)));
+                (new_size - llvm::count(llvm::ArrayRef(new_metadata, new_size),
+                                        MetadataGroup::Empty)));
 #ifndef NDEBUG
   CARBON_DCHECK(debug_empty_count == (old_size - count));
   CARBON_DCHECK(
-      llvm::count(llvm::ArrayRef(new_groups, new_size), Group::Empty) ==
+      llvm::count(llvm::ArrayRef(new_metadata, new_size), MetadataGroup::Empty) ==
       debug_empty_count + static_cast<ssize_t>(probed_indices.size()) +
           old_size);
 #endif
@@ -1173,13 +1174,13 @@ template <typename LookupKeyT>
     old_entries[old_index].Move(*new_entry);
   }
   CARBON_DCHECK(count ==
-                (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
-                                        Group::Empty)));
+                (new_size - llvm::count(llvm::ArrayRef(new_metadata, new_size),
+                                        MetadataGroup::Empty)));
   this->growth_budget_ -= count;
   CARBON_DCHECK(this->growth_budget_ ==
                 (GrowthThresholdForSize(new_size) -
-                 (new_size - llvm::count(llvm::ArrayRef(new_groups, new_size),
-                                         Group::Empty))));
+                 (new_size - llvm::count(llvm::ArrayRef(new_metadata, new_size),
+                                         MetadataGroup::Empty))));
   CARBON_DCHECK(this->growth_budget_ > 0 &&
                 "Must still have a growth budget after rehash!");
 
@@ -1210,33 +1211,33 @@ auto Base<InputKeyT, InputValueT>::InsertIndexHashed(LookupKeyT lookup_key)
     -> std::pair<EntryT*, bool> {
   CARBON_DCHECK(this->size() > 0);
 
-  uint8_t* groups = this->groups_ptr();
+  uint8_t* local_metadata = this->metadata();
 
   HashCode hash = HashValue(lookup_key, ComputeSeed());
   auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
-  uint8_t control_byte = ComputeControlByte(tag);
+  uint8_t metadata_byte = ComputeMetadataByte(tag);
 
   // We re-purpose the empty control byte to signal no insert is needed to the
   // caller. This is guaranteed to not be a control byte we're inserting.
   // constexpr uint8_t NoInsertNeeded = Group::Empty;
 
   ssize_t group_with_deleted_index;
-  Group::MatchRange deleted_matched_range = {};
+  MetadataGroup::MatchRange deleted_matched_range = {};
 
   EntryT* local_entries = this->entries();
 
   auto return_insert_at_index = [&](ssize_t index) -> std::pair<EntryT*, bool> {
     // We'll need to insert at this index so set the control group byte to the
     // proper value.
-    groups[index] = control_byte;
+    local_metadata[index] = metadata_byte;
     return {&local_entries[index], true};
   };
 
   for (ProbeSequence s(hash_index, this->size());; s.step()) {
     ssize_t group_index = s.getIndex();
-    auto g = Group::Load(groups, group_index);
+    auto g = MetadataGroup::Load(local_metadata, group_index);
 
-    auto control_byte_matched_range = g.Match(control_byte);
+    auto control_byte_matched_range = g.Match(metadata_byte);
     auto empty_matched_range = g.MatchEmpty();
     if (control_byte_matched_range) {
       EntryT* group_entries = &local_entries[group_index];
@@ -1300,9 +1301,9 @@ auto Base<InputKeyT, InputValueT>::ClearImpl() -> void {
           this->entries()[index].Destroy();
         }
       },
-      [](uint8_t* groups, ssize_t group_index) {
+      [](uint8_t* metadata, ssize_t group_index) {
         // Clear the group.
-        std::memset(groups + group_index, 0, GroupSize);
+        std::memset(metadata + group_index, 0, GroupSize);
       });
   this->growth_budget_ = GrowthThresholdForSize(this->size());
 }
