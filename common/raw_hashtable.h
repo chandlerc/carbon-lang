@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstring>
 #include <iterator>
+#include <new>
 #include <type_traits>
 #include <utility>
 
@@ -434,12 +435,17 @@ using Group = PortableGroup;
 #endif
 
 constexpr ssize_t GroupSize = sizeof(MetadataGroup);
+static_assert(GroupSize >= alignof(MetadataGroup));
 static_assert(GroupSize <= MaxGroupSize);
 static_assert(MaxGroupSize % GroupSize == 0);
 static_assert(llvm::isPowerOf2_64(GroupSize),
               "The group size must be a constant power of two so dividing by "
               "it is a simple shift.");
 constexpr ssize_t GroupMask = GroupSize - 1;
+
+// If allocating storage, allocate a minimum of one cacheline of group metadata
+// and a minimum of one group.
+constexpr ssize_t MinAllocatedSize = std::max<ssize_t>(64, MaxGroupSize);
 
 [[clang::always_inline]] inline void Prefetch(const void* address) {
   // Currently we just hard code a single "low" temporal locality prefetch as
@@ -459,6 +465,12 @@ struct StorageEntry {
       std::is_trivially_move_constructible_v<ValueT>;
 
   auto key() -> KeyT& {
+    // Ensure we don't need more alignment than available.
+    static_assert(
+        alignof(StorageEntry) <= MinAllocatedSize,
+        "The minimum allocated size turns into the alignment of our array of "
+        "storage entries as they follow the metadata byte array.");
+
     return *std::launder(reinterpret_cast<KeyT*>(&key_storage));
   }
 
@@ -501,6 +513,12 @@ struct StorageEntry<KeyT, void> {
       IsTriviallyDestructible && std::is_trivially_move_constructible_v<KeyT>;
 
   auto key() -> KeyT& {
+    // Ensure we don't need more alignment than available.
+    static_assert(
+        alignof(StorageEntry) <= MinAllocatedSize,
+        "The minimum allocated size turns into the alignment of our array of "
+        "storage entries as they follow the metadata byte array.");
+
     return *std::launder(reinterpret_cast<KeyT*>(&key_storage));
   }
 
@@ -521,45 +539,44 @@ struct StorageEntry<KeyT, void> {
   alignas(KeyT) std::byte key_storage[sizeof(KeyT)];
 };
 
-template <typename KeyT, typename ValueT>
-constexpr ssize_t StorageAlignment = std::max<ssize_t>(
-    {GroupSize, alignof(MetadataGroup), alignof(StorageEntry<KeyT, ValueT>)});
-
 struct Storage {};
 
-template <typename KeyT, typename ValueT, ssize_t SmallSize>
-struct SmallStorageImpl;
-
 template <typename KeyT, typename ValueT>
-struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl<KeyT, ValueT, 0>
-    : Storage {
-  SmallStorageImpl() {}
+struct StorageLayout {
+  using EntryT = StorageEntry<KeyT, ValueT>;
 
-  uint8_t metadata[0];
+  static constexpr ssize_t Alignment = std::max<ssize_t>(
+      {alignof(MetadataGroup), alignof(StorageEntry<KeyT, ValueT>)});
 
-  union {
-    StorageEntry<KeyT, ValueT> entries[0];
-  };
+  static auto Metadata(Storage* storage) -> uint8_t* {
+    return reinterpret_cast<uint8_t*>(storage);
+  }
+
+  static constexpr auto EntriesOffset(ssize_t size) -> ssize_t {
+    CARBON_DCHECK(llvm::isPowerOf2_64(size))
+        << "Size must be a power of two for a hashed buffer!";
+    // The size is always a power of two, which is typically perfectly aligned
+    // and we prevent any too-small sizes to have adequate alignment
+    // statically. As a result, the offset is exactly the size. But we
+    // validate this here to catch alignment bugs early.
+    CARBON_DCHECK(static_cast<uint64_t>(size) ==
+                  llvm::alignTo<alignof(EntryT)>(size));
+    return size;
+  }
+
+  static auto Entries(Storage* storage, ssize_t size) -> EntryT* {
+    return reinterpret_cast<EntryT*>(reinterpret_cast<unsigned char*>(storage) +
+                                     EntriesOffset(size));
+  }
+
+  static constexpr auto Size(ssize_t size) -> ssize_t {
+    return EntriesOffset(size) + sizeof(EntryT) * size;
+  }
 };
 
-template <typename KeyT, typename ValueT>
-constexpr auto ComputeStorageEntryOffset(ssize_t size) -> ssize_t {
-  // There are `size` control bytes plus any alignment needed for the key type.
-  return llvm::alignTo<alignof(StorageEntry<KeyT, ValueT>)>(size);
-}
-
-// If allocating storage, allocate a minimum of one cacheline of group metadata
-// and a minimum of one group.
-constexpr ssize_t MinAllocatedSize = std::max<ssize_t>(64, MaxGroupSize);
-
-template <typename KeyT, typename ValueT>
-constexpr static auto ComputeStorageSizeImpl(ssize_t size) -> ssize_t {
-  return ComputeStorageEntryOffset<KeyT, ValueT>(size) +
-         sizeof(StorageEntry<KeyT, ValueT>) * size;
-}
-
 template <typename KeyT, typename ValueT, ssize_t SmallSize>
-struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl : Storage {
+struct alignas(StorageLayout<KeyT, ValueT>::Alignment) SmallStorageImpl
+    : Storage {
   // Do early validation of the small size here.
   static_assert(llvm::isPowerOf2_64(SmallSize),
                 "SmallSize must be a power of two for a hashed buffer!");
@@ -573,34 +590,34 @@ struct alignas(StorageAlignment<KeyT, ValueT>) SmallStorageImpl : Storage {
   static_assert(SmallSize >= GroupSize);
   static_assert((SmallSize % GroupSize) == 0);
 
+  // Also ensure that for the specific types we will have enough alignment
+  // without padding for the entries.
+  static_assert(SmallSize >= alignof(StorageEntry<KeyT, ValueT>),
+                "Requested a small size that would require padding between "
+                "metadata bytes and correctly aligned key and value types. "
+                "Either a larger small size or a zero small size and heap "
+                "allocation are required for this key and value type.");
+
   static constexpr ssize_t SmallNumGroups = SmallSize / GroupSize;
   static_assert(llvm::isPowerOf2_64(SmallNumGroups),
                 "The number of groups must be a power of two when hashing!");
 
   SmallStorageImpl() {
-    // Validate a collection of invariants between the small size storage layout
-    // and the dynamically computed storage layout. We need the key type to be
-    // complete so we do this in the constructor body.
-    static_assert(SmallSize == 0 || alignof(SmallStorageImpl) ==
-                                        StorageAlignment<KeyT, ValueT>,
-                  "Small size buffer must have the same alignment as a heap "
-                  "allocated buffer.");
     static_assert(
-        SmallSize == 0 || (offsetof(SmallStorageImpl, entries) ==
-                           ComputeStorageEntryOffset<KeyT, ValueT>(SmallSize)),
+        SmallSize == 0 || (offsetof(SmallStorageImpl, entries) == SmallSize),
         "Offset to keys in small size storage doesn't match computed offset!");
-    static_assert(
-        SmallSize == 0 || sizeof(SmallStorageImpl) ==
-                              ComputeStorageSizeImpl<KeyT, ValueT>(SmallSize),
-        "The small size storage needs to match the dynamically "
-        "computed storage size.");
   }
 
   alignas(MetadataGroup) uint8_t metadata[SmallNumGroups * GroupSize];
+  mutable StorageEntry<KeyT, ValueT> entries[SmallSize];
+};
 
-  union {
-    mutable StorageEntry<KeyT, ValueT> entries[SmallSize];
-  };
+template <typename KeyT, typename ValueT>
+struct SmallStorageImpl<KeyT, ValueT, 0> : Storage {
+  SmallStorageImpl() = default;
+
+  uint8_t metadata[0];
+  mutable StorageEntry<KeyT, ValueT> entries[0];
 };
 
 // Base class that encodes either the absence of a value or a value type.
@@ -612,7 +629,8 @@ class ViewBase {
  protected:
   using KeyT = InputKeyT;
   using ValueT = InputValueT;
-  using EntryT = StorageEntry<KeyT, ValueT>;
+  using LayoutT = StorageLayout<KeyT, ValueT>;
+  using EntryT = typename LayoutT::EntryT;
 
   using ConstViewBaseT = ViewBase<const KeyT, const ValueT>;
 
@@ -637,18 +655,11 @@ class ViewBase {
       : size_(other_view.size_), storage_(other_view.storage_) {}
 
   auto size() const -> ssize_t { return size_; }
-
-  auto metadata() const -> uint8_t* {
-    return reinterpret_cast<uint8_t*>(storage_);
+  auto metadata() const -> uint8_t* { return LayoutT::Metadata(storage_); }
+  auto entries_offset() const -> ssize_t {
+    return LayoutT::EntriesOffset(size());
   }
-  auto entries() const -> EntryT* {
-    CARBON_DCHECK(size() == 0 || llvm::isPowerOf2_64(size()))
-        << "Size must be a power of two for a hashed buffer!";
-    CARBON_DCHECK(size() == ComputeStorageEntryOffset<KeyT, ValueT>(size()))
-        << "Cannot be more aligned than a power of two.";
-    return reinterpret_cast<EntryT*>(
-        reinterpret_cast<unsigned char*>(storage_) + size());
-  }
+  auto entries() const -> EntryT* { return LayoutT::Entries(storage_, size()); }
 
   template <typename LookupKeyT>
   auto LookupIndexHashed(LookupKeyT lookup_key) const -> EntryT*;
@@ -669,6 +680,7 @@ class Base {
   using KeyT = InputKeyT;
   using ValueT = InputValueT;
   using ViewBaseT = ViewBase<KeyT, ValueT>;
+  using LayoutT = typename ViewBaseT::LayoutT;
   using EntryT = typename ViewBaseT::EntryT;
 
   template <ssize_t SmallSize>
@@ -686,28 +698,22 @@ class Base {
       HasValue && std::is_trivially_move_constructible_v<ValueT> &&
       std::is_trivially_destructible_v<ValueT>;
 
-  static constexpr auto ComputeStorageSize(ssize_t size) -> ssize_t {
-    return ComputeStorageSizeImpl<KeyT, ValueT>(size);
-  }
-
-  static constexpr auto ComputeStorageAlignment() -> std::align_val_t {
-    return std::align_val_t(StorageAlignment<KeyT, ValueT>);
-  }
-
   static auto Allocate(ssize_t size) -> Storage* {
     return reinterpret_cast<Storage*>(__builtin_operator_new(
-        ComputeStorageSize(size), ComputeStorageAlignment(), std::nothrow_t()));
+        LayoutT::Size(size), static_cast<std::align_val_t>(LayoutT::Alignment),
+        std::nothrow_t()));
   }
 
   static auto Deallocate(Storage* storage, ssize_t size) -> void {
-    ssize_t allocated_size = ComputeStorageSize(size);
+    ssize_t allocated_size = LayoutT::Size(size);
     // We don't need the size, but make sure it always compiles.
-    (void)allocated_size;
-    return __builtin_operator_delete(storage,
+    static_cast<void>(allocated_size);
+    return __builtin_operator_delete(
+        storage,
 #if __cpp_sized_deallocation
-                                     allocated_size,
+        allocated_size,
 #endif
-                                     ComputeStorageAlignment());
+        static_cast<std::align_val_t>(LayoutT::Alignment));
   }
 
   Base(int small_size, Storage* small_storage) : small_size_(small_size) {
@@ -724,7 +730,6 @@ class Base {
   auto size() -> ssize_t& { return impl_view_.size_; }
   auto storage() const -> Storage* { return impl_view_.storage_; }
   auto storage() -> Storage*& { return impl_view_.storage_; }
-
   auto metadata() const -> uint8_t* { return impl_view_.metadata(); }
   auto entries() const -> EntryT* { return impl_view_.entries(); }
 
@@ -947,10 +952,13 @@ template <typename LookupKeyT>
 
 inline auto ComputeNewSize(ssize_t old_size) -> ssize_t {
   // We want the next power of two. This should always be a power of two coming
-  // in, and so we just verify that. Also verify that this doesn't overflow.
+  // in, and so we just verify that.
   CARBON_DCHECK(old_size == static_cast<ssize_t>(llvm::PowerOf2Ceil(old_size)))
       << "Expected a power of two!";
-  return old_size * 2;
+  ssize_t new_size;
+  bool overflow = __builtin_mul_overflow(old_size, 2, &new_size);
+  CARBON_CHECK(!overflow) << "Computing the new size overflowed `ssize_t`!";
+  return new_size;
 }
 
 inline auto GrowthThresholdForSize(ssize_t size) -> ssize_t {
