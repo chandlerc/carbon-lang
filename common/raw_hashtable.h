@@ -686,18 +686,6 @@ class Base {
   template <ssize_t SmallSize>
   using SmallStorageT = SmallStorageImpl<KeyT, ValueT, SmallSize>;
 
-  static constexpr bool HasValue = !std::is_same_v<ValueT, const void>;
-
-  // We have an important optimization for trivially relocatable keys. But we
-  // don't have a relocatable trait (yet) so we approximate it here.
-  static constexpr bool IsKeyTriviallyRelocatable =
-      std::is_trivially_move_constructible_v<KeyT> &&
-      std::is_trivially_destructible_v<KeyT>;
-
-  static constexpr bool IsValueTriviallyRelocatable =
-      HasValue && std::is_trivially_move_constructible_v<ValueT> &&
-      std::is_trivially_destructible_v<ValueT>;
-
   static auto Allocate(ssize_t size) -> Storage* {
     return reinterpret_cast<Storage*>(__builtin_operator_new(
         LayoutT::Size(size), static_cast<std::align_val_t>(LayoutT::Alignment),
