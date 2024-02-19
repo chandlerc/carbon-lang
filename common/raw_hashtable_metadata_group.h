@@ -11,7 +11,6 @@
 
 #include "common/check.h"
 #include "llvm/ADT/Sequence.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/bit.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
@@ -218,7 +217,7 @@ class MetadataGroup : public Printable<MetadataGroup> {
   auto MatchDeleted() const -> MatchRange;
   auto MatchPresent() const -> MatchRange;
 
- private:
+  // private:
   static constexpr bool UseSIMD =
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP || CARBON_USE_X86_SIMD_CONTROL_GROUP
       true;
@@ -253,15 +252,6 @@ class MetadataGroup : public Printable<MetadataGroup> {
 // the grouped structure outside of the metadata bytes.
 constexpr ssize_t GroupSize = MetadataGroup::Size;
 constexpr ssize_t GroupMask = MetadataGroup::Mask;
-
-inline auto MetadataGroup::Print(llvm::raw_ostream& out) const -> void {
-  out << "[";
-  llvm::ListSeparator sep;
-  for (uint8_t byte : bytes) {
-    out << sep << llvm::formatv("{0:x2}", byte);
-  }
-  out << "]";
-}
 
 inline auto MetadataGroup::Load(uint8_t* metadata, ssize_t index)
     -> MetadataGroup {

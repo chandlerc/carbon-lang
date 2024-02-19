@@ -248,15 +248,41 @@ cc_library(
 cc_library(
     name = "raw_hashtable",
     srcs = ["raw_hashtable.cpp"],
-    hdrs = [
-        "raw_hashtable.h",
-        "raw_hashtable_metadata_group.h",
-    ],
+    hdrs = ["raw_hashtable.h"],
     deps = [
         ":check",
         ":hashing",
+        ":raw_hashtable_metadata_group",
         "@llvm-project//llvm:Support",
     ],
+)
+
+cc_library(
+    name = "raw_hashtable_metadata_group",
+    srcs = ["raw_hashtable_metadata_group.cpp"],
+    hdrs = ["raw_hashtable_metadata_group.h"],
+    deps = [
+        ":check",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_binary(
+    name = "raw_hashtable_metadata_group_benchmark",
+    testonly = 1,
+    srcs = ["raw_hashtable_metadata_group_benchmark.cpp"],
+    deps = [
+        ":raw_hashtable_metadata_group",
+        "@com_github_google_benchmark//:benchmark_main",
+        "@com_google_absl//absl/random",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+sh_test(
+    name = "raw_hashtable_metadata_group_benchmark_test",
+    srcs = ["raw_hashtable_metadata_group_benchmark_test.sh"],
+    data = [":raw_hashtable_metadata_group_benchmark"],
 )
 
 cc_library(
