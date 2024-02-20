@@ -230,6 +230,8 @@ class MetadataGroup : public Printable<MetadataGroup> {
   static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
   static constexpr uint64_t LSBs = 0x0101'0101'0101'0101ULL;
 
+  static constexpr bool FastByteClear = Size == 8;
+
   using MatchRange =
 #if CARBON_USE_X86_SIMD_CONTROL_GROUP
       BitIndexRange<uint32_t, /*Shift=*/0, /*ZeroMask=*/0xFFFF0000>;
@@ -264,6 +266,8 @@ class MetadataGroup : public Printable<MetadataGroup> {
 
   static auto Load(uint8_t* metadata, ssize_t index) -> MetadataGroup;
   auto Store(uint8_t* metadata, ssize_t index) const -> void;
+
+  auto ClearByte(ssize_t byte_index) -> void;
 
   auto ClearDeleted() -> void;
 
@@ -345,6 +349,13 @@ inline auto MetadataGroup::Store(uint8_t* metadata, ssize_t index) const
   CARBON_DCHECK(0 == std::memcmp(metadata + index, &bytes, Size));
 }
 
+inline auto MetadataGroup::ClearByte(ssize_t byte_index) -> void {
+  static_assert(FastByteClear, "Only use byte clearing when fast!");
+  static_assert(Size == 8, "The clear implementation assumes an 8-byte group.");
+
+  byte_ints[0] &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
+}
+
 inline auto MetadataGroup::ClearDeleted() -> void {
   MetadataGroup portable_g = *this;
   if constexpr (!UseSIMD || DebugChecks) {
@@ -355,10 +366,7 @@ inline auto MetadataGroup::ClearDeleted() -> void {
     }
   }
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-  // Compare less than zero of each byte to identify the present elements.
-  uint8x8_t present_mask = vclt_s8(vreinterpret_s8_u8(byte_vec), vdup_n_s8(0));
-  // And mask every other lane to zero.
-  byte_vec = vand_u8(byte_vec, present_mask);
+  byte_ints[0] &= (~LSBs | byte_ints[0] >> 7);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   byte_vec = _mm_blendv_epi8(_mm_setzero_si128(), byte_vec, byte_vec);
 #else

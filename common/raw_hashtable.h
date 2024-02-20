@@ -682,40 +682,43 @@ template <typename LookupKeyT>
   ssize_t count = 0;
   for (ssize_t group_index = 0; group_index < old_size;
        group_index += GroupSize) {
-#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-    uint64_t low_g;
-    memcpy(&low_g, old_metadata + group_index, GroupSize);
-    uint64_t present_mask = (low_g >> 7) & MetadataGroup::LSBs;
-    low_g &= (low_g >> 7) | ~MetadataGroup::LSBs;
-    uint64_t high_g = low_g;
-    auto present_matched_range = MetadataGroup::MatchRange(present_mask);
-#else
-    auto g = MetadataGroup::Load(old_metadata, group_index);
-    g.ClearDeleted();
-    auto present_matched_range = g.MatchPresent();
-    g.Store(new_metadata, group_index);
-    g.Store(new_metadata, group_index | old_size);
-#endif
+    auto low_g = MetadataGroup::Load(old_metadata, group_index);
+    // Make sure to match present elements first to enable pipelining with
+    // clearing.
+    auto present_matched_range = low_g.MatchPresent();
+    low_g.ClearDeleted();
+    MetadataGroup high_g;
+    if constexpr (MetadataGroup::FastByteClear) {
+      // When we have a fast byte clear, we can update the metadata for the
+      // growth in-register and store at the end.
+      high_g = low_g;
+    } else {
+      // If we don't have a fast byte clear, we can store the metadata group
+      // eagerly here and overwrite bytes with a byte store below instead of
+      // clearing the byte in-register.
+      low_g.Store(new_metadata, group_index);
+      low_g.Store(new_metadata, group_index | old_size);
+    }
     for (ssize_t byte_index : present_matched_range) {
       ++count;
       ssize_t old_index = group_index + byte_index;
-#if !CARBON_USE_NEON_SIMD_CONTROL_GROUP
-      CARBON_DCHECK(new_metadata[old_index] == old_metadata[old_index]);
-      CARBON_DCHECK(new_metadata[old_index | old_size] ==
-                    old_metadata[old_index]);
-#endif
+      if constexpr (!MetadataGroup::FastByteClear) {
+        CARBON_DCHECK(new_metadata[old_index] == old_metadata[old_index]);
+        CARBON_DCHECK(new_metadata[old_index | old_size] ==
+                      old_metadata[old_index]);
+      }
       HashCode hash = HashValue(old_entries[old_index].key(), ComputeSeed());
       ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
                                ComputeProbeMaskFromSize(old_size);
       if (LLVM_UNLIKELY(old_hash_index != group_index)) {
         probed_indices.push_back(old_index);
-#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-        low_g &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
-        high_g &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
-#else
-        new_metadata[old_index] = MetadataGroup::Empty;
-        new_metadata[old_index | old_size] = MetadataGroup::Empty;
-#endif
+        if constexpr (MetadataGroup::FastByteClear) {
+          low_g.ClearByte(byte_index);
+          high_g.ClearByte(byte_index);
+        } else {
+          new_metadata[old_index] = MetadataGroup::Empty;
+          new_metadata[old_index | old_size] = MetadataGroup::Empty;
+        }
         continue;
       }
       ssize_t new_index = hash.ExtractIndexAndTag<7>().first &
@@ -724,15 +727,13 @@ template <typename LookupKeyT>
                     new_index == (old_hash_index | old_size));
       // Toggle the newly added bit of the index to get to the other possible
       // target index.
-#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-      (new_index == old_hash_index ? high_g : low_g) &=
-          ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
-
-      new_index += byte_index;
-#else
-      new_index += byte_index;
-      new_metadata[new_index ^ old_size] = MetadataGroup::Empty;
-#endif
+      if constexpr (MetadataGroup::FastByteClear) {
+        (new_index == old_hash_index ? high_g : low_g).ClearByte(byte_index);
+        new_index += byte_index;
+      } else {
+        new_index += byte_index;
+        new_metadata[new_index ^ old_size] = MetadataGroup::Empty;
+      }
 
       // If we need to explicitly move (and destroy) the key or value, do so
       // here where we already know its target.
@@ -740,10 +741,10 @@ template <typename LookupKeyT>
         old_entries[old_index].Move(new_entries[new_index]);
       }
     }
-#if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-    memcpy(new_metadata + group_index, &low_g, GroupSize);
-    memcpy(new_metadata + (group_index | old_size), &high_g, GroupSize);
-#endif
+    if constexpr (MetadataGroup::FastByteClear) {
+      low_g.Store(new_metadata, group_index);
+      high_g.Store(new_metadata, (group_index | old_size));
+    }
   }
   CARBON_DCHECK((count - static_cast<ssize_t>(probed_indices.size())) ==
                 (new_size - llvm::count(llvm::ArrayRef(new_metadata, new_size),
