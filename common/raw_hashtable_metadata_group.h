@@ -350,8 +350,9 @@ inline auto MetadataGroup::Store(uint8_t* metadata, ssize_t index) const
 }
 
 inline auto MetadataGroup::ClearByte(ssize_t byte_index) -> void {
-  static_assert(FastByteClear, "Only use byte clearing when fast!");
-  static_assert(Size == 8, "The clear implementation assumes an 8-byte group.");
+  CARBON_DCHECK(FastByteClear) << "Only use byte clearing when fast!";
+  CARBON_DCHECK(Size == 8)
+      << "The clear implementation assumes an 8-byte group.";
 
   byte_ints[0] &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
 }
