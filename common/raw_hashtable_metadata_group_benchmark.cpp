@@ -42,7 +42,7 @@ static auto BuildBenchMetadata() -> llvm::ArrayRef<BenchMetadata> {
       auto group_bytes = llvm::MutableArrayRef(
           &metadata_storage[bm_index][g_index * GroupSize], GroupSize);
       for (uint8_t& b : group_bytes) {
-        b = absl::Uniform<uint8_t>(gen);
+        b = absl::Uniform<uint8_t>(gen) | MetadataGroup::PresentMask;
       }
 
       // Now we need up to `match_count` random indices into the group where
@@ -56,9 +56,8 @@ static auto BuildBenchMetadata() -> llvm::ArrayRef<BenchMetadata> {
       uint8_t& match_b = group_bytes[match_index];
       switch (Kind) {
         case BenchKind::Random: {
-          // Already a random value, but we need to make it a valid present
-          // value and ensure it isn't one that repeats elsewhere in the group.
-          match_b |= MetadataGroup::PresentMask;
+          // Already a random value, but we need to  ensure it isn't one that
+          // repeats elsewhere in the group.
           while (llvm::count(group_bytes, match_b) > 1) {
             match_b = absl::Uniform<uint8_t>(gen) | MetadataGroup::PresentMask;
           }
@@ -110,7 +109,7 @@ static void BM_LoadMatch(benchmark::State& s) {
 #pragma clang loop unroll(disable)
   for (auto _ : s) {
     auto g = MetadataGroup::Load(bm.metadata.data(), i * GroupSize);
-    MetadataGroup::MatchRange matches;
+    MetadataGroup::MatchIndex matches;
     if constexpr (!Portable) {
       if constexpr (Kind == BenchKind::Empty) {
         matches = g.MatchEmpty();
@@ -118,7 +117,7 @@ static void BM_LoadMatch(benchmark::State& s) {
         matches = g.MatchDeleted();
       } else {
         static_assert(Kind == BenchKind::Random);
-        matches = g.Match(bm.bytes[i]);
+        matches = static_cast<MetadataGroup::MatchIndex>(g.Match(bm.bytes[i]));
       }
     } else {
       if constexpr (Kind == BenchKind::Empty) {
@@ -127,10 +126,12 @@ static void BM_LoadMatch(benchmark::State& s) {
         matches = g.PortableMatchDeleted();
       } else {
         static_assert(Kind == BenchKind::Random);
-        matches = g.PortableMatch(bm.bytes[i]);
+        matches = static_cast<MetadataGroup::MatchIndex>(
+            g.PortableMatch(bm.bytes[i]));
       }
     }
-    i = (i + nonce_data[*matches.begin()]) & (BenchSize - 1);
+    CARBON_CHECK(matches);
+    i = (i + nonce_data[matches.index()]) & (BenchSize - 1);
   }
 }
 BENCHMARK(BM_LoadMatch<BenchKind::Random>);

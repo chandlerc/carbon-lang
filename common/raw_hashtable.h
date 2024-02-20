@@ -535,8 +535,8 @@ template <typename LookupKeyT>
     ssize_t group_index = s.getIndex();
     auto g = MetadataGroup::Load(local_metadata, group_index);
 
-    if (auto empty_matched_range = g.MatchEmpty()) {
-      ssize_t index = group_index + *empty_matched_range.begin();
+    if (auto empty_match = g.MatchEmpty()) {
+      ssize_t index = group_index + empty_match.index();
       local_metadata[index] = metadata_byte;
       return &local_entries[index];
     }
@@ -685,10 +685,10 @@ template <typename LookupKeyT>
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
     uint64_t low_g;
     memcpy(&low_g, old_metadata + group_index, GroupSize);
-    uint64_t present_mask = (low_g >> 7) & Group::LSBs;
-    low_g &= (low_g >> 7) | ~Group::LSBs;
+    uint64_t present_mask = (low_g >> 7) & MetadataGroup::LSBs;
+    low_g &= (low_g >> 7) | ~MetadataGroup::LSBs;
     uint64_t high_g = low_g;
-    auto present_matched_range = Group::MatchRange(present_mask);
+    auto present_matched_range = MetadataGroup::MatchRange(present_mask);
 #else
     auto g = MetadataGroup::Load(old_metadata, group_index);
     g.ClearDeleted();
@@ -828,7 +828,7 @@ auto Base<InputKeyT, InputValueT>::InsertIndexHashed(LookupKeyT lookup_key)
   // constexpr uint8_t NoInsertNeeded = Group::Empty;
 
   ssize_t group_with_deleted_index;
-  MetadataGroup::MatchRange deleted_matched_range = {};
+  MetadataGroup::MatchIndex deleted_match = {};
 
   EntryT* local_entries = this->entries();
 
@@ -844,7 +844,7 @@ auto Base<InputKeyT, InputValueT>::InsertIndexHashed(LookupKeyT lookup_key)
     auto g = MetadataGroup::Load(local_metadata, group_index);
 
     auto control_byte_matched_range = g.Match(metadata_byte);
-    auto empty_matched_range = g.MatchEmpty();
+    auto empty_match = g.MatchEmpty();
     if (control_byte_matched_range) {
       EntryT* group_entries = &local_entries[group_index];
       auto byte_it = control_byte_matched_range.begin();
@@ -859,14 +859,14 @@ auto Base<InputKeyT, InputValueT>::InsertIndexHashed(LookupKeyT lookup_key)
     }
 
     // Track the first group with a deleted entry that we could insert over.
-    if (!deleted_matched_range) {
-      deleted_matched_range = g.MatchDeleted();
+    if (!deleted_match) {
+      deleted_match = g.MatchDeleted();
       group_with_deleted_index = group_index;
     }
 
     // We failed to find a matching entry in this bucket, so check if there are
     // no empty slots. In that case, we'll continue probing.
-    if (!empty_matched_range) {
+    if (!empty_match) {
       continue;
     }
     // Ok, we've finished probing without finding anything and need to insert
@@ -876,9 +876,9 @@ auto Base<InputKeyT, InputValueT>::InsertIndexHashed(LookupKeyT lookup_key)
     // so just bail. We want to ensure building up a table is fast so we
     // de-prioritize this a bit. In practice this doesn't have too much of an
     // effect.
-    if (LLVM_UNLIKELY(deleted_matched_range)) {
+    if (LLVM_UNLIKELY(deleted_match)) {
       return return_insert_at_index(group_with_deleted_index +
-                                    *deleted_matched_range.begin());
+                                    deleted_match.index());
     }
 
     // We're going to need to grow by inserting into an empty slot. Check that
@@ -890,7 +890,7 @@ auto Base<InputKeyT, InputValueT>::InsertIndexHashed(LookupKeyT lookup_key)
     }
 
     --this->growth_budget_;
-    return return_insert_at_index(group_index + *empty_matched_range.begin());
+    return return_insert_at_index(group_index + empty_match.index());
   }
 
   CARBON_FATAL() << "We should never finish probing without finding the entry "
