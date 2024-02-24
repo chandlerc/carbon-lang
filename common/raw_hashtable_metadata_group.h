@@ -386,7 +386,7 @@ inline auto MetadataGroup::ClearDeleted() -> void {
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
   byte_ints[0] &= (~LSBs | ~byte_ints[0] >> 7);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
-  byte_vec = _mm_blendv_epi8(_mm_setzero_si128(), byte_vec, byte_vec);
+  byte_vec = _mm_blendv_epi8(byte_vec, _mm_set1_epi8(Empty), byte_vec);
 #else
   static_assert(!UseSIMD, "Unimplemented SIMD operation");
 #endif
@@ -433,7 +433,7 @@ inline auto MetadataGroup::MatchPresent() const -> MatchRange {
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   // We arrange the byte vector for present bytes so that we can directly
   // extract it as a mask.
-  result = MatchRange(_mm_movemask_epi8(byte_vec));
+  result = MatchRange(_mm_movemask_epi8(byte_vec) ^ 0xFFFFU);
 #else
   static_assert(!UseSIMD, "Unimplemented SIMD operation");
 #endif
@@ -616,7 +616,7 @@ inline auto MetadataGroup::PortableMatchPresent() const -> MatchRange {
     uint32_t mask = 0;
     uint32_t bit = 1;
     for (ssize_t i : llvm::seq<ssize_t>(0, Size)) {
-      if (bytes[i] & PresentMask) {
+      if ((bytes[i] & PresentMask) == 0) {
         mask |= bit;
       }
       bit <<= 1;
