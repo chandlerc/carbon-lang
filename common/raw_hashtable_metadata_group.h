@@ -47,8 +47,8 @@ constexpr ssize_t MaxGroupSize = 16;
 // Last but not least, some bits of the underlying value may be known-zero,
 // which can optimize various operations. These can be represented as a
 // `ZeroMask`.
-template <typename MaskT, int Shift = 0, MaskT ZeroMask = 0>
-class BitIndex : public Printable<BitIndex<MaskT, Shift, ZeroMask>> {
+template <typename MaskT, bool ByteEncoding, MaskT ZeroMask = 0>
+class BitIndex : public Printable<BitIndex<MaskT, ByteEncoding, ZeroMask>> {
  public:
   BitIndex() = default;
   explicit BitIndex(MaskT mask) : mask_(mask) {}
@@ -57,8 +57,9 @@ class BitIndex : public Printable<BitIndex<MaskT, Shift, ZeroMask>> {
     if (lhs.empty() || rhs.empty()) {
       return lhs.empty() == rhs.empty();
     }
-    // For non-empty bit indices, only the number of low zero bits matters.
-    return llvm::countr_zero(lhs.mask_) == llvm::countr_zero(rhs.mask_);
+    // For non-empty bit indices, compare the indices directly to ignore other
+    // (extraneous) parts of the mask.
+    return lhs.index() == rhs.index();
   }
 
   auto Print(llvm::raw_ostream& out) const -> void {
@@ -75,27 +76,42 @@ class BitIndex : public Printable<BitIndex<MaskT, Shift, ZeroMask>> {
   auto index() -> ssize_t {
     CARBON_DCHECK(mask_ != 0) << "Cannot get an index from a zero mask!";
     __builtin_assume(mask_ != 0);
-    ssize_t index = static_cast<size_t>(llvm::countr_zero(mask_));
-    if constexpr (Shift > 0) {
-      // We need to shift the index. However, we ensure that only zeros are
-      // shifted off here and leave an optimizer hint about that. The index
-      // will often be scaled by the user of this and we want that scale to
-      // fold with the right shift whenever it can. That means we need the
-      // optimizer to know there weren't low one-bites being shifted off here.
+    if constexpr (!ByteEncoding) {
+      return static_cast<size_t>(llvm::countr_zero(mask_));
+    } else {
+      // The index is encoded in the high bit of each byte. We compute the index
+      // by counting the number of low zero bytes there are before the first
+      // byte with its high bit set. Rather that shifting the high bit to be the
+      // low bit and counting the trailing (low) zero bits directly, we instead
+      // byte-reverse the mask and count the *leading* (high) zero bits. While
+      // this may be a wash on CPUs with direct support for counting the
+      // trailing zero bits, AArch64 only supports counting the leading zero
+      // bits and requires a bit-reverse to count the trailing zero bits. Doing
+      // the byte approach essentially combines moving the high bit into the low
+      // bit and the reverse necessary for counting the zero bits.
+      ssize_t index = llvm::countl_zero(llvm::byteswap(mask_));
+
+      // We still need to scale the index as we counted zero *bits* and not zero
+      // *bytes*. We do this with a shift. However, a common use of the index is
+      // to index memory which will also often be scaled. We leave an
+      // optimization hint that the scale operation here can be reversed (it
+      // doesn't shift off non-zero bits). This enables folding this scale with
+      // the scale in the caller in some cases.
+      constexpr int Shift = 3;
       CARBON_DCHECK((index & ((static_cast<MaskT>(1) << Shift) - 1)) == 0);
       __builtin_assume((index & ((static_cast<MaskT>(1) << Shift) - 1)) == 0);
-      index >>= Shift;
+      return index >> Shift;
     }
-    return index;
   }
 
  private:
   MaskT mask_ = 0;
 };
 
-template <typename MaskT, int Shift = 0, MaskT ZeroMask = 0>
-class BitIndexRange : public Printable<BitIndexRange<MaskT, Shift, ZeroMask>> {
-  using BitIndexT = BitIndex<MaskT, Shift, ZeroMask>;
+template <typename MaskT, bool ByteEncoding, MaskT ZeroMask = 0>
+class BitIndexRange
+    : public Printable<BitIndexRange<MaskT, ByteEncoding, ZeroMask>> {
+  using BitIndexT = BitIndex<MaskT, ByteEncoding, ZeroMask>;
 
  public:
   class Iterator
@@ -234,16 +250,16 @@ class MetadataGroup : public Printable<MetadataGroup> {
 
   using MatchRange =
 #if CARBON_USE_X86_SIMD_CONTROL_GROUP
-      BitIndexRange<uint32_t, /*Shift=*/0, /*ZeroMask=*/0xFFFF0000>;
+      BitIndexRange<uint32_t, /*ByteEncoding=*/false, /*ZeroMask=*/0xFFFF0000>;
 #else
-      BitIndexRange<uint64_t, /*Shift=*/3>;
+      BitIndexRange<uint64_t, /*ByteEncoding=*/true>;
 #endif
 
   using MatchIndex =
 #if CARBON_USE_X86_SIMD_CONTROL_GROUP
-      BitIndex<uint32_t, /*Shift=*/0, /*ZeroMask=*/0xFFFF0000>;
+      BitIndex<uint32_t, /*ByteEncoding=*/false, /*ZeroMask=*/0xFFFF0000>;
 #else
-      BitIndex<uint64_t, /*Shift=*/3>;
+      BitIndex<uint64_t, /*ByteEncoding=*/true>;
 #endif
 
   union {
@@ -389,7 +405,7 @@ inline auto MetadataGroup::Match(uint8_t match_byte) const -> MatchRange {
   auto match_byte_vec = vdup_n_u8(match_byte);
   auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
   uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-  result = MatchRange(mask & LSBs);
+  result = MatchRange(mask & MSBs);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   result = X86SIMDMatch(match_byte);
 #else
@@ -412,7 +428,7 @@ inline auto MetadataGroup::MatchPresent() const -> MatchRange {
   MatchRange result;
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
   // Just directly extract the bytes as the MSB already marks presence.
-  result = MatchRange((byte_ints[0] >> 7) & LSBs);
+  result = MatchRange(byte_ints[0] & MSBs);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   // We arrange the byte vector for present bytes so that we can directly
   // extract it as a mask.
@@ -436,9 +452,8 @@ inline auto MetadataGroup::MatchEmpty() const -> MatchIndex {
   }
   MatchIndex result;
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-  auto match_byte_cmp_vec = vceqz_u8(byte_vec);
-  uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-  result = MatchIndex(mask);
+  uint64_t mask = byte_ints[0] | (byte_ints[0] << 7);
+  result = MatchIndex(~mask & MSBs);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   result = MatchIndex(X86SIMDMatch(Empty));
 #else
@@ -460,10 +475,8 @@ inline auto MetadataGroup::MatchDeleted() const -> MatchIndex {
   }
   MatchIndex result;
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-  auto match_byte_vec = vdup_n_u8(Deleted);
-  auto match_byte_cmp_vec = vceq_u8(byte_vec, match_byte_vec);
-  uint64_t mask = vreinterpret_u64_u8(match_byte_cmp_vec)[0];
-  result = MatchIndex(mask);
+  uint64_t mask = byte_ints[0] | (~byte_ints[0] << 7);
+  result = MatchIndex(~mask & MSBs);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   result = MatchIndex(X86SIMDMatch(Deleted));
 #else
@@ -547,7 +560,7 @@ inline auto MetadataGroup::PortableMatch(uint8_t match_byte) const
 
   // This algorithm only works for matching *present* bytes. We leverage the
   // set high bit in the present case as part of the algorithm. The whole
-  // algorithm has a critical path height of 5 operations, and does 7
+  // algorithm has a critical path height of 4 operations, and does 6
   // operations total:
   //
   //          group | MSBs    LSBs * match_byte
@@ -557,20 +570,13 @@ inline auto MetadataGroup::PortableMatch(uint8_t match_byte) const
   // group & MSBs    MSBs - mask
   //        \            /
   //    group_MSBs & mask
-  //               |
-  //          mask >> 7
   //
   // While it is superficially similar to the "find zero bytes in a word" bit
   // math trick, it is different because this is designed to
-  // have no false positives and perfectly produce 0x01 for matching bytes and
+  // have no false positives and perfectly produce 0x80 for matching bytes and
   // 0x00 for non-matching bytes. This is do-able because we constrain to only
   // handle present matches which only require testing 7 bits and have a
   // particular layout.
-  //
-  // It is tempting to remove the last shift by targeting 0x80 bytes on matches,
-  // but this makes the shift to scale the zero-bit-count to an index to be a
-  // significant shift that cannot be folded with shifts to scale the index to a
-  // larger object size.
 
   // Set the high bit of every byte to `1`. The match byte always has this bit
   // set as well, which ensures the xor below, in addition to zeroing the byte
@@ -585,14 +591,11 @@ inline auto MetadataGroup::PortableMatch(uint8_t match_byte) const
   mask = MSBs - mask;
   // Mask down to the high bits, but only those in the original group.
   mask &= (byte_ints[0] & MSBs);
-  // And shift to the low bit so that counting the low zero bits exactly
-  // produces a shifted index for a match.
-  mask >>= 7;
 #ifndef NDEBUG
   for (ssize_t byte_index : llvm::seq<ssize_t>(0, Size)) {
     uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
     if (bytes[byte_index] == match_byte) {
-      CARBON_DCHECK(byte == 0x01)
+      CARBON_DCHECK(byte == 0x80)
           << "Should just have the low bit set for a present byte, found: "
           << llvm::formatv("{0:x}", byte);
     } else {
@@ -619,12 +622,12 @@ inline auto MetadataGroup::PortableMatchPresent() const -> MatchRange {
     return MatchRange(mask);
   }
 
-  uint64_t mask = (byte_ints[0] >> 7) & LSBs;
+  uint64_t mask = byte_ints[0] & MSBs;
 #ifndef NDEBUG
   for (ssize_t byte_index : llvm::seq<ssize_t>(0, Size)) {
     uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
     if (bytes[byte_index] & 0b1000'0000U) {
-      CARBON_DCHECK(byte == 0x01)
+      CARBON_DCHECK(byte == 0x80)
           << "Should just have the low bit set for a present byte, found: "
           << llvm::formatv("{0:x}", byte);
     } else {
@@ -643,13 +646,13 @@ inline auto MetadataGroup::PortableMatchEmpty() const -> MatchIndex {
   }
 
   // Materialize the group into a word.
-  uint64_t mask = (byte_ints[0] >> 7) | byte_ints[0];
-  mask = ~mask & LSBs;
+  uint64_t mask = (byte_ints[0] << 7) | byte_ints[0];
+  mask = ~mask & MSBs;
 #ifndef NDEBUG
   for (ssize_t byte_index : llvm::seq<ssize_t>(0, Size)) {
     uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
     if (bytes[byte_index] == Empty) {
-      CARBON_DCHECK((byte & 1) == 1)
+      CARBON_DCHECK((byte & 0x80) == 0x80)
           << "Should have the low bit set for a matched byte, found: "
           << llvm::formatv("{0:x}", byte);
       // Only the first match is needed so stop scanning once found.
@@ -671,13 +674,13 @@ inline auto MetadataGroup::PortableMatchDeleted() const -> MatchIndex {
   }
 
   // Materialize the group into a word.
-  uint64_t mask = (byte_ints[0] >> 7) | ~byte_ints[0];
-  mask = ~mask & LSBs;
+  uint64_t mask = byte_ints[0] | (~byte_ints[0] << 7);
+  mask = ~mask & MSBs;
 #ifndef NDEBUG
   for (ssize_t byte_index : llvm::seq<ssize_t>(0, Size)) {
     uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
     if (bytes[byte_index] == Deleted) {
-      CARBON_DCHECK((byte & 1) == 1)
+      CARBON_DCHECK((byte & 0x80) == 0x80)
           << "Should have the low bit set for a matched byte, found: "
           << llvm::formatv("{0:x}", byte);
       // Only the first match is needed so stop scanning once found.
