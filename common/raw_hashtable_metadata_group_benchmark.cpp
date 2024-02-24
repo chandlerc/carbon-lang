@@ -42,7 +42,7 @@ static auto BuildBenchMetadata() -> llvm::ArrayRef<BenchMetadata> {
       auto group_bytes = llvm::MutableArrayRef(
           &metadata_storage[bm_index][g_index * GroupSize], GroupSize);
       for (uint8_t& b : group_bytes) {
-        b = absl::Uniform<uint8_t>(gen) | MetadataGroup::PresentMask;
+        b = absl::Uniform<uint8_t>(gen) & ~MetadataGroup::PresentMask;
       }
 
       // Now we need up to `match_count` random indices into the group where
@@ -59,7 +59,7 @@ static auto BuildBenchMetadata() -> llvm::ArrayRef<BenchMetadata> {
           // Already a random value, but we need to  ensure it isn't one that
           // repeats elsewhere in the group.
           while (llvm::count(group_bytes, match_b) > 1) {
-            match_b = absl::Uniform<uint8_t>(gen) | MetadataGroup::PresentMask;
+            match_b = absl::Uniform<uint8_t>(gen) & ~MetadataGroup::PresentMask;
           }
           // Store this as the byte to search for in this group.
           bytes_storage[bm_index][g_index] = match_b;

@@ -428,7 +428,7 @@ inline auto ComputeSeed() -> uint64_t {
 inline auto ComputeMetadataByte(size_t tag) -> uint8_t {
   // Mask one over the high bit so that engaged control bytes are easily
   // identified.
-  return tag | 0b10000000;
+  return tag;  // | 0b10000000;
 }
 
 // TODO: Evaluate keeping this outlined to see if macro benchmarks observe the
@@ -566,7 +566,7 @@ void Base<InputKeyT, InputValueT>::Init(ssize_t init_size,
                                         Storage* init_storage) {
   size() = init_size;
   storage() = init_storage;
-  std::memset(metadata(), 0, init_size);
+  std::memset(metadata(), MetadataGroup::Empty, init_size);
   growth_budget_ = GrowthThresholdForSize(init_size);
 }
 
@@ -910,7 +910,7 @@ auto Base<InputKeyT, InputValueT>::ClearImpl() -> void {
       },
       [](uint8_t* metadata, ssize_t group_index) {
         // Clear the group.
-        std::memset(metadata + group_index, 0, GroupSize);
+        std::memset(metadata + group_index, MetadataGroup::Empty, GroupSize);
       });
   this->growth_budget_ = GrowthThresholdForSize(this->size());
 }

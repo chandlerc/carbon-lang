@@ -566,7 +566,7 @@ inline constexpr auto HashCode::ExtractIndexAndTag()
   static_assert(N >= 1);
   static_assert(N <= 32);
   return {static_cast<ssize_t>(value_ >> N),
-          static_cast<uint32_t>(value_ & ((1U << (N + 1)) - 1))};
+          static_cast<uint32_t>(value_ & ((1U << N) - 1))};
 }
 
 // Building with `-DCARBON_MCA_MARKERS` will enable `llvm-mca` annotations in

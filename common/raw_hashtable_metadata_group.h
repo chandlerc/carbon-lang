@@ -232,16 +232,16 @@ class MetadataGroup : public Printable<MetadataGroup> {
                 "it is a simple shift.");
   static constexpr ssize_t Mask = Size - 1;
 
+  static constexpr uint8_t PresentMask = 0b1000'0000;
+
   // Each control byte can have special values. All special values have the
   // most significant bit set to distinguish them from the seven hash bits
   // stored when the control byte represents a full bucket.
   //
   // Otherwise, their values are chose primarily to provide efficient SIMD
   // implementations of the common operations on an entire control group.
-  static constexpr uint8_t Empty = 0;
-  static constexpr uint8_t Deleted = 1;
-
-  static constexpr uint8_t PresentMask = 0b1000'0000;
+  static constexpr uint8_t Empty = PresentMask;
+  static constexpr uint8_t Deleted = PresentMask | 1;
 
   static constexpr uint64_t MSBs = 0x8080'8080'8080'8080ULL;
   static constexpr uint64_t LSBs = 0x0101'0101'0101'0101ULL;
@@ -295,7 +295,7 @@ class MetadataGroup : public Printable<MetadataGroup> {
 
   // private:
   static constexpr bool UseSIMD =
-#if CARBON_USE_NEON_SIMD_CONTROL_GROUP || CARBON_USE_X86_SIMD_CONTROL_GROUP
+#if CARBON_USE_X86_SIMD_CONTROL_GROUP
       true;
 #else
       false;
@@ -371,6 +371,7 @@ inline auto MetadataGroup::ClearByte(ssize_t byte_index) -> void {
       << "The clear implementation assumes an 8-byte group.";
 
   byte_ints[0] &= ~(static_cast<uint64_t>(0xff) << (byte_index * 8));
+  byte_ints[0] |= static_cast<uint64_t>(Empty) << (byte_index * 8);
 }
 
 inline auto MetadataGroup::ClearDeleted() -> void {
@@ -383,7 +384,7 @@ inline auto MetadataGroup::ClearDeleted() -> void {
     }
   }
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-  byte_ints[0] &= (~LSBs | byte_ints[0] >> 7);
+  byte_ints[0] &= (~LSBs | ~byte_ints[0] >> 7);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   byte_vec = _mm_blendv_epi8(_mm_setzero_si128(), byte_vec, byte_vec);
 #else
@@ -428,7 +429,7 @@ inline auto MetadataGroup::MatchPresent() const -> MatchRange {
   MatchRange result;
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
   // Just directly extract the bytes as the MSB already marks presence.
-  result = MatchRange(byte_ints[0] & MSBs);
+  result = MatchRange(~byte_ints[0] & MSBs);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   // We arrange the byte vector for present bytes so that we can directly
   // extract it as a mask.
@@ -452,8 +453,8 @@ inline auto MetadataGroup::MatchEmpty() const -> MatchIndex {
   }
   MatchIndex result;
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-  uint64_t mask = byte_ints[0] | (byte_ints[0] << 7);
-  result = MatchIndex(~mask & MSBs);
+  uint64_t mask = (byte_ints[0] & MSBs) & ~(byte_ints[0] << 7);
+  result = MatchIndex(mask);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   result = MatchIndex(X86SIMDMatch(Empty));
 #else
@@ -475,8 +476,8 @@ inline auto MetadataGroup::MatchDeleted() const -> MatchIndex {
   }
   MatchIndex result;
 #if CARBON_USE_NEON_SIMD_CONTROL_GROUP
-  uint64_t mask = byte_ints[0] | (~byte_ints[0] << 7);
-  result = MatchIndex(~mask & MSBs);
+  uint64_t mask = (byte_ints[0] & MSBs) & (byte_ints[0] << 7);
+  result = MatchIndex(mask);
 #elif CARBON_USE_X86_SIMD_CONTROL_GROUP
   result = MatchIndex(X86SIMDMatch(Deleted));
 #else
@@ -531,7 +532,7 @@ inline auto MetadataGroup::PortableStore(uint8_t* metadata, ssize_t index) const
 
 inline auto MetadataGroup::PortableClearDeleted() -> void {
   for (uint64_t& byte_int : byte_ints) {
-    byte_int &= (~LSBs | byte_int >> 7);
+    byte_int &= (~LSBs | ~byte_int >> 7);
   }
 }
 
@@ -556,19 +557,20 @@ inline auto MetadataGroup::PortableMatch(uint8_t match_byte) const
 
   // Small group optimized matching only works on present bytes, not empty or
   // deleted.
-  CARBON_DCHECK(match_byte & 0b1000'0000) << llvm::formatv("{0:x}", match_byte);
+  CARBON_DCHECK((match_byte & PresentMask) == 0)
+      << llvm::formatv("{0:x}", match_byte);
 
   // This algorithm only works for matching *present* bytes. We leverage the
   // set high bit in the present case as part of the algorithm. The whole
   // algorithm has a critical path height of 4 operations, and does 6
   // operations total:
   //
-  //          group | MSBs    LSBs * match_byte
+  //          group & ~MSBs   LSBs * match_byte
   //                 \            /
   //                 mask ^ pattern
   //                      |
-  // group & MSBs    MSBs - mask
-  //        \            /
+  // ~group & MSBs   MSBs - mask
+  //         \           /
   //    group_MSBs & mask
   //
   // While it is superficially similar to the "find zero bytes in a word" bit
@@ -581,7 +583,7 @@ inline auto MetadataGroup::PortableMatch(uint8_t match_byte) const
   // Set the high bit of every byte to `1`. The match byte always has this bit
   // set as well, which ensures the xor below, in addition to zeroing the byte
   // that matches, also clears the high bit of every byte.
-  uint64_t mask = byte_ints[0] | MSBs;
+  uint64_t mask = byte_ints[0] & ~MSBs;
   // Broadcast the match byte to all bytes.
   uint64_t pattern = LSBs * match_byte;
   // Xor the broadcast pattern, making matched bytes become zero bytes.
@@ -590,7 +592,7 @@ inline auto MetadataGroup::PortableMatch(uint8_t match_byte) const
   // clears the high bit but zero leaves it intact.
   mask = MSBs - mask;
   // Mask down to the high bits, but only those in the original group.
-  mask &= (byte_ints[0] & MSBs);
+  mask &= (~byte_ints[0] & MSBs);
 #ifndef NDEBUG
   for (ssize_t byte_index : llvm::seq<ssize_t>(0, Size)) {
     uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
@@ -622,11 +624,11 @@ inline auto MetadataGroup::PortableMatchPresent() const -> MatchRange {
     return MatchRange(mask);
   }
 
-  uint64_t mask = byte_ints[0] & MSBs;
+  uint64_t mask = ~byte_ints[0] & MSBs;
 #ifndef NDEBUG
   for (ssize_t byte_index : llvm::seq<ssize_t>(0, Size)) {
     uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
-    if (bytes[byte_index] & 0b1000'0000U) {
+    if ((bytes[byte_index] & PresentMask) == 0) {
       CARBON_DCHECK(byte == 0x80)
           << "Should just have the low bit set for a present byte, found: "
           << llvm::formatv("{0:x}", byte);
@@ -646,8 +648,7 @@ inline auto MetadataGroup::PortableMatchEmpty() const -> MatchIndex {
   }
 
   // Materialize the group into a word.
-  uint64_t mask = (byte_ints[0] << 7) | byte_ints[0];
-  mask = ~mask & MSBs;
+  uint64_t mask = (byte_ints[0] & MSBs) & ~(byte_ints[0] << 7);
 #ifndef NDEBUG
   for (ssize_t byte_index : llvm::seq<ssize_t>(0, Size)) {
     uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
@@ -674,8 +675,7 @@ inline auto MetadataGroup::PortableMatchDeleted() const -> MatchIndex {
   }
 
   // Materialize the group into a word.
-  uint64_t mask = byte_ints[0] | (~byte_ints[0] << 7);
-  mask = ~mask & MSBs;
+  uint64_t mask = (byte_ints[0] & MSBs) & (byte_ints[0] << 7);
 #ifndef NDEBUG
   for (ssize_t byte_index : llvm::seq<ssize_t>(0, Size)) {
     uint8_t byte = (mask >> (byte_index * 8)) & 0xFF;
