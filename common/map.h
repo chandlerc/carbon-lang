@@ -253,12 +253,11 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
   //
   // Example of counting occurrences:
   // ```cpp
-  //   m.Update(item, /*insert_cb=*/ [](void* key_storage, void* value_storage)
-  //   {
+  //   m.Update(item, /*insert_cb=*/[](void* key_storage, void* value_storage) {
   //                    new (key_storage) MyItem(item);
   //                    new (value_storage) Count(1);
   //                  },
-  //                  /*update_cb=*/ [](MyItem& /*key*/, Count& count) {
+  //                  /*update_cb=*/[](MyItem& /*key*/, Count& count) {
   //                    ++count;
   //                  });
   // ```
