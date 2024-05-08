@@ -32,13 +32,13 @@ struct SetWrapperImpl {
   static constexpr bool IsCarbonSet = false;
   using KeyT = typename SetT::key_type;
 
-  SetT M;
+  SetT s;
 
-  auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
+  auto BenchContains(KeyT k) -> bool { return s.find(k) != s.end(); }
 
   auto BenchLookup(KeyT k) -> bool {
-    auto it = M.find(k);
-    if (it == M.end()) {
+    auto it = s.find(k);
+    if (it == s.end()) {
       return false;
     }
     // We expect keys to always convert to `true` so directly return that here.
@@ -46,11 +46,11 @@ struct SetWrapperImpl {
   }
 
   auto BenchInsert(KeyT k) -> bool {
-    auto result = M.insert(k);
+    auto result = s.insert(k);
     return result.second;
   }
 
-  auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
+  auto BenchErase(KeyT k) -> bool { return s.erase(k) != 0; }
 };
 
 template <typename KT, int MinSmallSize>
@@ -58,12 +58,12 @@ struct SetWrapperImpl<Set<KT, MinSmallSize>> {
   using SetT = Set<KT, MinSmallSize>;
   using KeyT = KT;
 
-  SetT M;
+  SetT s;
 
-  auto BenchContains(KeyT k) -> bool { return M.Contains(k); }
+  auto BenchContains(KeyT k) -> bool { return s.Contains(k); }
 
   auto BenchLookup(KeyT k) -> bool {
-    auto result = M.Lookup(k);
+    auto result = s.Lookup(k);
     if (!result) {
       return false;
     }
@@ -71,11 +71,11 @@ struct SetWrapperImpl<Set<KT, MinSmallSize>> {
   }
 
   auto BenchInsert(KeyT k) -> bool {
-    auto result = M.Insert(k);
+    auto result = s.Insert(k);
     return result.is_inserted();
   }
 
-  auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
+  auto BenchErase(KeyT k) -> bool { return s.Erase(k); }
 };
 
 // Provide a way to override the Carbon Set specific benchmark runs with another
@@ -147,24 +147,24 @@ using SetWrapper =
 // magnitude of these effects even when there is a great deal of prediction and
 // speculative execution to hide memory access latency.
 template <typename SetT>
-static void BM_SetContainsHitPtr(benchmark::State& s) {
+static void BM_SetContainsHitPtr(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
-  SetWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
+  SetWrapperT s;
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
-    m.BenchInsert(k);
+    s.BenchInsert(k);
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       // We block optimizing `i` as that has proven both more effective at
       // blocking the loop from being optimized away and avoiding disruption of
       // the generated code that we're benchmarking.
       benchmark::DoNotOptimize(i);
 
-      bool result = m.BenchContains(lookup_keys[i]);
+      bool result = s.BenchContains(lookup_keys[i]);
       CARBON_DCHECK(result);
       // We use the lookup success to step through keys, establishing a
       // dependency between each lookup and allowing us to measure latency
@@ -178,21 +178,21 @@ MAP_BENCHMARK_ONE_OP(BM_SetContainsHitPtr, HitArgs);
 // Benchmark the "latency" (but more likely the reciprocal throughput, see
 // comment above) of testing for a key in the set that is *not* present.
 template <typename SetT>
-static void BM_SetContainsMissPtr(benchmark::State& s) {
+static void BM_SetContainsMissPtr(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
-  SetWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(s.range(0));
+  SetWrapperT s;
+  auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(state.range(0));
   for (auto k : keys) {
-    m.BenchInsert(k);
+    s.BenchInsert(k);
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       benchmark::DoNotOptimize(i);
 
-      bool result = m.BenchContains(lookup_keys[i]);
+      bool result = s.BenchContains(lookup_keys[i]);
       CARBON_DCHECK(!result);
       i += static_cast<ssize_t>(!result);
     }
@@ -213,21 +213,21 @@ MAP_BENCHMARK_ONE_OP(BM_SetContainsMissPtr, SizeArgs);
 // operated on in some way once looked up in the set, this will be fairly
 // representative of the latency cost from the data structure.
 template <typename SetT>
-static void BM_SetLookupHitPtr(benchmark::State& s) {
+static void BM_SetLookupHitPtr(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
-  SetWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
+  SetWrapperT s;
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
-    m.BenchInsert(k);
+    s.BenchInsert(k);
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       benchmark::DoNotOptimize(i);
 
-      bool result = m.BenchLookup(lookup_keys[i]);
+      bool result = s.BenchLookup(lookup_keys[i]);
       CARBON_DCHECK(result);
       i += static_cast<ssize_t>(result);
     }
@@ -242,24 +242,24 @@ MAP_BENCHMARK_ONE_OP(BM_SetLookupHitPtr, HitArgs);
 // start, and so this is expected to be perfectly predicted and not measure
 // meaningful latency.
 template <typename SetT>
-static void BM_SetEraseInsertHitPtr(benchmark::State& s) {
+static void BM_SetEraseInsertHitPtr(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
-  SetWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
+  SetWrapperT s;
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
-    m.BenchInsert(k);
+    s.BenchInsert(k);
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       benchmark::DoNotOptimize(i);
 
-      m.BenchErase(lookup_keys[i]);
+      s.BenchErase(lookup_keys[i]);
       benchmark::ClobberMemory();
 
-      bool inserted = m.BenchInsert(lookup_keys[i]);
+      bool inserted = s.BenchInsert(lookup_keys[i]);
       CARBON_DCHECK(inserted);
       i += static_cast<ssize_t>(inserted);
     }
@@ -300,26 +300,26 @@ MAP_BENCHMARK_ONE_OP(BM_SetEraseInsertHitPtr, HitArgs);
 // efficacy of the underlying hash function, and a direct factor that drives the
 // cost of these operations.
 template <typename SetT>
-static void BM_SetInsertSeq(benchmark::State& s) {
+static void BM_SetInsertSeq(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   constexpr ssize_t LookupKeysSize = 1 << 8;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), LookupKeysSize);
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), LookupKeysSize);
 
   // Now build a large shuffled set of keys (with duplicates) we'll use at the
   // end.
   ssize_t i = 0;
-  for (auto _ : s) {
+  for (auto _ : state) {
     benchmark::DoNotOptimize(i);
 
-    SetWrapperT m;
+    SetWrapperT s;
     for (auto k : keys) {
-      bool inserted = m.BenchInsert(k);
+      bool inserted = s.BenchInsert(k);
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
     }
 
     // Now insert a final random repeated key.
-    bool inserted = m.BenchInsert(lookup_keys[i]);
+    bool inserted = s.BenchInsert(lookup_keys[i]);
     CARBON_DCHECK(!inserted) << "Must already be in the map!";
 
     // Rotate through the shuffled keys.
@@ -329,16 +329,16 @@ static void BM_SetInsertSeq(benchmark::State& s) {
   // It can be easier in some cases to think of this as a key-throughput rate of
   // insertion rather than the latency of inserting N keys, so construct the
   // rate counter as well.
-  s.counters["KeyRate"] = benchmark::Counter(
+  state.counters["KeyRate"] = benchmark::Counter(
       keys.size(), benchmark::Counter::kIsIterationInvariantRate);
 
   // Report some extra statistics about the Carbon type.
   if constexpr (IsCarbonSet<SetT>) {
     // Re-build a set outside of the timing loop to look at the statistics
     // rather than the timing.
-    SetT set;
+    SetT s;
     for (auto k : keys) {
-      bool inserted = set.Insert(k).is_inserted();
+      bool inserted = s.Insert(k).is_inserted();
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
     }
 
@@ -348,7 +348,7 @@ static void BM_SetInsertSeq(benchmark::State& s) {
     // display the probe count of this benchmark *parameter*, not the probe
     // count that resulted from the number of iterations. That means we use the
     // normal counter API without flags.
-    s.counters["Probed"] = set.CountProbedKeys();
+    state.counters["Probed"] = s.CountProbedKeys();
 
     // Uncomment this call to print out statistics about the index-collisions
     // among these keys for debugging:

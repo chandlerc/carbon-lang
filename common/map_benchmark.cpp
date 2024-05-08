@@ -59,30 +59,30 @@ struct MapWrapperImpl {
   using KeyT = typename MapT::key_type;
   using ValueT = typename MapT::mapped_type;
 
-  MapT M;
+  MapT m;
 
-  auto BenchContains(KeyT k) -> bool { return M.find(k) != M.end(); }
+  auto BenchContains(KeyT k) -> bool { return m.find(k) != m.end(); }
 
   auto BenchLookup(KeyT k) -> bool {
-    auto it = M.find(k);
-    if (it == M.end()) {
+    auto it = m.find(k);
+    if (it == m.end()) {
       return false;
     }
     return ValueToBool(it->second);
   }
 
   auto BenchInsert(KeyT k, ValueT v) -> bool {
-    auto result = M.insert({k, v});
+    auto result = m.insert({k, v});
     return result.second;
   }
 
   auto BenchUpdate(KeyT k, ValueT v) -> bool {
-    auto result = M.insert({k, v});
+    auto result = m.insert({k, v});
     result.first->second = v;
     return result.second;
   }
 
-  auto BenchErase(KeyT k) -> bool { return M.erase(k) != 0; }
+  auto BenchErase(KeyT k) -> bool { return m.erase(k) != 0; }
 };
 
 // Explicit (partial) specialization for the Carbon map type. The core reason is
@@ -93,12 +93,12 @@ struct MapWrapperImpl<Map<KT, VT, MinSmallSize>> {
   using KeyT = KT;
   using ValueT = VT;
 
-  MapT M;
+  MapT m;
 
-  auto BenchContains(KeyT k) -> bool { return M.Contains(k); }
+  auto BenchContains(KeyT k) -> bool { return m.Contains(k); }
 
   auto BenchLookup(KeyT k) -> bool {
-    auto result = M.Lookup(k);
+    auto result = m.Lookup(k);
     if (!result) {
       return false;
     }
@@ -106,16 +106,16 @@ struct MapWrapperImpl<Map<KT, VT, MinSmallSize>> {
   }
 
   auto BenchInsert(KeyT k, ValueT v) -> bool {
-    auto result = M.Insert(k, v);
+    auto result = m.Insert(k, v);
     return result.is_inserted();
   }
 
   auto BenchUpdate(KeyT k, ValueT v) -> bool {
-    auto result = M.Update(k, v);
+    auto result = m.Update(k, v);
     return result.is_inserted();
   }
 
-  auto BenchErase(KeyT k) -> bool { return M.Erase(k); }
+  auto BenchErase(KeyT k) -> bool { return m.Erase(k); }
 };
 
 // Provide a way to override the Carbon Map specific benchmark runs with another
@@ -191,18 +191,18 @@ using MapWrapper =
 // the data structure or between similar data structures with similar
 // properties.
 template <typename MapT>
-static void BM_MapContainsHit(benchmark::State& s) {
+static void BM_MapContainsHit(benchmark::State& state) {
   using MapWrapperT = MapWrapper<MapT>;
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       // We block optimizing `i` as that has proven both more effective at
       // blocking the loop from being optimized away and avoiding disruption of
@@ -224,18 +224,18 @@ MAP_BENCHMARK_ONE_OP(BM_MapContainsHit, HitArgs);
 // benchmark, the critical path is expected to be well predicted and so it
 // should turn into something closer to a throughput benchmark.
 template <typename MapT>
-static void BM_MapContainsMiss(benchmark::State& s) {
+static void BM_MapContainsMiss(benchmark::State& state) {
   using MapWrapperT = MapWrapper<MapT>;
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(s.range(0));
+  auto [keys, lookup_keys] = GetKeysAndMissKeys<KT>(state.range(0));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       benchmark::DoNotOptimize(i);
 
@@ -275,18 +275,18 @@ MAP_BENCHMARK_ONE_OP(BM_MapContainsMiss, SizeArgs);
 // table doesn't actually encounter any cache pressure, so only a few of these
 // benchmarks will show any effects of the caching subsystem.
 template <typename MapT>
-static void BM_MapLookupHit(benchmark::State& s) {
+static void BM_MapLookupHit(benchmark::State& state) {
   using MapWrapperT = MapWrapper<MapT>;
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size;) {
       benchmark::DoNotOptimize(i);
 
@@ -312,18 +312,18 @@ MAP_BENCHMARK_ONE_OP(BM_MapLookupHit, HitArgs);
 // especially when comparing between implementations or across different hash
 // tables.
 template <typename MapT>
-static void BM_MapUpdateHit(benchmark::State& s) {
+static void BM_MapUpdateHit(benchmark::State& state) {
   using MapWrapperT = MapWrapper<MapT>;
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size; ++i) {
       benchmark::DoNotOptimize(i);
 
@@ -342,18 +342,18 @@ MAP_BENCHMARK_ONE_OP(BM_MapUpdateHit, HitArgs);
 // erase code sequence and the code sequence when inserting over an entry rather
 // than merely updating an already present entry.
 template <typename MapT>
-static void BM_MapEraseUpdateHit(benchmark::State& s) {
+static void BM_MapEraseUpdateHit(benchmark::State& state) {
   using MapWrapperT = MapWrapper<MapT>;
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), s.range(1));
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
   ssize_t lookup_keys_size = lookup_keys.size();
 
-  while (s.KeepRunningBatch(lookup_keys_size)) {
+  while (state.KeepRunningBatch(lookup_keys_size)) {
     for (ssize_t i = 0; i < lookup_keys_size; ++i) {
       benchmark::DoNotOptimize(i);
 
@@ -397,18 +397,18 @@ MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit, HitArgs);
 // efficacy of the underlying hash function, and a direct factor that drives the
 // cost of these operations.
 template <typename MapT>
-static void BM_MapInsertSeq(benchmark::State& s) {
+static void BM_MapInsertSeq(benchmark::State& state) {
   using MapWrapperT = MapWrapper<MapT>;
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   constexpr ssize_t LookupKeysSize = 1 << 8;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(s.range(0), LookupKeysSize);
+  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), LookupKeysSize);
 
   // Note that we don't force batches that use all the lookup keys because
   // there's no difference in cache usage by covering all the different lookup
   // keys.
   ssize_t i = 0;
-  for (auto _ : s) {
+  for (auto _ : state) {
     benchmark::DoNotOptimize(i);
 
     MapWrapperT m;
@@ -428,16 +428,16 @@ static void BM_MapInsertSeq(benchmark::State& s) {
   // It can be easier in some cases to think of this as a key-throughput rate of
   // insertion rather than the latency of inserting N keys, so construct the
   // rate counter as well.
-  s.counters["KeyRate"] = benchmark::Counter(
+  state.counters["KeyRate"] = benchmark::Counter(
       keys.size(), benchmark::Counter::kIsIterationInvariantRate);
 
   // Report some extra statistics about the Carbon type.
   if constexpr (IsCarbonMap<MapT>) {
     // Re-build a map outside of the timing loop to look at the statistics
     // rather than the timing.
-    MapT map;
+    MapT m;
     for (auto k : keys) {
-      bool inserted = map.Insert(k, MakeValue<VT>()).is_inserted();
+      bool inserted = m.Insert(k, MakeValue<VT>()).is_inserted();
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
     }
 
@@ -447,7 +447,7 @@ static void BM_MapInsertSeq(benchmark::State& s) {
     // display the probe count of this benchmark *parameter*, not the probe
     // count that resulted from the number of iterations. That means we use the
     // normal counter API without flags.
-    s.counters["Probed"] = map.CountProbedKeys();
+    state.counters["Probed"] = m.CountProbedKeys();
 
     // Uncomment this call to print out statistics about the index-collisions
     // among these keys for debugging:
