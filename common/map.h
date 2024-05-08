@@ -228,7 +228,7 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
     requires(!std::same_as<ValueT, InsertCallbackT> &&
              std::invocable<InsertCallbackT, LookupKeyT, void*, void*>);
 
-  // Update a key's value in a map if already present or insert it if not
+  // Replace a key's value in a map if already present or insert it if not
   // already present. The new value is always used.
   template <typename LookupKeyT>
   auto Update(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
