@@ -136,8 +136,8 @@ struct CarbonHashDI;
 
 template <>
 struct CarbonHashDI<int> {
-  static inline auto getEmptyKey() -> int { return -1; }
-  static inline auto getTombstoneKey() -> int { return -2; }
+  static auto getEmptyKey() -> int { return -1; }
+  static auto getTombstoneKey() -> int { return -2; }
   static auto getHashValue(const int val) -> unsigned {
     return static_cast<uint64_t>(HashValue(val));
   }
@@ -150,14 +150,14 @@ template <typename T>
 struct CarbonHashDI<T*> {
   static constexpr uintptr_t Log2MaxAlign = 12;
 
-  static inline auto getEmptyKey() -> T* {
+  static auto getEmptyKey() -> T* {
     auto val = static_cast<uintptr_t>(-1);
     val <<= Log2MaxAlign;
     // NOLINTNEXTLINE(performance-no-int-to-ptr): This is required by the API.
     return reinterpret_cast<int*>(val);
   }
 
-  static inline auto getTombstoneKey() -> T* {
+  static auto getTombstoneKey() -> T* {
     auto val = static_cast<uintptr_t>(-2);
     val <<= Log2MaxAlign;
     // NOLINTNEXTLINE(performance-no-int-to-ptr): This is required by the API.

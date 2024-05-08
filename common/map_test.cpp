@@ -18,7 +18,6 @@ namespace Carbon::Testing {
 namespace {
 
 using RawHashtable::TestData;
-using ::testing::Eq;
 using ::testing::Pair;
 using ::testing::UnorderedElementsAreArray;
 

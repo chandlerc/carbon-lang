@@ -80,7 +80,7 @@ struct BenchMetadata {
   llvm::ArrayRef<uint8_t> bytes;
 };
 
-enum class BenchKind {
+enum class BenchKind : uint8_t {
   Random,
   Empty,
   Deleted,
@@ -154,6 +154,7 @@ static auto BuildBenchMetadata() -> llvm::ArrayRef<BenchMetadata> {
 }
 
 template <BenchKind Kind>
+// NOLINTNEXTLINE(google-readability-casting): False positive clang-tidy bug.
 const auto bench_metadata = BuildBenchMetadata<Kind>();
 
 template <BenchKind Kind, typename GroupT = MetadataGroup>

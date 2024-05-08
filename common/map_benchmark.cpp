@@ -124,7 +124,7 @@ struct MapWrapperImpl<Map<KT, VT, MinSmallSize>> {
 // trigger a specific override for the `Map` type benchmarks. This is used to
 // get before/after runs that compare the performance of Carbon's Map versus
 // other implementations.
-enum class MapOverride {
+enum class MapOverride : uint8_t {
   None,
   Abseil,
   LLVM,

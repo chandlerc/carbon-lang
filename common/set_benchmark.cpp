@@ -84,7 +84,7 @@ struct SetWrapperImpl<Set<KT, MinSmallSize>> {
 // trigger a specific override for the `Set` type benchmarks. This is used to
 // get before/after runs that compare the performance of Carbon's Set versus
 // other implementations.
-enum class SetOverride {
+enum class SetOverride : uint8_t {
   Abseil,
   LLVM,
   LLVMAndCarbonHash,

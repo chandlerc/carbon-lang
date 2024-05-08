@@ -327,7 +327,7 @@ class Map : public RawHashtable::TableImpl<MapBase<InputKeyT, InputValueT>,
   Map(const Map& arg) = default;
   template <ssize_t OtherMinSmallSize>
   explicit Map(const Map<KeyT, ValueT, OtherMinSmallSize>& arg) : ImplT(arg) {}
-  Map(Map&& arg) = default;
+  Map(Map&& arg) noexcept = default;
   template <ssize_t OtherMinSmallSize>
   explicit Map(Map<KeyT, ValueT, OtherMinSmallSize>&& arg)
       : ImplT(std::move(arg)) {}
@@ -370,13 +370,11 @@ template <typename LookupKeyT>
 [[clang::always_inline]] auto MapBase<KT, VT>::Insert(LookupKeyT lookup_key,
                                                       ValueT new_v)
     -> InsertKVResult {
-  return Insert(lookup_key,
-                [&new_v](LookupKeyT lookup_key, void* key_storage,
-                         void* value_storage) -> std::pair<KeyT*, ValueT*> {
-                  KeyT* k = new (key_storage) KeyT(lookup_key);
-                  auto* v = new (value_storage) ValueT(std::move(new_v));
-                  return {k, v};
-                });
+  return Insert(lookup_key, [&new_v](LookupKeyT lookup_key, void* key_storage,
+                                     void* value_storage) {
+    new (key_storage) KeyT(lookup_key);
+    new (value_storage) ValueT(std::move(new_v));
+  });
 }
 
 template <typename KT, typename VT>
@@ -390,10 +388,9 @@ template <typename LookupKeyT, typename ValueCallbackT>
 {
   return Insert(lookup_key,
                 [&value_cb](LookupKeyT lookup_key, void* key_storage,
-                            void* value_storage) -> std::pair<KeyT*, ValueT*> {
-                  KeyT* k = new (key_storage) KeyT(lookup_key);
-                  ValueT* v = new (value_storage) ValueT(value_cb());
-                  return {k, v};
+                            void* value_storage) {
+                  new (key_storage) KeyT(lookup_key);
+                  new (value_storage) ValueT(value_cb());
                 });
 }
 

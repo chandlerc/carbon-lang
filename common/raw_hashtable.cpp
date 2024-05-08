@@ -6,6 +6,6 @@
 
 namespace Carbon::RawHashtable {
 
-volatile std::byte global_addr_seed = static_cast<std::byte>(1);
+volatile std::byte global_addr_seed{1};
 
 }  // namespace Carbon::RawHashtable

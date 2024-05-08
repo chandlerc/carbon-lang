@@ -404,7 +404,9 @@ class TableImpl : public InputBaseT {
       : TableImpl() {
     this->CopyFrom(arg);
   }
-  TableImpl(TableImpl&& arg) : TableImpl() { this->MoveFrom(std::move(arg)); }
+  TableImpl(TableImpl&& arg) noexcept : TableImpl() {
+    this->MoveFrom(std::move(arg));
+  }
   template <ssize_t OtherSmallSize>
   explicit TableImpl(TableImpl<BaseT, OtherSmallSize>&& arg) : TableImpl() {
     this->MoveFrom(std::move(arg));
@@ -465,7 +467,9 @@ class TableImpl<InputBaseT, 0> : public InputBaseT {
       : TableImpl() {
     this->CopyFrom(arg);
   }
-  TableImpl(TableImpl&& arg) : TableImpl() { this->MoveFrom(std::move(arg)); }
+  TableImpl(TableImpl&& arg) noexcept : TableImpl() {
+    this->MoveFrom(std::move(arg));
+  }
   template <ssize_t OtherMinSmallSize>
   explicit TableImpl(TableImpl<BaseT, OtherMinSmallSize>&& arg) : TableImpl() {
     this->MoveFrom(std::move(arg));
@@ -819,11 +823,11 @@ auto BaseImpl<InputKeyT, InputValueT>::Deallocate(Storage* storage,
   ssize_t allocated_size = Size(size);
   // We don't need the size, but make sure it always compiles.
   static_cast<void>(allocated_size);
-  return __builtin_operator_delete(storage,
+  __builtin_operator_delete(storage,
 #if __cpp_sized_deallocation
-                                   allocated_size,
+                            allocated_size,
 #endif
-                                   static_cast<std::align_val_t>(Alignment));
+                            static_cast<std::align_val_t>(Alignment));
 }
 
 // Construct a table using the provided small storage if `small_size_` is
