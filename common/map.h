@@ -96,7 +96,7 @@ class MapView : RawHashtable::ViewImpl<InputKeyT, InputValueT> {
   void ForEach(CallbackT callback);
 
   // Count the probed keys. This routine is purely informational and for use in
-  // benchmarking or logging of performance anomalies. It's returns have no
+  // benchmarking or logging of performance anomalies. Its returns have no
   // semantic guarantee at all.
   auto CountProbedKeys() -> ssize_t { return ImplT::CountProbedKeys(); }
 
@@ -193,6 +193,11 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
     return ViewT(*this).ForEach(callback);
   }
 
+  // Convenience forwarder to the view type.
+  auto CountProbedKeys() const -> ssize_t {
+    return ViewT(*this).CountProbedKeys();
+  }
+
   // Insert a key and value into the map. If the key is already present, the new
   // value is discarded and the existing value preserved.
   template <typename LookupKeyT>
@@ -212,13 +217,16 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
         std::convertible_to<decltype(std::declval<ValueCallbackT>()()), ValueT>)
   ;
 
-  // Insert a key into the map and call the provided callback to allow in-place
-  // construction of both the key and value when needed.
+  // Lookup a key in the map and if missing insert it and call the provided
+  // callback to in-place construct both the key and value. The lookup key is
+  // passed through to the callback so it needn't be captured and can be kept in
+  // a register argument throughout.
   //
   // Example:
   // ```cpp
-  //   m.Insert("widget", [](void* key_storage, void* value_storage) {
-  //     new (key_storage) MyStringType("widget");
+  //   m.Insert("widget", [](MyStringViewType lookup_key, void* key_storage,
+  //                         void* value_storage) {
+  //     new (key_storage) MyStringType(lookup_key);
   //     new (value_storage) MyValueType(....);
   //   });
   // ```
@@ -248,13 +256,16 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
 
   // Lookup or insert a key into the map. If not already present and the key is
   // inserted, the `insert_cb` is used to construct the new key and value in
-  // place. If the key was already present, the `update_cb` is called to update
-  // the existing key and value as desired.
+  // place. When inserting, the lookup key is passed through to the callback so
+  // it needn't be captured and can be kept in a register argument throughout.
+  // If the key was already present, the `update_cb` is called to update the
+  // existing key and value as desired.
   //
   // Example of counting occurrences:
   // ```cpp
-  //   m.Update(item, /*insert_cb=*/[](void* key_storage, void* value_storage) {
-  //                    new (key_storage) MyItem(item);
+  //   m.Update(item, /*insert_cb=*/[](MyStringViewType lookup_key,
+  //                                   void* key_storage, void* value_storage) {
+  //                    new (key_storage) MyItem(lookup_key);
   //                    new (value_storage) Count(1);
   //                  },
   //                  /*update_cb=*/[](MyItem& /*key*/, Count& count) {
@@ -276,13 +287,6 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
   // Clear all key/value pairs from the map but leave the underlying hashtable
   // allocated and in place.
   void Clear();
-
-  // Count the probed keys. This routine is purely informational and for use in
-  // benchmarking or logging of performance anomalies. It's returns have no
-  // semantic guarantee at all.
-  auto CountProbedKeys() const -> ssize_t {
-    return ViewT(*this).CountProbedKeys();
-  }
 
  protected:
   using ImplT::ImplT;
