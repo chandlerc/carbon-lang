@@ -49,7 +49,7 @@ class MapView : RawHashtable::ViewImpl<InputKeyT, InputValueT> {
   using KeyT = typename ImplT::KeyT;
   using ValueT = typename ImplT::ValueT;
 
-  // Result type used by lookup operations encodes whether the lookup was a
+  // This type represents the result of lookup operations. It encodes whether the lookup was a
   // success as well as accessors for the key and value.
   class LookupKVResult {
    public:
@@ -85,7 +85,7 @@ class MapView : RawHashtable::ViewImpl<InputKeyT, InputValueT> {
   template <typename LookupKeyT>
   auto Lookup(LookupKeyT lookup_key) const -> LookupKVResult;
 
-  // Lookup a key in the map and try to return its value. Returns null on a
+  // Lookup a key in the map and try to return a pointer to its value. Returns null on a
   // missing key.
   template <typename LookupKeyT>
   auto operator[](LookupKeyT lookup_key) const -> ValueT*;
@@ -114,8 +114,8 @@ class MapView : RawHashtable::ViewImpl<InputKeyT, InputValueT> {
       : ImplT(size, storage) {}
 };
 
-// A base class for a `Map` type that remains mutable while type-erasing any SSO
-// size.
+// A base class for a `Map` type that remains mutable while type-erasing the
+// `SmallSize` (SSO) template parameter.
 //
 // A pointer or reference to this type is the preferred way to pass a mutable
 // handle to a `Map` type across API boundaries as it avoids encoding specific
@@ -199,6 +199,8 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
   // Insert a key into the map and call the provided callback if necessary to
   // produce a new value when no existing value is found.
   //
+  // Example: `m.Insert(key, []() { return default_value; });`
+  //
   // TODO: The `;` formatting below appears to be bugs in clang-format with
   // concepts that should be filed upstream.
   template <typename LookupKeyT, typename ValueCallbackT>
@@ -229,7 +231,7 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
         std::convertible_to<decltype(std::declval<ValueCallbackT>()()), ValueT>)
   ;
 
-  // Similar to import, but with a distinct callback for updating an existing
+  // Similar to insert, but with a distinct callback for updating an existing
   // key/value pair as opposed to inserting a new one.
   template <typename LookupKeyT, typename InsertCallbackT,
             typename UpdateCallbackT>
@@ -260,17 +262,18 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
 
 // A data structure mapping from key to value.
 //
-// This map also supports SSO or small size optimization. The provided
-// `SmallSize` type parameter indicates the small size buffer embedded. The
+// This map also supports small size optimization (or "SSO"). The provided
+// `SmallSize` type parameter indicates the size of an embedded buffer for
+// storing maps small enough to fit. The
 // default is zero, which always allocates a heap buffer on construction. When
 // non-zero, must be a multiple of the `MaxGroupSize` of the underlying
 // hashtable implementation.
 //
-// This data structure optimizes heavily for small, cheap to move and even copy
-// key values. Ideally code can be shifted to ensure their keys fit this
+// This data structure optimizes heavily for small key types that are cheap to
+// move and even copy. Ideally code can be shifted to ensure their keys fit this
 // description.
 //
-// Note that this type should typically not appear on API boundaries and either
+// Note that this type should typically not appear on API boundaries; either
 // `MapBase` or `MapView` should be used instead.
 template <typename InputKeyT, typename InputValueT, ssize_t SmallSize = 0>
 class Map : public RawHashtable::TableImpl<MapBase<InputKeyT, InputValueT>,
@@ -352,7 +355,7 @@ template <typename LookupKeyT, typename ValueCallbackT>
                 [&value_cb](LookupKeyT lookup_key, void* key_storage,
                             void* value_storage) -> std::pair<KeyT*, ValueT*> {
                   KeyT* k = new (key_storage) KeyT(lookup_key);
-                  auto* v = new (value_storage) ValueT(value_cb());
+                  ValueT* v = new (value_storage) ValueT(value_cb());
                   return {k, v};
                 });
 }
