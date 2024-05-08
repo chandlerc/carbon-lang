@@ -151,7 +151,8 @@ static void BM_SetContainsHitPtr(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   SetWrapperT s;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     s.BenchInsert(k);
   }
@@ -217,7 +218,8 @@ static void BM_SetLookupHitPtr(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   SetWrapperT s;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     s.BenchInsert(k);
   }
@@ -246,7 +248,8 @@ static void BM_SetEraseInsertHitPtr(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   SetWrapperT s;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     s.BenchInsert(k);
   }
@@ -304,7 +307,8 @@ static void BM_SetInsertSeq(benchmark::State& state) {
   using SetWrapperT = SetWrapper<SetT>;
   using KT = typename SetWrapperT::KeyT;
   constexpr ssize_t LookupKeysSize = 1 << 8;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), LookupKeysSize);
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), LookupKeysSize);
 
   // Now build a large shuffled set of keys (with duplicates) we'll use at the
   // end.

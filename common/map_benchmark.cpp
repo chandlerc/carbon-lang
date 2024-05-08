@@ -196,7 +196,8 @@ static void BM_MapContainsHit(benchmark::State& state) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
@@ -280,7 +281,8 @@ static void BM_MapLookupHit(benchmark::State& state) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
@@ -317,7 +319,8 @@ static void BM_MapUpdateHit(benchmark::State& state) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
@@ -347,7 +350,8 @@ static void BM_MapEraseUpdateHit(benchmark::State& state) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   MapWrapperT m;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), state.range(1));
   for (auto k : keys) {
     m.BenchInsert(k, MakeValue<VT>());
   }
@@ -402,7 +406,8 @@ static void BM_MapInsertSeq(benchmark::State& state) {
   using KT = typename MapWrapperT::KeyT;
   using VT = typename MapWrapperT::ValueT;
   constexpr ssize_t LookupKeysSize = 1 << 8;
-  auto [keys, lookup_keys] = GetKeysAndHitKeys<KT>(state.range(0), LookupKeysSize);
+  auto [keys, lookup_keys] =
+      GetKeysAndHitKeys<KT>(state.range(0), LookupKeysSize);
 
   // Note that we don't force batches that use all the lookup keys because
   // there's no difference in cache usage by covering all the different lookup
