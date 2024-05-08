@@ -35,11 +35,12 @@ class Map;
 //
 // Note that while this type is a read-only view, that applies to the underlying
 // *map* data structure, not the individual entries stored within it. Those can
-// be mutated freely. If we applied a deep-`const` design here, it would prevent
-// using this type in many useful situations where the elements are mutated but
-// the associative container is not. A view of immutable data can always be
-// obtained by using `MapView<const T, const V>`, and we enable conversions to
-// more-const views. This mirrors the semantics of views like `std::span`.
+// be mutated freely as long as both the hashes and equality of the keys are
+// preserved. If we applied a deep-`const` design here, it would prevent using
+// this type in many useful situations where the elements are mutated but the
+// associative container is not. A view of immutable data can always be obtained
+// by using `MapView<const T, const V>`, and we enable conversions to more-const
+// views. This mirrors the semantics of views like `std::span`.
 template <typename InputKeyT, typename InputValueT>
 class MapView : RawHashtable::ViewImpl<InputKeyT, InputValueT> {
   using ImplT = RawHashtable::ViewImpl<InputKeyT, InputValueT>;
@@ -49,8 +50,8 @@ class MapView : RawHashtable::ViewImpl<InputKeyT, InputValueT> {
   using KeyT = typename ImplT::KeyT;
   using ValueT = typename ImplT::ValueT;
 
-  // This type represents the result of lookup operations. It encodes whether the lookup was a
-  // success as well as accessors for the key and value.
+  // This type represents the result of lookup operations. It encodes whether
+  // the lookup was a success as well as accessors for the key and value.
   class LookupKVResult {
    public:
     LookupKVResult() = default;
@@ -85,8 +86,8 @@ class MapView : RawHashtable::ViewImpl<InputKeyT, InputValueT> {
   template <typename LookupKeyT>
   auto Lookup(LookupKeyT lookup_key) const -> LookupKVResult;
 
-  // Lookup a key in the map and try to return a pointer to its value. Returns null on a
-  // missing key.
+  // Lookup a key in the map and try to return a pointer to its value. Returns
+  // null on a missing key.
   template <typename LookupKeyT>
   auto operator[](LookupKeyT lookup_key) const -> ValueT*;
 
@@ -192,14 +193,15 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
     return ViewT(*this).ForEach(callback);
   }
 
-  // Insert a key and value into the map.
+  // Insert a key and value into the map. If the key is already present, the new
+  // value is discarded and the existing value preserved.
   template <typename LookupKeyT>
   auto Insert(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
 
   // Insert a key into the map and call the provided callback if necessary to
   // produce a new value when no existing value is found.
   //
-  // Example: `m.Insert(key, []() { return default_value; });`
+  // Example: `m.Insert(key, [] { return default_value; });`
   //
   // TODO: The `;` formatting below appears to be bugs in clang-format with
   // concepts that should be filed upstream.
@@ -212,18 +214,31 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
 
   // Insert a key into the map and call the provided callback to allow in-place
   // construction of both the key and value when needed.
+  //
+  // Example:
+  // ```cpp
+  //   m.Insert("widget", [](void* key_storage, void* value_storage) {
+  //     new (key_storage) MyStringType("widget");
+  //     new (value_storage) MyValueType(....);
+  //   });
+  // ```
   template <typename LookupKeyT, typename InsertCallbackT>
   auto Insert(LookupKeyT lookup_key, InsertCallbackT insert_cb)
       -> InsertKVResult
     requires(!std::same_as<ValueT, InsertCallbackT> &&
              std::invocable<InsertCallbackT, LookupKeyT, void*, void*>);
 
-  // Similar to insert, but an existing value is replaced with the provided one.
+  // Update a key's value in a map if already present or insert it if not
+  // already present. The new value is always used.
   template <typename LookupKeyT>
   auto Update(LookupKeyT lookup_key, ValueT new_v) -> InsertKVResult;
 
-  // Similar to insert, but an existing value is replaced with the result of the
-  // callback.
+  // Lookup or insert a key into the map, and set it's value to the result of
+  // the `value_cb` callback. The callback is always run and its result is
+  // always used, whether the key was already in the map or not. Any existing
+  // value is replaced with the result.
+  //
+  // Example: `m.Update(key, [] { return new_value; });`
   template <typename LookupKeyT, typename ValueCallbackT>
   auto Update(LookupKeyT lookup_key, ValueCallbackT value_cb) -> InsertKVResult
     requires(
@@ -231,8 +246,22 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
         std::convertible_to<decltype(std::declval<ValueCallbackT>()()), ValueT>)
   ;
 
-  // Similar to insert, but with a distinct callback for updating an existing
-  // key/value pair as opposed to inserting a new one.
+  // Lookup or insert a key into the map. If not already present and the key is
+  // inserted, the `insert_cb` is used to construct the new key and value in
+  // place. If the key was already present, the `update_cb` is called to update
+  // the existing key and value as desired.
+  //
+  // Example of counting occurrences:
+  // ```cpp
+  //   m.Update(item, /*insert_cb=*/ [](void* key_storage, void* value_storage)
+  //   {
+  //                    new (key_storage) MyItem(item);
+  //                    new (value_storage) Count(1);
+  //                  },
+  //                  /*update_cb=*/ [](MyItem& /*key*/, Count& count) {
+  //                    ++count;
+  //                  });
+  // ```
   template <typename LookupKeyT, typename InsertCallbackT,
             typename UpdateCallbackT>
   auto Update(LookupKeyT lookup_key, InsertCallbackT insert_cb,
@@ -264,14 +293,19 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT> {
 //
 // This map also supports small size optimization (or "SSO"). The provided
 // `SmallSize` type parameter indicates the size of an embedded buffer for
-// storing maps small enough to fit. The
-// default is zero, which always allocates a heap buffer on construction. When
-// non-zero, must be a multiple of the `MaxGroupSize` of the underlying
-// hashtable implementation.
+// storing maps small enough to fit. The default is zero, which always allocates
+// a heap buffer on construction. When non-zero, must be a multiple of the
+// `MaxGroupSize` which is currently 16. The library will check that the size is
+// valid and provide an error at compile time if not. We don't automatically
+// select the next multiple or otherwise fit the size to the constraints to make
+// it clear in the code how much memory is used by the SSO buffer.
 //
 // This data structure optimizes heavily for small key types that are cheap to
-// move and even copy. Ideally code can be shifted to ensure their keys fit this
-// description.
+// move and even copy. Using types with large keys or expensive to copy keys may
+// create surprising performance bottlenecks. A `std::string` key should be fine
+// with largely small strings, but if some or many strings are large heap
+// allocations the performance of hashtable routines may be unacceptably bad and
+// another data structure or key design is likely preferable.
 //
 // Note that this type should typically not appear on API boundaries; either
 // `MapBase` or `MapView` should be used instead.
@@ -432,7 +466,6 @@ template <typename LookupKeyT, typename InsertCallbackT,
 {
   auto [entry, inserted] = this->InsertImpl(lookup_key);
   CARBON_DCHECK(entry) << "Should always result in a valid index.";
-  // EntryT& entry = this->entries()[index];
 
   if (LLVM_LIKELY(!inserted)) {
     update_cb(entry->key(), entry->value());
