@@ -22,15 +22,15 @@
 
 // A namespace collecting a set of low-level utilities for building hashtable
 // data structures. These should only be used as implementation details of
-// higher-level data structure APIs.
+// higher-level data-structure APIs.
 //
 // These utilities support hashtables following a *specific* API design pattern,
-// and using SSO or Small-Size Optimization when desired. We expect there to be
+// and using Small-Size Optimization, or "SSO", when desired. We expect there to be
 // three layers to any hashtable design:
 //
 // - A *view* type: a read-only view of the hashtable contents. This type should
 //   be a value type and is expected to be passed by-value in APIs. However, it
-//   will have `const`-reference semantics. Note that the *values* will continue
+//   will have `const`-reference semantics, much like a `std::string_view`. Note that the *entries* will continue
 //   to be mutable, it is only the *table* that is read-only.
 //
 // - A *base* type: a base class type of the actual hashtable, which allows
@@ -391,7 +391,7 @@ class TableImpl : public InputBaseT {
   using BaseT = InputBaseT;
 
   TableImpl() : BaseT(SmallSize, small_storage()) {
-    // Specifically validate. the offset of the small-size entries when we have
+    // Specifically validate the offset of the small-size entries when we have
     // a non-zero SSO size. This needs to be in an inline body to see the
     // complete type.
     static_assert(offsetof(SmallStorage, entries) == SmallSize,
@@ -479,7 +479,7 @@ class TableImpl<InputBaseT, 0> : public InputBaseT {
 };
 
 // Computes a seed that provides a small amount of entropy from ASLR where
-// possible with minimal cost. The priority is speed, and this computes the
+// available with minimal cost. The priority is speed, and this computes the
 // entropy in a way that doesn't require loading from memory, merely accessing
 // entropy already available without accessing memory.
 inline auto ComputeSeed() -> uint64_t {
@@ -494,17 +494,16 @@ inline auto ComputeSeed() -> uint64_t {
 inline auto ComputeProbeMaskFromSize(ssize_t size) -> size_t {
   CARBON_DCHECK(llvm::isPowerOf2_64(size))
       << "Size must be a power of two for a hashed buffer!";
-  // The probe mask needs to mask down to keep the index within
-  // `size`. Since `size` is a power of two, this is equivalent to
-  // `size - 1`. We also mask off the low bits while here to match the size of
-  // the groups of entries.
+  // Since `size` is a power of two, we can make sure the probes are less
+  // than `size` by making the mask `size - 1`. We also mask off the low
+  // bits so the probes are a multiple of the size of the groups of entries.
   return (size - 1) & ~GroupMask;
 }
 
 // This class handles building a sequence of probe indices from a given
 // starting point, including both the quadratic growth and masking the index
 // to stay within the bucket array size. The starting point doesn't need to be
-// clamped to the size ahead of time (or even by positive), we will do it
+// clamped to the size ahead of time (or even be positive), we will do it
 // internally.
 //
 // We compute the quadratic probe index incrementally, but we can also compute
@@ -517,7 +516,7 @@ inline auto ComputeProbeMaskFromSize(ssize_t size) -> size_t {
 // provided size divided by the group size.
 //
 // However, we compute it scaled to the group size constant G and have it visit
-// each G multiple modulo the size using the scaled formula:
+// each multiple of G modulo the size using the scaled formula:
 //
 //   p(x,s) = (x + (s + (s^2 * G) / G^2) / 2) mod Size
 class ProbeSequence {
@@ -558,7 +557,7 @@ class ProbeSequence {
 };
 
 // TODO: Evaluate keeping this outlined to see if macro benchmarks observe the
-// same perf hit as micros.
+// same perf hit as micro benchmarks.
 template <typename InputKeyT, typename InputValueT>
 template <typename LookupKeyT>
 auto ViewImpl<InputKeyT, InputValueT>::LookupEntry(LookupKeyT lookup_key) const
@@ -663,7 +662,7 @@ BaseImpl<InputKeyT, InputValueT>::~BaseImpl() {
 //
 // Handles all table growth needed to allow insertion to succeed.
 //
-// TODO: Evaluate whether it is wort forcing this out-of-line given the
+// TODO: Evaluate whether it is worth forcing this out-of-line given the
 // reasonable ABI boundary it forms and large volume of code necessary to
 // implement it.
 template <typename InputKeyT, typename InputValueT>
