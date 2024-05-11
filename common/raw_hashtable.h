@@ -25,13 +25,14 @@
 // higher-level data-structure APIs.
 //
 // These utilities support hashtables following a *specific* API design pattern,
-// and using Small-Size Optimization, or "SSO", when desired. We expect there to be
-// three layers to any hashtable design:
+// and using Small-Size Optimization, or "SSO", when desired. We expect there to
+// be three layers to any hashtable design:
 //
 // - A *view* type: a read-only view of the hashtable contents. This type should
 //   be a value type and is expected to be passed by-value in APIs. However, it
-//   will have `const`-reference semantics, much like a `std::string_view`. Note that the *entries* will continue
-//   to be mutable, it is only the *table* that is read-only.
+//   will have `const`-reference semantics, much like a `std::string_view`. Note
+//   that the *entries* will continue to be mutable, it is only the *table* that
+//   is read-only.
 //
 // - A *base* type: a base class type of the actual hashtable, which allows
 //   almost all mutable operations but erases any specific SSO buffer size.
