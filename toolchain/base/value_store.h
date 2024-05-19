@@ -8,10 +8,10 @@
 #include <type_traits>
 
 #include "common/check.h"
+#include "common/map.h"
 #include "common/ostream.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
@@ -199,12 +199,14 @@ class ValueStore<StringId> : public Yaml::Printable<ValueStore<StringId>> {
   // Returns an ID to reference the value. May return an existing ID if the
   // string was previously added.
   auto Add(llvm::StringRef value) -> StringId {
-    auto [it, inserted] = map_.insert({value, StringId(values_.size())});
-    if (inserted) {
-      CARBON_CHECK(it->second.index >= 0) << "Too many unique strings";
+    auto result = map_.Insert(value, [this, value] {
+      auto id = StringId(values_.size());
+      CARBON_CHECK(id.index >= 0)
+          << "Overflow in string index, too many unique strings";
       values_.push_back(value);
-    }
-    return it->second;
+      return id;
+    });
+    return result.value();
   }
 
   // Returns the value for an ID.
@@ -215,8 +217,8 @@ class ValueStore<StringId> : public Yaml::Printable<ValueStore<StringId>> {
 
   // Returns an ID for the value, or Invalid if not found.
   auto Lookup(llvm::StringRef value) const -> StringId {
-    if (auto it = map_.find(value); it != map_.end()) {
-      return it->second;
+    if (auto result = map_.Lookup(value)) {
+      return result.value();
     }
     return StringId::Invalid;
   }
@@ -232,7 +234,7 @@ class ValueStore<StringId> : public Yaml::Printable<ValueStore<StringId>> {
   auto size() const -> size_t { return values_.size(); }
 
  private:
-  llvm::DenseMap<llvm::StringRef, StringId> map_;
+  Map<llvm::StringRef, StringId> map_;
   // Set inline size to 0 because these will typically be too large for the
   // stack, while this does make File smaller.
   llvm::SmallVector<llvm::StringRef, 0> values_;
@@ -323,15 +325,5 @@ class SharedValueStores : public Yaml::Printable<SharedValueStores> {
 };
 
 }  // namespace Carbon
-
-// Support use of IdentifierId as DenseMap/DenseSet keys.
-// TODO: Remove once NameId is used in checking.
-template <>
-struct llvm::DenseMapInfo<Carbon::IdentifierId>
-    : public Carbon::IndexMapInfo<Carbon::IdentifierId> {};
-// Support use of StringId as DenseMap/DenseSet keys.
-template <>
-struct llvm::DenseMapInfo<Carbon::StringId>
-    : public Carbon::IndexMapInfo<Carbon::StringId> {};
 
 #endif  // CARBON_TOOLCHAIN_BASE_VALUE_STORE_H_

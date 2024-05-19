@@ -8,6 +8,7 @@
 
 #include "common/check.h"
 #include "common/error.h"
+#include "common/map.h"
 #include "common/variant_helpers.h"
 #include "common/vlog.h"
 #include "toolchain/base/pretty_stack_trace_function.h"
@@ -35,8 +36,7 @@ namespace Carbon::Check {
 class SemIRDiagnosticConverter : public DiagnosticConverter<SemIRLoc> {
  public:
   explicit SemIRDiagnosticConverter(
-      const llvm::DenseMap<const SemIR::File*, Parse::NodeLocConverter*>*
-          node_converters,
+      MapView<const SemIR::File*, Parse::NodeLocConverter*> node_converters,
       const SemIR::File* sem_ir)
       : node_converters_(node_converters), sem_ir_(sem_ir) {}
 
@@ -137,14 +137,13 @@ class SemIRDiagnosticConverter : public DiagnosticConverter<SemIRLoc> {
   auto ConvertLocInFile(const SemIR::File* sem_ir, Parse::NodeId node_id,
                         bool token_only, ContextFnT context_fn) const
       -> DiagnosticLoc {
-    auto it = node_converters_->find(sem_ir);
-    CARBON_CHECK(it != node_converters_->end());
-    return it->second->ConvertLoc(Parse::NodeLoc(node_id, token_only),
-                                  context_fn);
+    auto result = node_converters_.Lookup(sem_ir);
+    CARBON_CHECK(result);
+    return result.value()->ConvertLoc(Parse::NodeLoc(node_id, token_only),
+                                      context_fn);
   }
 
-  const llvm::DenseMap<const SemIR::File*, Parse::NodeLocConverter*>*
-      node_converters_;
+  MapView<const SemIR::File*, Parse::NodeLocConverter*> node_converters_;
   const SemIR::File* sem_ir_;
 };
 
@@ -197,7 +196,7 @@ struct UnitInfo {
   llvm::SmallVector<PackageImports> package_imports;
 
   // A map of the package names to the outgoing imports above.
-  llvm::DenseMap<IdentifierId, int32_t> package_imports_map;
+  Map<IdentifierId, int32_t> package_imports_map;
 
   // The remaining number of imports which must be checked before this unit can
   // be processed.
@@ -218,15 +217,15 @@ static auto ImportCurrentPackage(Context& context, UnitInfo& unit_info,
                                  SemIR::InstId package_inst_id,
                                  SemIR::TypeId namespace_type_id) -> void {
   // Add imports from the current package.
-  auto self_import_map_it =
-      unit_info.package_imports_map.find(IdentifierId::Invalid);
-  if (self_import_map_it == unit_info.package_imports_map.end()) {
+  int32_t* self_import_index =
+      unit_info.package_imports_map[IdentifierId::Invalid];
+  if (!self_import_index) {
     // Push the scope; there are no names to add.
     context.scope_stack().Push(package_inst_id, SemIR::NameScopeId::Package);
     return;
   }
   UnitInfo::PackageImports& self_import =
-      unit_info.package_imports[self_import_map_it->second];
+      unit_info.package_imports[*self_import_index];
 
   // Track whether an IR was imported in full, including `export import`. This
   // distinguishes from IRs that are indirectly added without all names being
@@ -818,8 +817,7 @@ static auto ProcessNodeIds(Context& context, llvm::raw_ostream* vlog_stream,
 
 // Produces and checks the IR for the provided Parse::Tree.
 static auto CheckParseTree(
-    llvm::DenseMap<const SemIR::File*, Parse::NodeLocConverter*>*
-        node_converters,
+    MapBase<const SemIR::File*, Parse::NodeLocConverter*>& node_converters,
     UnitInfo& unit_info, int total_ir_count, llvm::raw_ostream* vlog_stream)
     -> void {
   unit_info.unit->sem_ir->emplace(
@@ -828,7 +826,8 @@ static auto CheckParseTree(
 
   // For ease-of-access.
   SemIR::File& sem_ir = **unit_info.unit->sem_ir;
-  CARBON_CHECK(node_converters->insert({&sem_ir, &unit_info.converter}).second);
+  auto result = node_converters.Insert(&sem_ir, &unit_info.converter);
+  CARBON_CHECK(result.is_inserted());
 
   SemIRDiagnosticConverter converter(node_converters, &sem_ir);
   Context::DiagnosticEmitter emitter(converter, unit_info.err_tracker);
@@ -1008,15 +1007,18 @@ static auto TrackImport(
   }
 
   // Get the package imports, or create them if this is the first.
-  auto [package_imports_map_it, is_inserted] =
-      unit_info.package_imports_map.insert(
-          {import.package_id, unit_info.package_imports.size()});
-  if (is_inserted) {
-    unit_info.package_imports.push_back(
-        UnitInfo::PackageImports(import.package_id, import.node_id));
-  }
+  int32_t package_imports_index =
+      unit_info.package_imports_map
+          .Insert(
+              import.package_id,
+              [&]() -> int32_t {
+                unit_info.package_imports.push_back(UnitInfo::PackageImports(
+                    import.package_id, import.node_id));
+                return unit_info.package_imports.size() - 1;
+              })
+          .value();
   UnitInfo::PackageImports& package_imports =
-      unit_info.package_imports[package_imports_map_it->second];
+      unit_info.package_imports[package_imports_index];
 
   if (auto api = api_map.find(import_key); api != api_map.end()) {
     // Add references between the file and imported api.
@@ -1186,14 +1188,14 @@ auto CheckParseTrees(llvm::MutableArrayRef<Unit> units, bool prelude_import,
     }
   }
 
-  llvm::DenseMap<const SemIR::File*, Parse::NodeLocConverter*> node_converters;
+  Map<const SemIR::File*, Parse::NodeLocConverter*> node_converters;
 
   // Check everything with no dependencies. Earlier entries with dependencies
   // will be checked as soon as all their dependencies have been checked.
   for (int check_index = 0;
        check_index < static_cast<int>(ready_to_check.size()); ++check_index) {
     auto* unit_info = ready_to_check[check_index];
-    CheckParseTree(&node_converters, *unit_info, units.size(), vlog_stream);
+    CheckParseTree(node_converters, *unit_info, units.size(), vlog_stream);
     for (auto* incoming_import : unit_info->incoming_imports) {
       --incoming_import->imports_remaining;
       if (incoming_import->imports_remaining == 0) {
@@ -1240,7 +1242,7 @@ auto CheckParseTrees(llvm::MutableArrayRef<Unit> units, bool prelude_import,
     // incomplete imports.
     for (auto& unit_info : unit_infos) {
       if (unit_info.imports_remaining > 0) {
-        CheckParseTree(&node_converters, unit_info, units.size(), vlog_stream);
+        CheckParseTree(node_converters, unit_info, units.size(), vlog_stream);
       }
     }
   }

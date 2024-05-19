@@ -7,7 +7,6 @@
 
 #include <type_traits>
 
-#include "llvm/ADT/DenseMap.h"
 #include "toolchain/base/value_store.h"
 #include "toolchain/base/yaml.h"
 

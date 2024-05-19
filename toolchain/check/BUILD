@@ -122,6 +122,7 @@ cc_library(
         ":pointer_dereference",
         "//common:check",
         "//common:error",
+        "//common:map",
         "//common:ostream",
         "//common:variant_helpers",
         "//common:vlog",
