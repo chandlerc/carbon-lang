@@ -243,6 +243,7 @@ cc_binary(
         ":raw_hashtable_benchmark_helpers",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/random",
+        "@boost_unordered",
         "@google_benchmark//:benchmark_main",
         "@llvm-project//llvm:Support",
     ],
