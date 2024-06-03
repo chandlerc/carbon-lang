@@ -160,6 +160,41 @@ template <typename MapT>
 using MapWrapper =
     MapWrapperOverride<MapT, MapOverride::CARBON_MAP_BENCH_OVERRIDE>;
 
+template <typename MapT>
+auto ReportMetrics(const MapWrapper<MapT>& m_wrapper, benchmark::State& state)
+    -> void {
+  using MapWrapperT = MapWrapper<MapT>;
+  using KT = typename MapWrapperT::KeyT;
+  using VT = typename MapWrapperT::ValueT;
+
+  const auto& m = m_wrapper.m;
+
+  // Report some extra statistics about the Carbon type.
+  if constexpr (IsCarbonMap<MapT>) {
+    // While this count is "iteration invariant" (it should be exactly the same
+    // for every iteration as the set of keys is the same), we don't use that
+    // because it will scale this by the number of iterations. We want to
+    // display the metrics for this benchmark *parameter*, not what resulted
+    // from the number of iterations. That means we use the normal counter API
+    // without flags.
+    auto metrics = m.GetMetrics();
+    state.counters["P-compares"] = metrics.probe_avg_compares;
+    state.counters["P-distance"] = metrics.probe_avg_distance;
+    state.counters["P-fraction"] =
+        static_cast<double>(metrics.probed_key_count) / metrics.key_count;
+    state.counters["Pmax-distance"] = metrics.probe_max_distance;
+    state.counters["Pmax-compares"] = metrics.probe_max_compares;
+    state.counters["Probed"] = metrics.probed_key_count;
+
+    state.counters["Storage"] = metrics.storage_bytes;
+    // Also compute how 'efficient' the storage is, 1.0 being zero bytes outside
+    // of key and value.
+    state.counters["Storage eff"] =
+        static_cast<double>(metrics.key_count * (sizeof(KT) + sizeof(VT))) /
+        metrics.storage_bytes;
+  }
+}
+
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, KT, VT)                         \
   BENCHMARK(NAME<Map<KT, VT>>)->Apply(APPLY);                                  \
@@ -225,6 +260,8 @@ static void BM_MapContainsHit(benchmark::State& state) {
       i += static_cast<ssize_t>(result);
     }
   }
+
+  ReportMetrics(m, state);
 }
 MAP_BENCHMARK_ONE_OP(BM_MapContainsHit, HitArgs);
 
@@ -252,6 +289,8 @@ static void BM_MapContainsMiss(benchmark::State& state) {
       i += static_cast<ssize_t>(!result);
     }
   }
+
+  ReportMetrics(m, state);
 }
 MAP_BENCHMARK_ONE_OP(BM_MapContainsMiss, SizeArgs);
 
@@ -304,6 +343,8 @@ static void BM_MapLookupHit(benchmark::State& state) {
       i += static_cast<ssize_t>(result);
     }
   }
+
+  ReportMetrics(m, state);
 }
 MAP_BENCHMARK_ONE_OP(BM_MapLookupHit, HitArgs);
 
@@ -341,6 +382,8 @@ static void BM_MapUpdateHit(benchmark::State& state) {
       CARBON_DCHECK(!inserted);
     }
   }
+
+  ReportMetrics(m, state);
 }
 MAP_BENCHMARK_ONE_OP(BM_MapUpdateHit, HitArgs);
 
@@ -449,19 +492,13 @@ static void BM_MapInsertSeq(benchmark::State& state) {
   if constexpr (IsCarbonMap<MapT>) {
     // Re-build a map outside of the timing loop to look at the statistics
     // rather than the timing.
-    MapT m;
+    MapWrapperT m;
     for (auto k : keys) {
-      bool inserted = m.Insert(k, MakeValue<VT>()).is_inserted();
+      bool inserted = m.BenchInsert(k, MakeValue<VT>());
       CARBON_DCHECK(inserted) << "Must be a successful insert!";
     }
 
-    // While this count is "iteration invariant" (it should be exactly the same
-    // for every iteration as the set of keys is the same), we don't use that
-    // because it will scale this by the number of iterations. We want to
-    // display the probe count of this benchmark *parameter*, not the probe
-    // count that resulted from the number of iterations. That means we use the
-    // normal counter API without flags.
-    state.counters["Probed"] = m.CountProbedKeys();
+    ReportMetrics(m, state);
 
     // Uncomment this call to print out statistics about the index-collisions
     // among these keys for debugging:
