@@ -17,12 +17,14 @@
 namespace Carbon {
 
 // Forward declarations to resolve cyclic references.
-template <typename KeyT, typename ValueT, typename KeyContextT>
+template <typename KeyT, typename ValueT, typename KeyContextT,
+          bool UseProbeMarker>
 class MapView;
-template <typename KeyT, typename ValueT, typename KeyContextT>
+template <typename KeyT, typename ValueT, typename KeyContextT,
+          bool UseProbeMarker>
 class MapBase;
 template <typename KeyT, typename ValueT, ssize_t SmallSize,
-          typename KeyContextT>
+          typename KeyContextT, bool UseProbeMarker>
 class Map;
 
 // A read-only view type for a map from key to value.
@@ -55,11 +57,12 @@ class Map;
 // hashing and comparing keys. For more details about the key context, see
 // `hashtable_key_context.h`.
 template <typename InputKeyT, typename InputValueT,
-          typename InputKeyContextT = DefaultKeyContext>
-class MapView
-    : RawHashtable::ViewImpl<InputKeyT, InputValueT, InputKeyContextT> {
-  using ImplT =
-      RawHashtable::ViewImpl<InputKeyT, InputValueT, InputKeyContextT>;
+          typename InputKeyContextT = DefaultKeyContext,
+          bool UseProbeMarker = true>
+class MapView : RawHashtable::ViewImpl<InputKeyT, InputValueT, InputKeyContextT,
+                                       UseProbeMarker> {
+  using ImplT = RawHashtable::ViewImpl<InputKeyT, InputValueT, InputKeyContextT,
+                                       UseProbeMarker>;
   using EntryT = typename ImplT::EntryT;
 
  public:
@@ -89,7 +92,8 @@ class MapView
   // needing all 3 versions.
   template <typename OtherKeyT, typename OtherValueT>
   // NOLINTNEXTLINE(google-explicit-constructor)
-  MapView(MapView<OtherKeyT, OtherValueT, KeyContextT> other_view)
+  MapView(
+      MapView<OtherKeyT, OtherValueT, KeyContextT, UseProbeMarker> other_view)
     requires(std::same_as<KeyT, OtherKeyT> ||
              std::same_as<KeyT, const OtherKeyT>) &&
             (std::same_as<ValueT, OtherValueT> ||
@@ -127,12 +131,12 @@ class MapView
 
  private:
   template <typename MapKeyT, typename MapValueT, ssize_t MinSmallSize,
-            typename KeyContextT>
+            typename KeyContextT, bool MapUseProbeMarker>
   friend class Map;
-  friend class MapBase<KeyT, ValueT, KeyContextT>;
-  friend class MapView<const KeyT, ValueT, KeyContextT>;
-  friend class MapView<KeyT, const ValueT, KeyContextT>;
-  friend class MapView<const KeyT, const ValueT, KeyContextT>;
+  friend class MapBase<KeyT, ValueT, KeyContextT, UseProbeMarker>;
+  friend class MapView<const KeyT, ValueT, KeyContextT, UseProbeMarker>;
+  friend class MapView<KeyT, const ValueT, KeyContextT, UseProbeMarker>;
+  friend class MapView<const KeyT, const ValueT, KeyContextT, UseProbeMarker>;
 
   MapView() = default;
   // NOLINTNEXTLINE(google-explicit-constructor): Implicit by design.
@@ -148,19 +152,21 @@ class MapView
 // handle to a `Map` type across API boundaries as it avoids encoding specific
 // SSO sizing information while providing a near-complete mutable API.
 template <typename InputKeyT, typename InputValueT,
-          typename InputKeyContextT = DefaultKeyContext>
-class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT,
-                                                 InputKeyContextT> {
+          typename InputKeyContextT = DefaultKeyContext,
+          bool UseProbeMarker = true>
+class MapBase
+    : protected RawHashtable::BaseImpl<InputKeyT, InputValueT, InputKeyContextT,
+                                       UseProbeMarker> {
  protected:
-  using ImplT =
-      RawHashtable::BaseImpl<InputKeyT, InputValueT, InputKeyContextT>;
+  using ImplT = RawHashtable::BaseImpl<InputKeyT, InputValueT, InputKeyContextT,
+                                       UseProbeMarker>;
   using EntryT = typename ImplT::EntryT;
 
  public:
   using KeyT = typename ImplT::KeyT;
   using ValueT = typename ImplT::ValueT;
   using KeyContextT = typename ImplT::KeyContextT;
-  using ViewT = MapView<KeyT, ValueT, KeyContextT>;
+  using ViewT = MapView<KeyT, ValueT, KeyContextT, UseProbeMarker>;
   using LookupKVResult = typename ViewT::LookupKVResult;
   using MetricsT = typename ImplT::MetricsT;
 
@@ -192,7 +198,7 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT,
   // const, so explicitly support adding const to produce a view here.
   template <typename OtherKeyT, typename OtherValueT>
   // NOLINTNEXTLINE(google-explicit-constructor)
-  operator MapView<OtherKeyT, OtherValueT, KeyContextT>() const
+  operator MapView<OtherKeyT, OtherValueT, KeyContextT, UseProbeMarker>() const
     requires(std::same_as<KeyT, OtherKeyT> ||
              std::same_as<const KeyT, OtherKeyT>) &&
             (std::same_as<ValueT, OtherValueT> ||
@@ -356,10 +362,14 @@ class MapBase : protected RawHashtable::BaseImpl<InputKeyT, InputValueT,
 // Note that this type should typically not appear on API boundaries; either
 // `MapBase` or `MapView` should be used instead.
 template <typename InputKeyT, typename InputValueT, ssize_t SmallSize = 0,
-          typename InputKeyContextT = DefaultKeyContext>
-class Map : public RawHashtable::TableImpl<
-                MapBase<InputKeyT, InputValueT, InputKeyContextT>, SmallSize> {
-  using BaseT = MapBase<InputKeyT, InputValueT, InputKeyContextT>;
+          typename InputKeyContextT = DefaultKeyContext,
+          bool UseProbeMarker = true>
+class Map
+    : public RawHashtable::TableImpl<
+          MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>,
+          SmallSize, UseProbeMarker> {
+  using BaseT =
+      MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>;
   using ImplT = RawHashtable::TableImpl<BaseT, SmallSize>;
 
  public:
@@ -375,32 +385,37 @@ class Map : public RawHashtable::TableImpl<
   void Reset();
 };
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
-auto MapView<InputKeyT, InputValueT, InputKeyContextT>::Contains(
-    LookupKeyT lookup_key, KeyContextT key_context) const -> bool {
+auto MapView<InputKeyT, InputValueT, InputKeyContextT,
+             UseProbeMarker>::Contains(LookupKeyT lookup_key,
+                                       KeyContextT key_context) const -> bool {
   return this->LookupEntry(lookup_key, key_context) != nullptr;
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
-auto MapView<InputKeyT, InputValueT, InputKeyContextT>::Lookup(
+auto MapView<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::Lookup(
     LookupKeyT lookup_key, KeyContextT key_context) const -> LookupKVResult {
   return LookupKVResult(this->LookupEntry(lookup_key, key_context));
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
-auto MapView<InputKeyT, InputValueT, InputKeyContextT>::operator[](
-    LookupKeyT lookup_key) const
+auto MapView<InputKeyT, InputValueT, InputKeyContextT,
+             UseProbeMarker>::operator[](LookupKeyT lookup_key) const
     -> ValueT* requires(std::default_initializable<KeyContextT>) {
       auto result = Lookup(lookup_key, KeyContextT());
       return result ? &result.value() : nullptr;
     }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename CallbackT>
-void MapView<InputKeyT, InputValueT, InputKeyContextT>::ForEach(
+void MapView<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::ForEach(
     CallbackT callback)
   requires(std::invocable<CallbackT, KeyT&, ValueT&>)
 {
@@ -409,10 +424,11 @@ void MapView<InputKeyT, InputValueT, InputKeyContextT>::ForEach(
       [](auto...) {});
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
 [[clang::always_inline]] auto
-MapBase<InputKeyT, InputValueT, InputKeyContextT>::Insert(
+MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::Insert(
     LookupKeyT lookup_key, ValueT new_v, KeyContextT key_context)
     -> InsertKVResult {
   return Insert(
@@ -424,10 +440,11 @@ MapBase<InputKeyT, InputValueT, InputKeyContextT>::Insert(
       key_context);
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT, typename ValueCallbackT>
 [[clang::always_inline]] auto
-MapBase<InputKeyT, InputValueT, InputKeyContextT>::Insert(
+MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::Insert(
     LookupKeyT lookup_key, ValueCallbackT value_cb, KeyContextT key_context)
     -> InsertKVResult
   requires(
@@ -444,10 +461,11 @@ MapBase<InputKeyT, InputValueT, InputKeyContextT>::Insert(
       key_context);
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT, typename InsertCallbackT>
 [[clang::always_inline]] auto
-MapBase<InputKeyT, InputValueT, InputKeyContextT>::Insert(
+MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::Insert(
     LookupKeyT lookup_key, InsertCallbackT insert_cb, KeyContextT key_context)
     -> InsertKVResult
   requires(!std::same_as<ValueT, InsertCallbackT> &&
@@ -465,10 +483,11 @@ MapBase<InputKeyT, InputValueT, InputKeyContextT>::Insert(
   return InsertKVResult(true, *entry);
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
 [[clang::always_inline]] auto
-MapBase<InputKeyT, InputValueT, InputKeyContextT>::Update(
+MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::Update(
     LookupKeyT lookup_key, ValueT new_v, KeyContextT key_context)
     -> InsertKVResult {
   return Update(
@@ -484,10 +503,11 @@ MapBase<InputKeyT, InputValueT, InputKeyContextT>::Update(
       key_context);
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT, typename ValueCallbackT>
 [[clang::always_inline]] auto
-MapBase<InputKeyT, InputValueT, InputKeyContextT>::Update(
+MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::Update(
     LookupKeyT lookup_key, ValueCallbackT value_cb, KeyContextT key_context)
     -> InsertKVResult
   requires(
@@ -508,11 +528,12 @@ MapBase<InputKeyT, InputValueT, InputKeyContextT>::Update(
       key_context);
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT, typename InsertCallbackT,
           typename UpdateCallbackT>
 [[clang::always_inline]] auto
-MapBase<InputKeyT, InputValueT, InputKeyContextT>::Update(
+MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::Update(
     LookupKeyT lookup_key, InsertCallbackT insert_cb, UpdateCallbackT update_cb,
     KeyContextT key_context) -> InsertKVResult
   requires(!std::same_as<ValueT, InsertCallbackT> &&
@@ -532,21 +553,25 @@ MapBase<InputKeyT, InputValueT, InputKeyContextT>::Update(
   return InsertKVResult(true, *entry);
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
-auto MapBase<InputKeyT, InputValueT, InputKeyContextT>::Erase(
+auto MapBase<InputKeyT, InputValueT, InputKeyContextT, UseProbeMarker>::Erase(
     LookupKeyT lookup_key, KeyContextT key_context) -> bool {
   return this->EraseImpl(lookup_key, key_context);
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-void MapBase<InputKeyT, InputValueT, InputKeyContextT>::Clear() {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
+void MapBase<InputKeyT, InputValueT, InputKeyContextT,
+             UseProbeMarker>::Clear() {
   this->ClearImpl();
 }
 
 template <typename InputKeyT, typename InputValueT, ssize_t SmallSize,
-          typename InputKeyContextT>
-void Map<InputKeyT, InputValueT, SmallSize, InputKeyContextT>::Reset() {
+          typename InputKeyContextT, bool UseProbeMarker>
+void Map<InputKeyT, InputValueT, SmallSize, InputKeyContextT,
+         UseProbeMarker>::Reset() {
   this->ResetImpl();
 }
 

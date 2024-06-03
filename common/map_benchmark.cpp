@@ -49,8 +49,10 @@ auto MakeValue2() -> T {
 
 template <typename MapT>
 struct IsCarbonMapImpl : std::false_type {};
-template <typename KT, typename VT, int MinSmallSize>
-struct IsCarbonMapImpl<Map<KT, VT, MinSmallSize>> : std::true_type {};
+template <typename KT, typename VT, int MinSmallSize, typename KeyContextT,
+          bool UseProbeMarker>
+struct IsCarbonMapImpl<Map<KT, VT, MinSmallSize, KeyContextT, UseProbeMarker>>
+    : std::true_type {};
 
 template <typename MapT>
 static constexpr bool IsCarbonMap = IsCarbonMapImpl<MapT>::value;
@@ -88,9 +90,10 @@ struct MapWrapperImpl {
 
 // Explicit (partial) specialization for the Carbon map type. The core reason is
 // to switch to the Carbon Map API which is structured a bit differently.
-template <typename KT, typename VT, int MinSmallSize>
-struct MapWrapperImpl<Map<KT, VT, MinSmallSize>> {
-  using MapT = Map<KT, VT, MinSmallSize>;
+template <typename KT, typename VT, int MinSmallSize, bool UseProbeMarker>
+struct MapWrapperImpl<
+    Map<KT, VT, MinSmallSize, DefaultKeyContext, UseProbeMarker>> {
+  using MapT = Map<KT, VT, MinSmallSize, DefaultKeyContext, UseProbeMarker>;
   using KeyT = KT;
   using ValueT = VT;
 
@@ -198,6 +201,7 @@ auto ReportMetrics(const MapWrapper<MapT>& m_wrapper, benchmark::State& state)
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
 #define MAP_BENCHMARK_ONE_OP_SIZE(NAME, APPLY, KT, VT)                         \
   BENCHMARK(NAME<Map<KT, VT>>)->Apply(APPLY);                                  \
+  BENCHMARK(NAME<Map<KT, VT, 0, DefaultKeyContext, false>>)->Apply(APPLY);     \
   BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(APPLY);                  \
   BENCHMARK(NAME<boost::unordered::unordered_flat_map<KT, VT>>)->Apply(APPLY); \
   BENCHMARK(NAME<llvm::DenseMap<KT, VT>>)->Apply(APPLY);                       \
@@ -418,16 +422,19 @@ static void BM_MapEraseUpdateHit(benchmark::State& state) {
       CARBON_DCHECK(inserted);
     }
   }
+
+  ReportMetrics(m, state);
 }
 MAP_BENCHMARK_ONE_OP(BM_MapEraseUpdateHit, HitArgs);
 
 // NOLINTBEGIN(bugprone-macro-parentheses): Parentheses are incorrect here.
-#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT, VT)                  \
-  BENCHMARK(NAME<Map<KT, VT>>)->Apply(SizeArgs);                 \
-  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(SizeArgs); \
-  BENCHMARK(NAME<boost::unordered::unordered_flat_map<KT, VT>>)  \
-      ->Apply(SizeArgs);                                         \
-  BENCHMARK(NAME<llvm::DenseMap<KT, VT>>)->Apply(APPLY);         \
+#define MAP_BENCHMARK_OP_SEQ_SIZE(NAME, KT, VT)                               \
+  BENCHMARK(NAME<Map<KT, VT>>)->Apply(SizeArgs);                              \
+  BENCHMARK(NAME<Map<KT, VT, 0, DefaultKeyContext, false>>)->Apply(SizeArgs); \
+  BENCHMARK(NAME<absl::flat_hash_map<KT, VT>>)->Apply(SizeArgs);              \
+  BENCHMARK(NAME<boost::unordered::unordered_flat_map<KT, VT>>)               \
+      ->Apply(SizeArgs);                                                      \
+  BENCHMARK(NAME<llvm::DenseMap<KT, VT>>)->Apply(APPLY);                      \
   BENCHMARK(NAME<llvm::DenseMap<KT, VT, CarbonHashDI<KT>>>)->Apply(SizeArgs)
 // NOLINTEND(bugprone-macro-parentheses)
 

@@ -282,7 +282,8 @@ struct Storage {};
 
 // Forward declaration to support friending, see the definition below.
 template <typename KeyT, typename ValueT = void,
-          typename InputKeyContextT = DefaultKeyContext>
+          typename InputKeyContextT = DefaultKeyContext,
+          bool UseProbeMarker = true>
 class BaseImpl;
 
 // Implementation helper for defining a read-only view type for a hashtable.
@@ -307,7 +308,8 @@ class BaseImpl;
 // Those are kept `private` and where necessary the other components of the raw
 // hashtable implementation are friended to give access to them.
 template <typename InputKeyT, typename InputValueT = void,
-          typename InputKeyContextT = DefaultKeyContext>
+          typename InputKeyContextT = DefaultKeyContext,
+          bool UseProbeMarker = true>
 class ViewImpl {
  protected:
   using KeyT = InputKeyT;
@@ -316,12 +318,12 @@ class ViewImpl {
   using EntryT = StorageEntry<KeyT, ValueT>;
   using MetricsT = Metrics;
 
-  friend class BaseImpl<KeyT, ValueT, KeyContextT>;
+  friend class BaseImpl<KeyT, ValueT, KeyContextT, UseProbeMarker>;
 
   // Make more-`const` types friends to enable conversions that add `const`.
-  friend class ViewImpl<const KeyT, ValueT, KeyContextT>;
-  friend class ViewImpl<KeyT, const ValueT, KeyContextT>;
-  friend class ViewImpl<const KeyT, const ValueT, KeyContextT>;
+  friend class ViewImpl<const KeyT, ValueT, KeyContextT, UseProbeMarker>;
+  friend class ViewImpl<KeyT, const ValueT, KeyContextT, UseProbeMarker>;
+  friend class ViewImpl<const KeyT, const ValueT, KeyContextT, UseProbeMarker>;
 
   ViewImpl() = default;
 
@@ -355,6 +357,9 @@ class ViewImpl {
   auto GetMetrics(KeyContextT key_context) const -> MetricsT;
 
  private:
+  template <typename InputBaseT, ssize_t SmallSize, bool TableUseProbeMarker>
+  friend class TableImpl;
+
   ViewImpl(ssize_t alloc_size, Storage* storage)
       : alloc_size_(alloc_size), storage_(storage) {}
 
@@ -373,9 +378,20 @@ class ViewImpl {
     return alloc_size;
   }
 
+  // Compute the offset of our probe markers, these are stored past the entry
+  // array as we only need them when probing.
+  static constexpr auto ProbeMarkersOffset(ssize_t alloc_size) -> ssize_t {
+    static_assert(UseProbeMarker);
+    return EntriesOffset(alloc_size) + (sizeof(EntryT) * alloc_size);
+  }
+
   // Compute the allocated table's byte size.
   static constexpr auto AllocByteSize(ssize_t alloc_size) -> ssize_t {
-    return EntriesOffset(alloc_size) + sizeof(EntryT) * alloc_size;
+    ssize_t byte_size = EntriesOffset(alloc_size) + sizeof(EntryT) * alloc_size;
+    if constexpr (UseProbeMarker) {
+      byte_size += (alloc_size / MetadataGroup::Size);
+    }
+    return byte_size;
   }
 
   auto metadata() const -> uint8_t* {
@@ -384,6 +400,15 @@ class ViewImpl {
   auto entries() const -> EntryT* {
     return reinterpret_cast<EntryT*>(reinterpret_cast<std::byte*>(storage_) +
                                      EntriesOffset(alloc_size_));
+  }
+  auto probe_markers() const -> uint8_t* {
+    static_assert(UseProbeMarker);
+    return reinterpret_cast<uint8_t*>(reinterpret_cast<std::byte*>(storage_) +
+                                      ProbeMarkersOffset(alloc_size_));
+  }
+  auto probe_marker(ssize_t group_index, int bit) const -> bool {
+    static_assert(UseProbeMarker);
+    return probe_markers()[group_index / GroupSize] & (1 << bit);
   }
 
   ssize_t alloc_size_;
@@ -400,13 +425,14 @@ class ViewImpl {
 // Other than the use of `protected` inheritance, the patterns for this type,
 // and how to build user-facing hashtable base types from it, mirror those of
 // `ViewImpl`. See its documentation for more details.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContextT,
+          bool UseProbeMarker>
 class BaseImpl {
  protected:
   using KeyT = InputKeyT;
   using ValueT = InputValueT;
   using KeyContextT = InputKeyContextT;
-  using ViewImplT = ViewImpl<KeyT, ValueT, KeyContextT>;
+  using ViewImplT = ViewImpl<KeyT, ValueT, KeyContextT, UseProbeMarker>;
   using EntryT = typename ViewImplT::EntryT;
   using MetricsT = typename ViewImplT::MetricsT;
 
@@ -450,7 +476,7 @@ class BaseImpl {
   auto ClearImpl() -> void;
 
  private:
-  template <typename InputBaseT, ssize_t SmallSize>
+  template <typename InputBaseT, ssize_t SmallSize, bool TableUseProbeMarker>
   friend class TableImpl;
 
   static constexpr ssize_t Alignment = std::max<ssize_t>(
@@ -463,6 +489,7 @@ class BaseImpl {
   struct SmallStorage : Storage {
     alignas(Alignment) uint8_t metadata[SmallSize];
     mutable StorageEntry<KeyT, ValueT> entries[SmallSize];
+    uint8_t probe_markers[SmallSize / MetadataGroup::Size];
   };
   // Specialized storage with no inline buffer to avoid any extra alignment.
   template <>
@@ -478,6 +505,13 @@ class BaseImpl {
   auto storage() -> Storage*& { return view_impl_.storage_; }
   auto metadata() const -> uint8_t* { return view_impl_.metadata(); }
   auto entries() const -> EntryT* { return view_impl_.entries(); }
+  auto probe_markers() const -> uint8_t* { return view_impl_.probe_markers(); }
+  auto probe_marker(ssize_t group_index, int bit) const -> bool {
+    return view_impl_.probe_marker(group_index, bit);
+  }
+  auto set_probe_marker(ssize_t group_index, int bit) -> void {
+    probe_markers()[group_index / GroupSize] |= (1 << bit);
+  }
   auto small_alloc_size() const -> ssize_t {
     return static_cast<unsigned>(small_alloc_size_);
   }
@@ -523,10 +557,11 @@ class BaseImpl {
 // Other than this inheritance technique, the patterns for this type, and how to
 // build user-facing hashtable types from it, mirror those of `ViewImpl`. See
 // its documentation for more details.
-template <typename InputBaseT, ssize_t SmallSize>
+template <typename InputBaseT, ssize_t SmallSize, bool UseProbeMarker = true>
 class TableImpl : public InputBaseT {
  protected:
   using BaseT = InputBaseT;
+  using ViewT = typename InputBaseT::ViewT;
 
   TableImpl() : BaseT(SmallSize, small_storage()) {}
   TableImpl(const TableImpl& arg);
@@ -541,7 +576,9 @@ class TableImpl : public InputBaseT {
   using KeyT = BaseT::KeyT;
   using ValueT = BaseT::ValueT;
   using EntryT = BaseT::EntryT;
-  using SmallStorage = BaseT::template SmallStorage<SmallSize>;
+  using BaseImplT = BaseT::ImplT;
+  using ViewImplT = BaseImplT::ViewImplT;
+  using SmallStorage = BaseImplT::template SmallStorage<SmallSize>;
 
   auto small_storage() const -> Storage*;
 
@@ -635,10 +672,13 @@ class ProbeSequence {
 
 // TODO: Evaluate keeping this outlined to see if macro benchmarks observe the
 // same perf hit as micro benchmarks.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
-auto ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::LookupEntry(
-    LookupKeyT lookup_key, KeyContextT key_context) const -> EntryT* {
+auto ViewImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::LookupEntry(LookupKeyT lookup_key,
+                                           KeyContextT key_context) const
+    -> EntryT* {
   // Prefetch with a "low" temporal locality as we're primarily expecting a
   // brief use of the storage and then to return to application code.
   __builtin_prefetch(storage_, /*read*/ 0, /*low-locality*/ 1);
@@ -648,7 +688,15 @@ auto ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::LookupEntry(
 
   uint8_t* local_metadata = metadata();
   HashCode hash = key_context.HashKey(lookup_key, ComputeSeed());
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
+  auto [hash_index, tag] =
+      hash.ExtractIndexAndTag < UseProbeMarker ? 10 : 7 > ();
+
+  // Split the the tag into the probe marker bit and tag.
+  [[maybe_unused]] int probe_marker_bit;
+  if constexpr (UseProbeMarker) {
+    probe_marker_bit = tag >> 7;
+    tag &= 0b0111'1111;
+  }
 
   EntryT* local_entries = entries();
 
@@ -679,12 +727,19 @@ auto ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::LookupEntry(
       } while (LLVM_UNLIKELY(byte_it != byte_end));
     }
 
-    // We failed to find a matching entry in this bucket, so check if there are
-    // empty slots as that indicates we're done probing -- no later probed index
-    // could have a match.
-    auto empty_byte_matched_range = g.MatchEmpty();
-    if (LLVM_LIKELY(empty_byte_matched_range)) {
-      return nullptr;
+    if constexpr (UseProbeMarker) {
+      // If we don't have a probe marker bit set, we're done probing.
+      if (LLVM_LIKELY(!probe_marker(group_index, probe_marker_bit))) {
+        return nullptr;
+      }
+    } else {
+      // We failed to find a matching entry in this bucket, so check if there
+      // are empty slots as that indicates we're done probing -- no later probed
+      // index could have a match.
+      auto empty_byte_matched_range = g.MatchEmpty();
+      if (LLVM_LIKELY(empty_byte_matched_range)) {
+        return nullptr;
+      }
     }
 
     s.Next();
@@ -701,10 +756,11 @@ auto ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::LookupEntry(
 // boundaries within the loop for performance, and recognizing the degree of
 // simplification from inlining these callbacks may be difficult to
 // automatically recognize.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
 template <typename EntryCallbackT, typename GroupCallbackT>
 [[clang::always_inline]] auto
-ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::ForEachEntry(
+ViewImpl<InputKeyT, InputValueT, InputKeyContext, UseProbeMarker>::ForEachEntry(
     EntryCallbackT entry_callback, GroupCallbackT group_callback) const
     -> void {
   uint8_t* local_metadata = metadata();
@@ -726,9 +782,11 @@ ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::ForEachEntry(
   }
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-auto ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::GetMetrics(
-    KeyContextT key_context) const -> Metrics {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+auto ViewImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::GetMetrics(KeyContextT key_context) const
+    -> Metrics {
   uint8_t* local_metadata = metadata();
   EntryT* local_entries = entries();
   ssize_t local_size = alloc_size_;
@@ -751,7 +809,16 @@ auto ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::GetMetrics(
       ssize_t index = group_index + byte_index;
       HashCode hash =
           key_context.HashKey(local_entries[index].key(), ComputeSeed());
-      auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
+      auto [hash_index, tag] =
+          hash.ExtractIndexAndTag<(UseProbeMarker ? 10 : 7)>();
+
+      // Split the the tag into the probe marker bit and tag.
+      [[maybe_unused]] int probe_marker_bit;
+      if constexpr (UseProbeMarker) {
+        probe_marker_bit = tag >> 7;
+        tag &= 0b0111'1111;
+      }
+
       ProbeSequence s(hash_index, local_size);
       metrics.probed_key_count +=
           static_cast<ssize_t>(s.index() != group_index);
@@ -766,6 +833,9 @@ auto ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::GetMetrics(
             MetadataGroup::Load(local_metadata, probe_index);
         auto metadata_matched_range = probe_g.Match(tag);
         if (probe_index != group_index) {
+          if constexpr (UseProbeMarker) {
+            CARBON_CHECK(probe_marker(probe_index, probe_marker_bit));
+          }
           compares += std::distance(metadata_matched_range.begin(),
                                     metadata_matched_range.end());
           distance += 1;
@@ -797,25 +867,36 @@ auto ViewImpl<InputKeyT, InputValueT, InputKeyContextT>::GetMetrics(
   return metrics;
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::~BaseImpl() {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+BaseImpl<InputKeyT, InputValueT, InputKeyContext, UseProbeMarker>::~BaseImpl() {
   Destroy();
 }
 
 // TODO: Evaluate whether it is worth forcing this out-of-line given the
 // reasonable ABI boundary it forms and large volume of code necessary to
 // implement it.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
-auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::InsertImpl(
-    LookupKeyT lookup_key, KeyContextT key_context)
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::InsertImpl(LookupKeyT lookup_key,
+                                          KeyContextT key_context)
     -> std::pair<EntryT*, bool> {
   CARBON_DCHECK(alloc_size() > 0);
 
   uint8_t* local_metadata = metadata();
 
   HashCode hash = key_context.HashKey(lookup_key, ComputeSeed());
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
+  auto [hash_index, tag] =
+      hash.ExtractIndexAndTag < UseProbeMarker ? 10 : 7 > ();
+
+  // Split the the tag into the probe marker bit and tag.
+  [[maybe_unused]] int probe_marker_bit;
+  if constexpr (UseProbeMarker) {
+    probe_marker_bit = tag >> 7;
+    tag &= 0b0111'1111;
+  }
 
   // We re-purpose the empty control byte to signal no insert is needed to the
   // caller. This is guaranteed to not be a control byte we're inserting.
@@ -851,52 +932,105 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::InsertImpl(
       } while (LLVM_UNLIKELY(byte_it != byte_end));
     }
 
-    // Track the first group with a deleted entry that we could insert over.
-    if (!deleted_match) {
-      deleted_match = g.MatchDeleted();
-      group_with_deleted_index = group_index;
-    }
+    if constexpr (UseProbeMarker) {
+      // If we have a probe marker bit set, we need to keep probing as we may
+      // still find an existing entry.
+      if (probe_marker(group_index, probe_marker_bit)) {
+        // Save the first empty match we find. FIXME: we use `deleted_match` for
+        // this, need to clean up.
+        if (!deleted_match) {
+          deleted_match = g.MatchEmpty();
+          group_with_deleted_index = group_index;
+        }
 
-    // We failed to find a matching entry in this bucket, so check if there are
-    // no empty slots. In that case, we'll continue probing.
-    auto empty_match = g.MatchEmpty();
-    if (!empty_match) {
-      continue;
-    }
-    // Ok, we've finished probing without finding anything and need to insert
-    // instead.
+        continue;
+      }
 
-    // If we found a deleted slot, we don't need the probe sequence to insert
-    // so just bail. We want to ensure building up a table is fast so we
-    // de-prioritize this a bit. In practice this doesn't have too much of an
-    // effect.
-    if (LLVM_UNLIKELY(deleted_match)) {
-      return return_insert_at_index(group_with_deleted_index +
-                                    deleted_match.index());
-    }
+      if (LLVM_UNLIKELY(deleted_match)) {
+        return return_insert_at_index(group_with_deleted_index +
+                                      deleted_match.index());
+      }
 
-    // We're going to need to grow by inserting into an empty slot. Check that
-    // we have the budget for that before we compute the exact index of the
-    // empty slot. Without the growth budget we'll have to completely rehash and
-    // so we can just bail here.
-    if (LLVM_UNLIKELY(growth_budget_ == 0)) {
-      return {GrowAndInsert(lookup_key, key_context), true};
-    }
+      // We're going to need to grow by inserting into an empty slot. Check that
+      // we have the budget for that before we compute the exact index of the
+      // empty slot. Without the growth budget we'll have to completely rehash
+      // and so we can just bail here.
+      if (LLVM_UNLIKELY(growth_budget_ == 0)) {
+        return {GrowAndInsert(lookup_key, key_context), true};
+      }
 
-    --growth_budget_;
-    CARBON_DCHECK(growth_budget() >= 0)
-        << "Growth budget shouldn't have gone negative!";
-    return return_insert_at_index(group_index + empty_match.index());
+      --growth_budget_;
+      CARBON_DCHECK(growth_budget() >= 0)
+          << "Growth budget shouldn't have gone negative!";
+
+      // Now we need to find an empty slot to insert into because we haven't
+      // found one yet. Probe until we find one and insert there. This is
+      // guaranteed to eventually find one given the growth budget wasn't
+      // exhausted.
+      for (;;) {
+        deleted_match = g.MatchEmpty();
+        if (deleted_match) {
+          break;
+        }
+        // Mark that now this group too will need to be probed through.
+        set_probe_marker(group_index, probe_marker_bit);
+        s.Next();
+        group_index = s.index();
+        g = MetadataGroup::Load(local_metadata, group_index);
+      }
+
+      return return_insert_at_index(group_index + deleted_match.index());
+    } else {
+      // Track the first group with a deleted entry that we could insert over.
+      if (!deleted_match) {
+        deleted_match = g.MatchDeleted();
+        group_with_deleted_index = group_index;
+      }
+
+      // We failed to find a matching entry in this bucket, so check if there
+      // are no empty slots. In that case, we'll continue probing.
+      auto empty_match = g.MatchEmpty();
+      if (!empty_match) {
+        continue;
+      }
+
+      // Ok, we've finished probing without finding anything and need to insert
+      // instead.
+
+      // If we found a deleted slot, we don't need the probe sequence to insert
+      // so just bail. We want to ensure building up a table is fast so we
+      // de-prioritize this a bit. In practice this doesn't have too much of an
+      // effect.
+      if (LLVM_UNLIKELY(deleted_match)) {
+        return return_insert_at_index(group_with_deleted_index +
+                                      deleted_match.index());
+      }
+
+      // We're going to need to grow by inserting into an empty slot. Check that
+      // we have the budget for that before we compute the exact index of the
+      // empty slot. Without the growth budget we'll have to completely rehash
+      // and so we can just bail here.
+      if (LLVM_UNLIKELY(growth_budget_ == 0)) {
+        return {GrowAndInsert(lookup_key, key_context), true};
+      }
+
+      --growth_budget_;
+      CARBON_DCHECK(growth_budget() >= 0)
+          << "Growth budget shouldn't have gone negative!";
+      return return_insert_at_index(group_index + empty_match.index());
+    }
   }
 
   CARBON_FATAL() << "We should never finish probing without finding the entry "
                     "or an empty slot.";
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
-auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::EraseImpl(
-    LookupKeyT lookup_key, KeyContextT key_context) -> bool {
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::EraseImpl(LookupKeyT lookup_key,
+                                         KeyContextT key_context) -> bool {
   EntryT* entry = view_impl_.LookupEntry(lookup_key, key_context);
   if (!entry) {
     return false;
@@ -914,13 +1048,29 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::EraseImpl(
   EntryT* local_entries = entries();
   ssize_t index = entry - local_entries;
   ssize_t group_index = index & ~GroupMask;
-  auto g = MetadataGroup::Load(local_metadata, group_index);
-  auto empty_matched_range = g.MatchEmpty();
-  if (empty_matched_range) {
+  if constexpr (UseProbeMarker) {
+    // Mark the slot as empty now.
     local_metadata[index] = MetadataGroup::Empty;
-    ++growth_budget_;
+
+    // Figure out if this is an empty slot we can grow into.
+    HashCode hash = key_context.HashKey(lookup_key, ComputeSeed());
+    auto [hash_index, tag] = hash.ExtractIndexAndTag<10>();
+    // We just need the probe marker bit.
+    int probe_marker_bit = tag >> 7;
+    if (probe_marker(group_index, probe_marker_bit)) {
+      // We can only increase the growth budget if we won't probe past the newly
+      // empty slot.
+      ++growth_budget_;
+    }
   } else {
-    local_metadata[index] = MetadataGroup::Deleted;
+    auto g = MetadataGroup::Load(local_metadata, group_index);
+    auto empty_matched_range = g.MatchEmpty();
+    if (empty_matched_range) {
+      local_metadata[index] = MetadataGroup::Empty;
+      ++growth_budget_;
+    } else {
+      local_metadata[index] = MetadataGroup::Deleted;
+    }
   }
 
   if constexpr (!EntryT::IsTriviallyDestructible) {
@@ -930,8 +1080,10 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::EraseImpl(
   return true;
 }
 
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::ClearImpl() -> void {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::ClearImpl() -> void {
   view_impl_.ForEachEntry(
       [](EntryT& entry) {
         if constexpr (!EntryT::IsTriviallyDestructible) {
@@ -942,6 +1094,9 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::ClearImpl() -> void {
         // Clear the group.
         std::memset(metadata_group, 0, GroupSize);
       });
+  if constexpr (UseProbeMarker) {
+    memset(probe_markers(), 0, alloc_size() / GroupSize);
+  }
   growth_budget_ = GrowthThresholdForAllocSize(alloc_size());
 }
 
@@ -950,9 +1105,10 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::ClearImpl() -> void {
 //
 // The returned pointer *must* be deallocated by calling the below `Deallocate`
 // function with the same `alloc_size` as used here.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::Allocate(
-    ssize_t alloc_size) -> Storage* {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::Allocate(ssize_t alloc_size) -> Storage* {
   return reinterpret_cast<Storage*>(__builtin_operator_new(
       ViewImplT::AllocByteSize(alloc_size),
       static_cast<std::align_val_t>(Alignment), std::nothrow_t()));
@@ -960,9 +1116,11 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::Allocate(
 
 // Deallocates a table's storage that was allocated with the `Allocate`
 // function.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::Deallocate(
-    Storage* storage, ssize_t alloc_size) -> void {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::Deallocate(Storage* storage, ssize_t alloc_size)
+    -> void {
   ssize_t allocated_size = ViewImplT::AllocByteSize(alloc_size);
   // We don't need the size, but make sure it always compiles.
   static_cast<void>(allocated_size);
@@ -978,9 +1136,10 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::Deallocate(
 // and can be null. Regardless, after this the storage pointer is non-null and
 // the size is non-zero so that we can directly begin inserting or querying the
 // table.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::Construct(
-    Storage* small_storage) -> void {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::Construct(Storage* small_storage) -> void {
   if (small_alloc_size_ > 0) {
     alloc_size() = small_alloc_size_;
     storage() = small_storage;
@@ -991,12 +1150,17 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::Construct(
     storage() = Allocate(MinAllocatedSize);
   }
   std::memset(metadata(), 0, alloc_size());
+  if constexpr (UseProbeMarker) {
+    std::memset(probe_markers(), 0, alloc_size() / MetadataGroup::Size);
+  }
   growth_budget_ = GrowthThresholdForAllocSize(alloc_size());
 }
 
 // Destroy the current table, releasing any memory used.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::Destroy() -> void {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::Destroy() -> void {
   // Check for a moved-from state and don't do anything. Only a moved-from table
   // has a zero size.
   if (alloc_size() == 0) {
@@ -1024,13 +1188,24 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::Destroy() -> void {
 // (and growth space) to insert into before any deleted slots. When both of
 // these are true, typically just after growth, we can dramatically simplify the
 // insert position search.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
 [[clang::noinline]] auto
-BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::InsertIntoEmpty(
-    LookupKeyT lookup_key, KeyContextT key_context) -> EntryT* {
+BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+         UseProbeMarker>::InsertIntoEmpty(LookupKeyT lookup_key,
+                                          KeyContextT key_context) -> EntryT* {
   HashCode hash = key_context.HashKey(lookup_key, ComputeSeed());
-  auto [hash_index, tag] = hash.ExtractIndexAndTag<7>();
+  auto [hash_index, tag] =
+      hash.ExtractIndexAndTag < UseProbeMarker ? 10 : 7 > ();
+
+  // Split the the tag into the probe marker bit and tag.
+  [[maybe_unused]] int probe_marker_bit;
+  if constexpr (UseProbeMarker) {
+    probe_marker_bit = tag >> 7;
+    tag &= 0b0111'1111;
+  }
+
   uint8_t* local_metadata = metadata();
   EntryT* local_entries = entries();
 
@@ -1039,20 +1214,34 @@ BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::InsertIntoEmpty(
     auto g = MetadataGroup::Load(local_metadata, group_index);
 
     if (auto empty_match = g.MatchEmpty()) {
+      if constexpr (UseProbeMarker) {
+        // The only way we can find an empty slot is if this should not need
+        // probing through because this is only used on fresh tables w/o
+        // deletions.
+        CARBON_DCHECK(!probe_marker(group_index, probe_marker_bit));
+      }
+
       ssize_t index = group_index + empty_match.index();
       local_metadata[index] = tag | MetadataGroup::PresentMask;
       return &local_entries[index];
     }
 
     // Otherwise we continue probing.
+    if constexpr (UseProbeMarker) {
+      // Mark that now this group too will now need to be probed through if it
+      // wasn't already.
+      set_probe_marker(group_index, probe_marker_bit);
+    }
   }
 }
 
 // Apply our doubling growth strategy and (re-)check invariants around table
 // size.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::ComputeNextAllocSize(
-    ssize_t old_alloc_size) -> ssize_t {
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::ComputeNextAllocSize(ssize_t old_alloc_size)
+    -> ssize_t {
   CARBON_DCHECK(llvm::isPowerOf2_64(old_alloc_size))
       << "Expected a power of two!";
   ssize_t new_alloc_size;
@@ -1062,9 +1251,10 @@ auto BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::ComputeNextAllocSize(
 }
 
 // Compute the growth threshold for a given size.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
-auto BaseImpl<InputKeyT, InputValueT,
-              InputKeyContextT>::GrowthThresholdForAllocSize(ssize_t alloc_size)
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
+auto BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+              UseProbeMarker>::GrowthThresholdForAllocSize(ssize_t alloc_size)
     -> ssize_t {
   // We use a 7/8ths load factor to trigger growth.
   return alloc_size - alloc_size / 8;
@@ -1075,11 +1265,13 @@ auto BaseImpl<InputKeyT, InputValueT,
 // selecting the insertion entry, this routine updates the metadata array so
 // that this function can be directly called and the result returned from
 // `InsertImpl`.
-template <typename InputKeyT, typename InputValueT, typename InputKeyContextT>
+template <typename InputKeyT, typename InputValueT, typename InputKeyContext,
+          bool UseProbeMarker>
 template <typename LookupKeyT>
 [[clang::noinline]] auto
-BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::GrowAndInsert(
-    LookupKeyT lookup_key, KeyContextT key_context) -> EntryT* {
+BaseImpl<InputKeyT, InputValueT, InputKeyContext,
+         UseProbeMarker>::GrowAndInsert(LookupKeyT lookup_key,
+                                        KeyContextT key_context) -> EntryT* {
   // We collect the probed elements in a small vector for re-insertion. It is
   // tempting to reuse the already allocated storage, but doing so appears to
   // be a (very slight) performance regression. These are relatively rare and
@@ -1155,7 +1347,9 @@ BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::GrowAndInsert(
     // Make sure to match present elements first to enable pipelining with
     // clearing.
     auto present_matched_range = low_g.MatchPresent();
-    low_g.ClearDeleted();
+    if constexpr (!UseProbeMarker) {
+      low_g.ClearDeleted();
+    }
     MetadataGroup high_g;
     if constexpr (MetadataGroup::FastByteClear) {
       // When we have a fast byte clear, we can update the metadata for the
@@ -1178,8 +1372,9 @@ BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::GrowAndInsert(
       }
       HashCode hash =
           key_context.HashKey(old_entries[old_index].key(), ComputeSeed());
-      ssize_t old_hash_index = hash.ExtractIndexAndTag<7>().first &
-                               ComputeProbeMaskFromSize(old_size);
+      ssize_t old_hash_index =
+          hash.ExtractIndexAndTag<(UseProbeMarker ? 10 : 7)>().first &
+          ComputeProbeMaskFromSize(old_size);
       if (LLVM_UNLIKELY(old_hash_index != group_index)) {
         probed_indices.push_back(old_index);
         if constexpr (MetadataGroup::FastByteClear) {
@@ -1191,8 +1386,9 @@ BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::GrowAndInsert(
         }
         continue;
       }
-      ssize_t new_index = hash.ExtractIndexAndTag<7>().first &
-                          ComputeProbeMaskFromSize(new_size);
+      ssize_t new_index =
+          hash.ExtractIndexAndTag<(UseProbeMarker ? 10 : 7)>().first &
+          ComputeProbeMaskFromSize(new_size);
       CARBON_DCHECK(new_index == old_hash_index ||
                     new_index == (old_hash_index | old_size));
       // Toggle the newly added bit of the index to get to the other possible
@@ -1240,6 +1436,10 @@ BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::GrowAndInsert(
     memcpy(new_entries + old_size, old_entries, old_size * sizeof(EntryT));
   }
 
+  if constexpr (UseProbeMarker) {
+    memset(probe_markers(), 0, new_size / GroupSize);
+  }
+
   // We then need to do a normal insertion for anything that was probed before
   // growth, but we know we'll find an empty slot, so leverage that.
   for (ssize_t old_index : probed_indices) {
@@ -1269,8 +1469,9 @@ BaseImpl<InputKeyT, InputValueT, InputKeyContextT>::GrowAndInsert(
   return InsertIntoEmpty(lookup_key, key_context);
 }
 
-template <typename InputBaseT, ssize_t SmallSize>
-TableImpl<InputBaseT, SmallSize>::TableImpl(const TableImpl& arg)
+template <typename InputBaseT, ssize_t SmallSize, bool UseProbeMarker>
+TableImpl<InputBaseT, SmallSize, UseProbeMarker>::TableImpl(
+    const TableImpl& arg)
     : BaseT(arg.alloc_size(), arg.growth_budget_, SmallSize) {
   CARBON_DCHECK(arg.small_alloc_size_ == SmallSize);
 
@@ -1301,12 +1502,17 @@ TableImpl<InputBaseT, SmallSize>::TableImpl(const TableImpl& arg)
           local_arg_entries[group_index + byte_index]);
     }
   }
+
+  if constexpr (UseProbeMarker) {
+    memcpy(this->probe_markers(), arg.probe_markers(), local_size / GroupSize);
+  }
 }
 
 // Puts the incoming table into a moved-from state that can be destroyed or
 // re-initialized but must not be used otherwise.
-template <typename InputBaseT, ssize_t SmallSize>
-TableImpl<InputBaseT, SmallSize>::TableImpl(TableImpl&& arg) noexcept
+template <typename InputBaseT, ssize_t SmallSize, bool UseProbeMarker>
+TableImpl<InputBaseT, SmallSize, UseProbeMarker>::TableImpl(
+    TableImpl&& arg) noexcept
     : BaseT(arg.alloc_size(), arg.growth_budget_, SmallSize) {
   CARBON_DCHECK(arg.small_alloc_size_ == SmallSize);
 
@@ -1336,6 +1542,11 @@ TableImpl<InputBaseT, SmallSize>::TableImpl(TableImpl&& arg) noexcept
         }
       }
     }
+
+    if constexpr (UseProbeMarker) {
+      memcpy(this->probe_markers(), arg.probe_markers(),
+             local_size / GroupSize);
+    }
   } else {
     // Just point to the allocated storage.
     this->storage() = arg.storage();
@@ -1349,8 +1560,8 @@ TableImpl<InputBaseT, SmallSize>::TableImpl(TableImpl&& arg) noexcept
 
 // Reset a table to its original state, including releasing any allocated
 // memory.
-template <typename InputBaseT, ssize_t SmallSize>
-auto TableImpl<InputBaseT, SmallSize>::ResetImpl() -> void {
+template <typename InputBaseT, ssize_t SmallSize, bool UseProbeMarker>
+auto TableImpl<InputBaseT, SmallSize, UseProbeMarker>::ResetImpl() -> void {
   this->Destroy();
 
   // Re-initialize the whole thing.
@@ -1358,8 +1569,9 @@ auto TableImpl<InputBaseT, SmallSize>::ResetImpl() -> void {
   this->Construct(small_storage());
 }
 
-template <typename InputBaseT, ssize_t SmallSize>
-auto TableImpl<InputBaseT, SmallSize>::small_storage() const -> Storage* {
+template <typename InputBaseT, ssize_t SmallSize, bool UseProbeMarker>
+auto TableImpl<InputBaseT, SmallSize, UseProbeMarker>::small_storage() const
+    -> Storage* {
   if constexpr (SmallSize > 0) {
     // Do a bunch of validation of the small size to establish our invariants
     // when we know we have a non-zero small size.
@@ -1383,9 +1595,18 @@ auto TableImpl<InputBaseT, SmallSize>::small_storage() const -> Storage* {
                   "Either a larger small size or a zero small size and heap "
                   "allocation are required for this key and value type.");
 
-    static_assert(offsetof(SmallStorage, entries) == SmallSize,
-                  "Offset to entries in small size storage doesn't match "
-                  "computed offset!");
+    static_assert(
+        offsetof(SmallStorage, entries) == ViewImplT::EntriesOffset(SmallSize),
+        "Offset to entries in small size storage doesn't match computed "
+        "offset!");
+
+    if constexpr (UseProbeMarker) {
+      static_assert(
+          offsetof(SmallStorage, probe_markers) ==
+              ViewImplT::ProbeMarkersOffset(SmallSize),
+          "Offset to probe markers in small size storage doesn't match "
+          "computed offset!");
+    }
 
     return &small_storage_;
   } else {
