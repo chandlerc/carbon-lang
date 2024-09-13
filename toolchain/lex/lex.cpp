@@ -6,6 +6,7 @@
 
 #include <array>
 #include <limits>
+#include <utility>
 
 #include "common/check.h"
 #include "common/variant_helpers.h"
@@ -177,9 +178,11 @@ class [[clang::internal_linkage]] Lexer {
 
   // Given a word that has already been lexed, determine whether it is a type
   // literal and if so form the corresponding token.
+  template <unsigned char FirstByte>
   auto LexWordAsTypeLiteralToken(llvm::StringRef word, int32_t byte_offset)
       -> LexResult;
 
+  template <unsigned char FirstByte>
   auto LexKeywordOrIdentifier(llvm::StringRef source_text, ssize_t& position)
       -> LexResult;
 
@@ -513,7 +516,6 @@ static auto DispatchNext(Lexer& lexer, llvm::StringRef source_text,
   }
 CARBON_DISPATCH_LEX_TOKEN(LexError)
 CARBON_DISPATCH_LEX_TOKEN(LexSymbolToken)
-CARBON_DISPATCH_LEX_TOKEN(LexKeywordOrIdentifier)
 CARBON_DISPATCH_LEX_TOKEN(LexHash)
 CARBON_DISPATCH_LEX_TOKEN(LexNumericLiteral)
 CARBON_DISPATCH_LEX_TOKEN(LexStringLiteral)
@@ -547,6 +549,16 @@ CARBON_DISPATCH_LEX_NON_TOKEN(LexVerticalWhitespace)
 CARBON_DISPATCH_LEX_NON_TOKEN(LexCR)
 CARBON_DISPATCH_LEX_NON_TOKEN(LexCommentOrSlash)
 
+template <unsigned char FirstByte>
+static auto DispatchLexKeywordOrIdentifier(Lexer& lexer,
+                                           llvm::StringRef source_text,
+                                           ssize_t position) -> void {
+  Lexer::LexResult result =
+      lexer.LexKeywordOrIdentifier<FirstByte>(source_text, position);
+  CARBON_CHECK(result, "Failed to form a token!");
+  [[clang::musttail]] return DispatchNext(lexer, source_text, position);
+}
+
 // Build a table of function pointers that we can use to dispatch to the
 // correct lexer routine based on the first byte of source text.
 //
@@ -578,7 +590,7 @@ CARBON_DISPATCH_LEX_NON_TOKEN(LexCommentOrSlash)
 // of the lexer. This is based on the technique described more fully for any
 // kind of byte-stream loop structure here:
 // https://blog.reverberate.org/2021/04/21/musttail-efficient-interpreters.html
-static constexpr auto MakeDispatchTable() -> DispatchTableT {
+static consteval auto MakeDispatchTable() -> DispatchTableT {
   DispatchTableT table = {};
   // First set the table entries to dispatch to our error token handler as the
   // base case. Everything valid comes from an override below.
@@ -613,22 +625,26 @@ static constexpr auto MakeDispatchTable() -> DispatchTableT {
   // symbol.
   table['/'] = &DispatchLexCommentOrSlash;
 
-  table['_'] = &DispatchLexKeywordOrIdentifier;
-  // Note that we don't use `llvm::seq` because this needs to be `constexpr`
-  // evaluated.
-  for (unsigned char c = 'a'; c <= 'z'; ++c) {
-    table[c] = &DispatchLexKeywordOrIdentifier;
-  }
-  for (unsigned char c = 'A'; c <= 'Z'; ++c) {
-    table[c] = &DispatchLexKeywordOrIdentifier;
-  }
+  table['_'] = &DispatchLexKeywordOrIdentifier<'_'>;
+
+  auto set_alpha_bytes_to_keyword_or_ident =
+      [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
+        ((table['a' + Is] = &DispatchLexKeywordOrIdentifier<'a' + Is>), ...);
+        ((table['A' + Is] = &DispatchLexKeywordOrIdentifier<'A' + Is>), ...);
+      };
+  set_alpha_bytes_to_keyword_or_ident(
+      std::make_index_sequence<'z' - 'a' + 1>());
+
   // We dispatch all non-ASCII UTF-8 characters to the identifier lexing
   // as whitespace characters should already have been skipped and the
   // only remaining valid Unicode characters would be part of an
   // identifier. That code can either accept or reject.
-  for (int i = 0x80; i < 0x100; ++i) {
-    table[i] = &DispatchLexKeywordOrIdentifier;
-  }
+  auto set_non_ascii_bytes_to_keyword_or_ident =
+      [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
+        ((table[0x80 + Is] = &DispatchLexKeywordOrIdentifier<0x80 + Is>), ...);
+      };
+  set_non_ascii_bytes_to_keyword_or_ident(
+      std::make_index_sequence<0x100 - 0x80>());
 
   for (unsigned char c = '0'; c <= '9'; ++c) {
     table[c] = &DispatchLexNumericLiteral;
@@ -1149,6 +1165,7 @@ auto Lexer::LexSymbolToken(llvm::StringRef source_text, ssize_t& position)
   return token;
 }
 
+template <unsigned char FirstByte>
 auto Lexer::LexWordAsTypeLiteralToken(llvm::StringRef word, int32_t byte_offset)
     -> LexResult {
   if (word.size() < 2) {
@@ -1161,7 +1178,7 @@ auto Lexer::LexWordAsTypeLiteralToken(llvm::StringRef word, int32_t byte_offset)
   }
 
   TokenKind kind;
-  switch (word.front()) {
+  switch (FirstByte) {
     case 'i':
       kind = TokenKind::IntTypeLiteral;
       break;
@@ -1189,14 +1206,18 @@ auto Lexer::LexWordAsTypeLiteralToken(llvm::StringRef word, int32_t byte_offset)
       byte_offset);
 }
 
+template <unsigned char FirstByte>
 auto Lexer::LexKeywordOrIdentifier(llvm::StringRef source_text,
                                    ssize_t& position) -> LexResult {
-  if (static_cast<unsigned char>(source_text[position]) > 0x7F) {
+  CARBON_DCHECK(
+      static_cast<unsigned char>(source_text[position]) == FirstByte,
+      "Did not find expected byte '{0:x}' at this position, found '{1:x}'",
+      FirstByte, source_text[position]);
+  if constexpr (FirstByte > 0x7F) {
     // TODO: Need to add support for Unicode lexing.
     return LexError(source_text, position);
   }
-  CARBON_CHECK(
-      IsIdStartByteTable[static_cast<unsigned char>(source_text[position])]);
+  CARBON_CHECK(IsIdStartByteTable[static_cast<unsigned char>(FirstByte)]);
 
   // Capture the position before we step past the token.
   int32_t byte_offset = position;
@@ -1209,18 +1230,18 @@ auto Lexer::LexKeywordOrIdentifier(llvm::StringRef source_text,
 
   // Check if the text is a type literal, and if so form such a literal.
   if (LexResult result =
-          LexWordAsTypeLiteralToken(identifier_text, byte_offset)) {
+          LexWordAsTypeLiteralToken<FirstByte>(identifier_text, byte_offset)) {
     return result;
   }
 
   // Check if the text matches a keyword token, and if so use that.
-  TokenKind kind = llvm::StringSwitch<TokenKind>(identifier_text)
-#define CARBON_KEYWORD_TOKEN(Name, Spelling) .Case(Spelling, TokenKind::Name)
-#include "toolchain/lex/token_kind.def"
-                       .Default(TokenKind::Error);
-  if (kind != TokenKind::Error) {
-    return LexToken(kind, byte_offset);
+#define CARBON_KEYWORD_TOKEN(Name, Spelling)                   \
+  if constexpr (Spelling[0] == FirstByte) {                    \
+    if (TokenKind::Name.fixed_spelling() == identifier_text) { \
+      return LexToken(TokenKind::Name, byte_offset);           \
+    }                                                          \
   }
+#include "toolchain/lex/token_kind.def"
 
   // Otherwise we have a generic identifier.
   return LexTokenWithPayload(
