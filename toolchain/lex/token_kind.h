@@ -25,6 +25,9 @@ class TokenKind : public CARBON_ENUM_BASE(TokenKind) {
 #define CARBON_TOKEN(TokenName) CARBON_ENUM_CONSTANT_DECL(TokenName)
 #include "toolchain/lex/token_kind.def"
 
+  // The number of keyword tokens.
+  static const int NumKeywordTokens;
+
   // An array of all the keyword tokens.
   static const llvm::ArrayRef<TokenKind> KeywordTokens;
 
@@ -136,6 +139,9 @@ constexpr TokenKind TokenKind::KeywordTokensStorage[] = {
 };
 constexpr llvm::ArrayRef<TokenKind> TokenKind::KeywordTokens =
     KeywordTokensStorage;
+
+constexpr int TokenKind::NumKeywordTokens =
+    sizeof(KeywordTokensStorage) / sizeof(TokenKind);
 
 }  // namespace Carbon::Lex
 

@@ -109,6 +109,8 @@ class [[clang::internal_linkage]] Lexer {
     return &buffer_.line_infos_[line_index_ + 1];
   }
 
+  auto PopulateKeywordIdentifierIds() -> void;
+
   // Note when the lexer has encountered whitespace, and the next lexed token
   // should reflect that it was preceded by some amount of whitespace.
   auto NoteWhitespace() -> void { has_leading_space_ = true; }
@@ -720,7 +722,10 @@ auto Lexer::Lex() && -> TokenizedBuffer {
   // size. This overshoot is usually fine for hot parts of the lexer where
   // latency is expected to be more important than minimizing memory usage.
   buffer_.value_stores_->identifiers().Reserve(
+      TokenKind::NumKeywordTokens +
       EstimateUpperBoundOnNumIdentifiers(buffer_.line_infos_.size()));
+
+  PopulateKeywordIdentifierIds();
 
   ssize_t position = 0;
   LexFileStart(source_text, position);
@@ -778,6 +783,18 @@ auto Lexer::MakeLines(llvm::StringRef source_text) -> void {
   // Now that all the infos are allocated, get a fresh pointer to the first
   // info for use while lexing.
   line_index_ = 0;
+}
+
+auto Lexer::PopulateKeywordIdentifierIds() -> void {
+  // We populate the first N identifiers with Carbon keywords so that we can use
+  // the identifier hash table for lexing of keywords as well as identifiers.
+  for (TokenKind kw_token : TokenKind::KeywordTokens) {
+    auto kw_id =
+        buffer_.value_stores_->identifiers().Add(kw_token.fixed_spelling());
+    CARBON_CHECK(kw_id.index < TokenKind::NumKeywordTokens);
+    CARBON_CHECK(buffer_.value_stores_->identifiers().Get(kw_id) ==
+                 TokenKind::KeywordTokens[kw_id.index].fixed_spelling());
+  }
 }
 
 auto Lexer::SkipHorizontalWhitespace(llvm::StringRef source_text,
@@ -1213,20 +1230,16 @@ auto Lexer::LexKeywordOrIdentifier(llvm::StringRef source_text,
     return result;
   }
 
-  // Check if the text matches a keyword token, and if so use that.
-  TokenKind kind = llvm::StringSwitch<TokenKind>(identifier_text)
-#define CARBON_KEYWORD_TOKEN(Name, Spelling) .Case(Spelling, TokenKind::Name)
-#include "toolchain/lex/token_kind.def"
-                       .Default(TokenKind::Error);
-  if (kind != TokenKind::Error) {
-    return LexToken(kind, byte_offset);
+  auto ident_id = buffer_.value_stores_->identifiers().Add(identifier_text);
+  if (ident_id.index < TokenKind::NumKeywordTokens) {
+    // The first identifier indices are reserved for tokens, and directly
+    // correspond to that token keyword.
+    return LexToken(TokenKind::KeywordTokens[ident_id.index], byte_offset);
   }
 
   // Otherwise we have a generic identifier.
-  return LexTokenWithPayload(
-      TokenKind::Identifier,
-      buffer_.value_stores_->identifiers().Add(identifier_text).index,
-      byte_offset);
+  return LexTokenWithPayload(TokenKind::Identifier, ident_id.index,
+                             byte_offset);
 }
 
 auto Lexer::LexHash(llvm::StringRef source_text, ssize_t& position)

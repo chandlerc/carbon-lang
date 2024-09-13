@@ -83,5 +83,9 @@ TEST(TokenKindTest, SymbolsInDescendingLength) {
   EXPECT_GT(previous_length, 0);
 }
 
+TEST(TokenKindTest, NumKeywordTokens) {
+  EXPECT_EQ(TokenKind::KeywordTokens.size(), TokenKind::NumKeywordTokens);
+}
+
 }  // namespace
 }  // namespace Carbon::Lex
