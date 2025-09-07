@@ -204,6 +204,14 @@ install_dirs = {
     ],
     "lib/carbon/llvm/lib/clang/" + LLVM_VERSION_MAJOR + "/src": [
         install_filegroup("builtins", ":clang_builtins_runtimes", "lib/builtins/"),
+
+        # Include header only libraries used by runtimes. While listed as
+        # third-party, this is under the LLVM license.
+        install_filegroup(
+            "siphash",
+            "@llvm-project//third-party/siphash:siphash_header",
+            "include/siphash",
+        ),
     ],
 }
 

@@ -96,8 +96,35 @@ def _builtins_path(file):
     # The CompilerRT package has the builtins runtime sources in the
     # "lib/builtins/" subdirectory, and we install into a "builtins/"
     # subdirectory, so just remove the "lib/" prefix from the package-relative
-    # label name.
-    return file.owner.name.removeprefix("lib/")
+    # file name. However, we need to handle both normal files and generated
+    # files and so we have to find the package name in the path manually.
+
+    # First, locate the repo name in the short path and remove everything before
+    # that and the repo name. This ensures we don't have to worry about
+    # collisions between package name and the contents of the repo path or
+    # anything before it.
+    path = file.short_path
+    repo_index = path.rfind(file.owner.repo_name)
+    if repo_index != -1:
+        path = path[repo_index + len(file.owner.repo_name):]
+
+    # Then remove the package name and everything before that.
+    pkg_index = path.rfind(file.owner.package)
+    if pkg_index != -1:
+        path = path[pkg_index + len(file.owner.package):]
+
+        # Ensure the package is separated by a `/` from the rest of the path.
+        if not path.startswith("/"):
+            fail(msg = "Invalid path after package name: {0}".format(file.short_path))
+
+        # And remove that `/`.
+        path = path.removeprefix("/")
+
+    # Ensure we ended up with the `lib` subdirectory under the package, and
+    # remove that to have the correct relative path.
+    if not path.startswith("lib/"):
+        fail(msg = "Invalid path: {0}".format(file.short_path))
+    return path.removeprefix("lib/")
 
 def _get_path(file_attr, to_path_fn):
     files = file_attr[DefaultInfo].files.to_list()

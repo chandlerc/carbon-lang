@@ -22,6 +22,7 @@
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "common/filesystem.h"
+#include "common/set.h"
 #include "common/vlog.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -387,9 +388,9 @@ auto ClangRunner::BuildCrtFile(llvm::StringRef target, llvm::StringRef src_file,
       "-O3",
       "-fPIC",
       "-ffreestanding",
-      "-std=c11",
       "-w",
       "-c",
+      "-std=c17",
       "-o",
       out_path.native(),
       src_path.native(),
@@ -403,7 +404,8 @@ auto ClangRunner::CollectBuiltinsSrcFiles(const llvm::Triple& target_triple)
       [&](auto input_srcs,
           llvm::function_ref<bool(llvm::StringRef)> filter_out = {}) {
         for (llvm::StringRef input_src : input_srcs) {
-          if (!input_src.ends_with(".c") && !input_src.ends_with(".S")) {
+          if (!input_src.ends_with(".c") && !input_src.ends_with(".S") &&
+              !input_src.ends_with(".s") && !input_src.ends_with(".cpp")) {
             // Not a compiled file.
             continue;
           }
@@ -415,13 +417,10 @@ auto ClangRunner::CollectBuiltinsSrcFiles(const llvm::Triple& target_triple)
           src_files.push_back(input_src);
         }
       };
-  append_src_files(llvm::ArrayRef(RuntimeSources::BuiltinsGenericSrcs));
-  append_src_files(llvm::ArrayRef(RuntimeSources::BuiltinsBf16Srcs));
-  if (target_triple.isArch64Bit()) {
-    append_src_files(llvm::ArrayRef(RuntimeSources::BuiltinsTfSrcs));
-  }
+
+  // First add architecture-specific sources.
   auto filter_out_chkstk = [&](llvm::StringRef src) {
-    return !target_triple.isOSWindows() || !src.ends_with("chkstk.S");
+    return !target_triple.isOSWindows() && src.ends_with("chkstk.S");
   };
   if (target_triple.isAArch64()) {
     append_src_files(llvm::ArrayRef(RuntimeSources::BuiltinsAarch64Srcs),
@@ -446,6 +445,26 @@ auto ClangRunner::CollectBuiltinsSrcFiles(const llvm::Triple& target_triple)
     CARBON_FATAL("Target architecture is not supported: {0}",
                  target_triple.str());
   }
+
+  // Now add generic sources, but only if there wasn't an architecture specific
+  // one with the same base name.
+  Set<std::filesystem::path> arch_base_names;
+  for (llvm::StringRef arch_src : src_files) {
+    std::filesystem::path src_path = arch_src.str();
+    arch_base_names.Insert(src_path.stem());
+  }
+  auto filter_out_existing_base_name = [&](llvm::StringRef src) {
+    std::filesystem::path src_path = src.str();
+    return arch_base_names.Contains(src_path.stem());
+  };
+  append_src_files(llvm::ArrayRef(RuntimeSources::BuiltinsGenericSrcs),
+                   filter_out_existing_base_name);
+  append_src_files(llvm::ArrayRef(RuntimeSources::BuiltinsBf16Srcs),
+                   filter_out_existing_base_name);
+  if (target_triple.isArch64Bit()) {
+    append_src_files(llvm::ArrayRef(RuntimeSources::BuiltinsTfSrcs),
+                     filter_out_existing_base_name);
+  }
   return src_files;
 }
 
@@ -453,12 +472,18 @@ auto ClangRunner::BuildBuiltinsFile(llvm::StringRef target,
                                     llvm::StringRef src_file,
                                     const std::filesystem::path& out_path)
     -> void {
-  std::filesystem::path src_path =
-      installation_->llvm_runtime_srcs() / std::string_view(src_file);
-  CARBON_VLOG("Building `{0}' from `{1}`...\n", out_path, src_path);
+  // The runtime sources path may be used to include files from other runtimes
+  // trees.
+  std::filesystem::path srcs_path = installation_->llvm_runtime_srcs();
+  // And the builtins path may be used to include files from the builtins
+  // without any prefix.
+  std::filesystem::path builtins_path = srcs_path / "builtins";
+
+  std::filesystem::path src_file_path = srcs_path / std::string_view(src_file);
+  CARBON_VLOG("Building `{0}' from `{1}`...\n", out_path, src_file_path);
 
   std::string target_arg = llvm::formatv("--target={0}", target).str();
-  CARBON_CHECK(RunTargetIndependentCommand({
+  llvm::SmallVector<llvm::StringRef> args = {
       "-no-canonical-prefixes",
       target_arg,
       "-O3",
@@ -467,13 +492,27 @@ auto ClangRunner::BuildBuiltinsFile(llvm::StringRef target,
       "-fno-builtin",
       "-fomit-frame-pointer",
       "-fvisibility=hidden",
-      "-std=c11",
+      "-iquote",
+      builtins_path.native(),
+      "-iquote",
+      srcs_path.native(),
       "-w",
       "-c",
       "-o",
       out_path.native(),
-      src_path.native(),
-  }));
+  };
+
+  // For C and C++ files, get the most recent well supported standard version.
+  if (src_file.ends_with(".c")) {
+    args.push_back("-std=c17");
+  } else if (src_file.ends_with(".cpp")) {
+    args.push_back("-std=c++20");
+  }
+
+  // Put the input file last.
+  args.push_back(src_file_path.native());
+
+  CARBON_CHECK(RunTargetIndependentCommand(args));
 }
 
 auto ClangRunner::BuildBuiltinsLib(llvm::StringRef target,

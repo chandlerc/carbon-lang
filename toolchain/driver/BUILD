@@ -27,6 +27,7 @@ cc_library(
         "//common:error",
         "//common:filesystem",
         "//common:ostream",
+        "//common:set",
         "//common:vlog",
         "//toolchain/base:runtime_sources",
         "//toolchain/install:install_paths",
