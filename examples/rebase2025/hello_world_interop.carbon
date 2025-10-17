@@ -1,0 +1,16 @@
+// Part of the Carbon Language project, under the Apache License v2.0 with LLVM
+// Exceptions. See /LICENSE for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+import Cpp inline "#include <cstdio>";
+
+fn Run() -> i32 {
+  let message: array(char, 13) =
+      ('H', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '!', '\n');
+  for (c: char in message) {
+    // TODO: u8 should probably have an implicit cast to i32.
+    Cpp.putchar((c as u8) as i32);
+  }
+
+  return 0;
+}
