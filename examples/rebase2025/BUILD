@@ -32,6 +32,7 @@ carbon_binary(
 carbon_binary(
     name = "interop4",
     srcs = ["interop4.carbon"],
+    tags = ["manual"],
 )
 
 carbon_binary(

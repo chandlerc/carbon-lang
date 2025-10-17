@@ -4,13 +4,13 @@
 
 import Core library "io";
 
-import Cpp inline '''
+import Cpp inline #'''c++
 
 auto GetNumber() -> int {
   return 42;
 }
 
-''';
+'''#;
 
 fn Run() -> i32 {
   let x: i32 = Cpp.GetNumber();

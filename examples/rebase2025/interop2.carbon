@@ -4,14 +4,14 @@
 
 import Core library "io";
 
-import Cpp inline '''
+import Cpp inline #'''c++
 
 auto Double(int value) -> int { return value * 2; }
 auto Double(float value) -> float { return value * 2.0f; }
 
 auto Round(float value) -> int { return static_cast<int>(value); }
 
-''';
+'''#;
 
 fn Run() -> i32 {
   let x: i32 = Cpp.Double(21);

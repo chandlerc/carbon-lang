@@ -4,7 +4,7 @@
 
 import Core library "io";
 
-import Cpp inline '''
+import Cpp inline #'''c++
 
 class Point {
  public:
@@ -21,7 +21,7 @@ class Point {
   int y_;
 };
 
-''';
+'''#;
 
 fn Run() -> i32 {
   var p: Cpp.Point = Cpp.Point.Point(1, 2);
