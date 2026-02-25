@@ -248,13 +248,13 @@ configure_cmake_file(
     },
 )
 
-filegroup(
-    name = "libcxx",
-    srcs = [
-        "@llvm-project//libcxx:libcxx_hdrs",
-        "@llvm-project//libcxx:libcxx_srcs",
-    ],
-)
+#filegroup(
+#    name = "libcxx",
+#    srcs = [
+#        "@llvm-project//libcxx:libcxx_hdrs",
+#        "@llvm-project//libcxx:libcxx_srcs",
+#    ],
+#)
 
 filegroup(
     name = "libcxx_gen_files",
@@ -353,7 +353,7 @@ install_dirs = {
             ":clang_builtins_runtimes",
             remove_prefix = "lib/builtins/",
         ),
-        install_filegroup("libcxx", ":libcxx"),
+        install_filegroup("libcxx", "@llvm-project//libcxx:libcxx_srcs"),
         install_filegroup("libcxxabi", ":libcxxabi"),
         install_filegroup("libunwind", ":libunwind"),
     ],
@@ -362,9 +362,16 @@ install_dirs = {
     ],
     "lib/carbon/runtimes/libcxx": [
         install_filegroup(
-            "include",
+            "include_hdrs",
+            "@llvm-project//libcxx:libcxx_hdrs",
+            remove_prefix = "include/",
+            install_prefix = "include/",
+        ),
+        install_filegroup(
+            "include_generated_hdrs",
             ":libcxx_gen_files",
             remove_prefix = "staging_libcxx/include/",
+            install_prefix = "include/",
         ),
     ],
     "lib/carbon/llvm/lib/clang/" + LLVM_VERSION_MAJOR: [
@@ -396,16 +403,16 @@ install_dirs = {
 make_install_filegroups(
     name = "install_data",
     install_dirs = install_dirs,
-    no_digest_name = "install_data.no_digest",
-    no_driver_name = "install_data.no_driver",
-    pkg_name = "pkg_data",
-    prefix = "prefix",
     install_path_filegroups = {
-        "install_data_libcxx": "lib/carbon/runtimes/libcxx",
+        "install_data_libcxx": "lib/carbon/runtimes/libcxx/include",
         "install_data_libcxxabi": "lib/carbon/runtimes/libcxxabi",
         "install_data_libunwind": "lib/carbon/runtimes/libunwind",
         "install_clang_headers": "lib/carbon/llvm/lib/clang/" + LLVM_VERSION_MAJOR,
     },
+    no_digest_name = "install_data.no_digest",
+    no_driver_name = "install_data.no_driver",
+    pkg_name = "pkg_data",
+    prefix = "prefix",
 )
 
 py_test(
@@ -463,16 +470,19 @@ manifest(
     srcs = [":install_clang_headers"],
     strip_package_dir = True,
 )
+
 manifest(
     name = "libcxx_headers_manifest.txt",
     srcs = [":install_data_libcxx"],
     strip_package_dir = True,
 )
+
 manifest(
     name = "libcxxabi_headers_manifest.txt",
     srcs = [":install_data_libcxxabi"],
     strip_package_dir = True,
 )
+
 manifest(
     name = "libunwind_headers_manifest.txt",
     srcs = [":install_data_libunwind"],

@@ -69,6 +69,10 @@ static auto GetSharedTestData(llvm::StringRef exe_path)
     for (const auto& file : clang_header_files) {
       CARBON_RETURN_IF_ERROR(AddFile(*data.file_system, file));
     }
+
+    // FIXME: Teach the installation to have `.ReadLibcxxHeadersManifest`, and
+    // then use that to loop over the headers and add them to the VFS.
+
     return data;
   }();
   CARBON_CHECK(data.ok(), "{0}", data.error());
