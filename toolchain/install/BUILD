@@ -371,7 +371,6 @@ install_dirs = {
         install_filegroup(
             "include",
             ":clang_headers",
-            label = "installed_clang_headers",
             remove_prefix = "staging/include/",
         ),
     ],
@@ -401,6 +400,12 @@ make_install_filegroups(
     no_driver_name = "install_data.no_driver",
     pkg_name = "pkg_data",
     prefix = "prefix",
+    install_path_filegroups = {
+        "install_data_libcxx": "lib/carbon/runtimes/libcxx",
+        "install_data_libcxxabi": "lib/carbon/runtimes/libcxxabi",
+        "install_data_libunwind": "lib/carbon/runtimes/libunwind",
+        "install_clang_headers": "lib/carbon/llvm/lib/clang/" + LLVM_VERSION_MAJOR,
+    },
 )
 
 py_test(
@@ -455,7 +460,22 @@ genrule(
 # This is consumed by //toolchain/testing:file_test.
 manifest(
     name = "clang_headers_manifest.txt",
-    srcs = [":installed_clang_headers"],
+    srcs = [":install_clang_headers"],
+    strip_package_dir = True,
+)
+manifest(
+    name = "libcxx_headers_manifest.txt",
+    srcs = [":install_data_libcxx"],
+    strip_package_dir = True,
+)
+manifest(
+    name = "libcxxabi_headers_manifest.txt",
+    srcs = [":install_data_libcxxabi"],
+    strip_package_dir = True,
+)
+manifest(
+    name = "libunwind_headers_manifest.txt",
+    srcs = [":install_data_libunwind"],
     strip_package_dir = True,
 )
 

@@ -64,6 +64,12 @@ file_test(
         ":min_prelude",
         "//toolchain/install:clang_headers",
         "//toolchain/install:clang_headers_manifest.txt",
+        "//toolchain/install:install_data_libcxx",
+        "//toolchain/install:libcxx_headers_manifest.txt",
+        "//toolchain/install:install_data_libcxxabi",
+        "//toolchain/install:libcxxabi_headers_manifest.txt",
+        "//toolchain/install:install_data_libunwind",
+        "//toolchain/install:libunwind_headers_manifest.txt",
     ],
     tests = [":all_testdata"],
     deps = [

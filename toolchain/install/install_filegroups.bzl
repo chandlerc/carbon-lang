@@ -69,7 +69,43 @@ def install_target(name, target, executable = False, is_driver = False, is_diges
         "target": target,
     }
 
-def make_install_filegroups(name, no_digest_name, no_driver_name, pkg_name, install_dirs, prefix):
+def count(sequence, value):
+    """Returns how many occurrences of `value` are in `sequence`.
+
+    Args:
+        sequence: A sequence of elements.
+        value: The element to count.
+    """
+    n = 0
+    for i in sequence:
+        if i == value:
+            n += 1
+    return n
+
+def count_subdirs(path):
+    """Returns how many subdirectories a path contains."""
+    return path.count("/") if path != "/" else 0
+
+def propagate_labels_up(prefixes_to_labels):
+    """Adds labels from subpaths to their parents.
+
+    Args:
+        prefixes_to_labels: A dictionary of paths that are mapped to labels.
+    Returns:
+        prefixes_to_labels, with labels from any subdirectories propagated to
+        parent directories.
+    """
+    for path in sorted(prefixes_to_labels.keys(), key=count_subdirs, reverse=True):
+        parent = path[:path.rfind('/')]
+        if not parent:
+            return prefixes_to_labels
+        prefixes_to_labels.setdefault(parent, set())
+        prefixes_to_labels[parent]=prefixes_to_labels[parent].union(prefixes_to_labels[path])
+    for i in prefixes_to_labels.keys():
+        prefixes_to_labels[i] = list(prefixes_to_labels[i])
+    return prefixes_to_labels
+
+def make_install_filegroups(name, no_digest_name, no_driver_name, pkg_name, install_dirs, install_path_filegroups, prefix):
     """Makes filegroups of install data.
 
     Args:
@@ -82,12 +118,16 @@ def make_install_filegroups(name, no_digest_name, no_driver_name, pkg_name, inst
       pkg_name: The name of a pkg_filegroup for tar.
       install_dirs: A dict of {directory: [install_* rules]}. This is used to
         structure files to be installed.
+      install_path_filegroups: TODO
       prefix: A prefix for files in the native (non-pkg) filegroups.
     """
     all_srcs = []
     no_driver_srcs = []
     no_digest_srcs = []
     pkg_srcs = []
+    prefixes_to_labels = {
+        prefix: set()
+    }
 
     for dir, entries in install_dirs.items():
         for entry in entries:
@@ -100,8 +140,10 @@ def make_install_filegroups(name, no_digest_name, no_driver_name, pkg_name, inst
             if not entry["is_digest"]:
                 no_digest_srcs.append(prefixed_path)
 
-            pkg_label = entry.get("label") or path + ".pkg"
+            pkg_label = path + ".pkg"
             pkg_srcs.append(pkg_label)
+            prefixes_to_labels.setdefault(prefixed_path, set())
+            prefixes_to_labels[prefixed_path].add(pkg_label)
 
             if "target" in entry:
                 if entry["executable"]:
@@ -160,7 +202,16 @@ def make_install_filegroups(name, no_digest_name, no_driver_name, pkg_name, inst
                 )
             else:
                 fail("Unrecognized structure: {0}".format(entry))
+
+    prefixes_to_labels = propagate_labels_up(prefixes_to_labels)
+
     native.filegroup(name = name, srcs = all_srcs)
     native.filegroup(name = no_driver_name, srcs = no_driver_srcs)
     native.filegroup(name = no_digest_name, srcs = no_digest_srcs)
+    for desired_label, desired_prefix in install_path_filegroups.items():
+        srcs = prefixes_to_labels["{}/{}".format(prefix, desired_prefix)]
+        native.filegroup(
+            name = desired_label,
+            srcs = srcs
+        )
     pkg_filegroup(name = pkg_name, srcs = pkg_srcs)
