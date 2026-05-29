@@ -42,6 +42,11 @@ static auto SumSizes(const T& range) -> ssize_t {
   return sum;
 }
 
+// Counts the number of lines (newline characters) in some source text.
+static auto CountLines(llvm::StringRef source) -> ssize_t {
+  return llvm::count(source, '\n');
+}
+
 TEST(SourceGenTest, Identifiers) {
   SourceGen gen;
 
@@ -272,6 +277,160 @@ TEST(SourceGenTest, GenApiFileDenseDeclsCppTest) {
 
   // TODO: When the driver supports compiling C++ code as easily as Carbon, we
   // should test that the generated C++ code is valid.
+}
+
+// The central benchmarking invariant: for a fixed language, line target, and
+// generation parameters, the generated source must always have the exact same
+// number of lines and bytes regardless of the random seed, even though the
+// actual content (identifiers, ordering) differs from run to run. This is what
+// makes the generated code usable for stable, comparable benchmarking.
+TEST(SourceGenTest, GenApiFileDenseDeclsStableSizeAcrossSeeds) {
+  for (SourceGen::Language language :
+       {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+    // A spread of line targets large enough to fit at least one class up
+    // through reasonably large files.
+    for (int target_lines : {200, 1000, 5000, 20000}) {
+      std::optional<size_t> expected_bytes;
+      std::optional<ssize_t> expected_lines;
+      std::optional<std::string> first_source;
+      bool any_different = false;
+
+      constexpr int NumSeeds = 16;
+      for (int _ : llvm::seq(NumSeeds)) {
+        // A fresh generator gets an independent random seed.
+        SourceGen gen(language);
+        std::string source = gen.GenApiFileDenseDecls(
+            target_lines, SourceGen::DenseDeclParams{});
+
+        if (!expected_bytes) {
+          expected_bytes = source.size();
+          expected_lines = CountLines(source);
+          first_source = source;
+          continue;
+        }
+        EXPECT_THAT(source.size(), Eq(*expected_bytes))
+            << "Byte count varied across seeds for language="
+            << static_cast<int>(language) << " target_lines=" << target_lines;
+        EXPECT_THAT(CountLines(source), Eq(*expected_lines))
+            << "Line count varied across seeds for language="
+            << static_cast<int>(language) << " target_lines=" << target_lines;
+        if (source != *first_source) {
+          any_different = true;
+        }
+      }
+      // Sanity check that we really are shuffling content across seeds,
+      // otherwise the invariance check above is meaningless.
+      EXPECT_TRUE(any_different)
+          << "Expected different source across seeds for language="
+          << static_cast<int>(language) << " target_lines=" << target_lines;
+    }
+  }
+}
+
+// Like the above, but exercises non-default class parameters to check that the
+// stable-size invariant holds for the general machinery and not just the
+// default shape of classes. Different parameters produce different sizes, but
+// for any fixed set of parameters the size must be seed-independent.
+TEST(SourceGenTest, GenApiFileDenseDeclsStableSizeWithVariedParams) {
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  // Many small functions with no parameters and no fields.
+  param_set.push_back({.class_params = {.public_function_decls = 20,
+                                        .public_method_decls = 0,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 0}});
+  // Methods with large parameter counts to exercise line-wrapping heuristics.
+  param_set.push_back(
+      {.class_params = {.public_function_decls = 2,
+                        .public_function_decl_params = {.max_params = 16},
+                        .public_method_decls = 4,
+                        .public_method_decl_params = {.max_params = 16},
+                        .private_function_decls = 0,
+                        .private_method_decls = 0,
+                        .private_field_decls = 0}});
+  // The default shape, scaled up, keeping the default proportion of fields.
+  param_set.push_back({.class_params = {.public_function_decls = 8,
+                                        .public_method_decls = 20,
+                                        .private_function_decls = 4,
+                                        .private_method_decls = 16,
+                                        .private_field_decls = 12}});
+
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    for (SourceGen::Language language :
+         {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+      std::optional<size_t> expected_bytes;
+      std::optional<ssize_t> expected_lines;
+      constexpr int NumSeeds = 12;
+      for (int _ : llvm::seq(NumSeeds)) {
+        SourceGen gen(language);
+        std::string source = gen.GenApiFileDenseDecls(5000, params);
+        if (!expected_bytes) {
+          expected_bytes = source.size();
+          expected_lines = CountLines(source);
+          continue;
+        }
+        EXPECT_THAT(source.size(), Eq(*expected_bytes));
+        EXPECT_THAT(CountLines(source), Eq(*expected_lines));
+      }
+    }
+  }
+}
+
+// Stresses the type-name validity constraints with field-heavy classes. Fields
+// cannot reference the class currently being defined (nor any not-yet-defined
+// class), so when most type uses are fields an unlucky shuffle could once leave
+// the final class with no valid field type and crash `GetValidTypeName`. The
+// generator caps how often each class is referenced to make this robust for any
+// seed; this test guards that behavior across many seeds and extreme shapes,
+// while also confirming the byte and line counts stay stable and the result
+// still compiles.
+TEST(SourceGenTest, GenApiFileDenseDeclsRobustForFieldHeavyParams) {
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  // Many fields with only a couple of functions/methods to absorb references.
+  param_set.push_back({.class_params = {.public_function_decls = 1,
+                                        .public_method_decls = 1,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 30}});
+  // A single method with a very large number of fields.
+  param_set.push_back({.class_params = {.public_function_decls = 0,
+                                        .public_method_decls = 1,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 50}});
+  // Fields only: no functions or methods at all, so no class can be referenced
+  // as a type and every type use must fall back to a fixed type.
+  param_set.push_back({.class_params = {.public_function_decls = 0,
+                                        .public_method_decls = 0,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 16}});
+
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    for (SourceGen::Language language :
+         {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+      std::optional<size_t> expected_bytes;
+      std::optional<ssize_t> expected_lines;
+      // The historical failure was shuffle-dependent, so use many seeds.
+      constexpr int NumSeeds = 32;
+      for (int _ : llvm::seq(NumSeeds)) {
+        SourceGen gen(language);
+        std::string source = gen.GenApiFileDenseDecls(3000, params);
+        if (!expected_bytes) {
+          expected_bytes = source.size();
+          expected_lines = CountLines(source);
+          // The generated Carbon must remain valid: every emitted field type
+          // must be a fixed type or an already-declared class.
+          if (language == SourceGen::Language::Carbon) {
+            EXPECT_TRUE(TestCompile(source));
+          }
+          continue;
+        }
+        EXPECT_THAT(source.size(), Eq(*expected_bytes));
+        EXPECT_THAT(CountLines(source), Eq(*expected_lines));
+      }
+    }
+  }
 }
 
 }  // namespace
