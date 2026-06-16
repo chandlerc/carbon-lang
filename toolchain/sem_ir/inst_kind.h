@@ -240,9 +240,12 @@ enum class InstConstantKind : int8_t {
 enum class InstConstantNeedsInstIdKind : int8_t {
   // This instruction kind doesn't need an InstId to be evaluated.
   No,
-  // This instruction needs an InstId during evaluation, but doesn't need the
-  // instruction to persist after evaluation.
-  DuringEvaluation,
+  // This instruction kind doesn't need an InstId to be evaluated, but
+  // evaluating it can produce diagnostics, which need a location and may refer
+  // to the instruction's original, unevaluated operands. Evaluation is given
+  // the original instruction and a location instead of an InstId, so the
+  // instruction need not be allocated.
+  LocOnly,
   // This instruction needs a permanent instruction ID, for example because that
   // instruction ID can appear in the constant result of evaluation.
   Permanent,

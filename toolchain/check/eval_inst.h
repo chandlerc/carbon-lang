@@ -122,19 +122,32 @@ constexpr auto ConstantKindHasEvalConstantInst(SemIR::InstConstantKind kind)
 
 // Given an instruction kind, determines the type that should be used to declare
 // `EvalConstantInst` for that instruction.
-template <typename InstT, bool HasFn, bool HasInstId>
+template <typename InstT, bool HasFn,
+          SemIR::InstConstantNeedsInstIdKind NeedsInstId>
 struct FunctionTypeForEvalConstantInstImpl {
   // By default, we want no `EvalConstantInst` function at all. But we can't
   // express that, so use the type `auto () -> void` as a placeholder.
   using Type = auto() -> void;
 };
 template <typename InstT>
-struct FunctionTypeForEvalConstantInstImpl<InstT, true, false> {
+struct FunctionTypeForEvalConstantInstImpl<
+    InstT, true, SemIR::InstConstantNeedsInstIdKind::No> {
   // Can be evaluated, evaluation doesn't need InstId.
   using Type = auto(Context& context, InstT inst) -> ConstantEvalResult;
 };
 template <typename InstT>
-struct FunctionTypeForEvalConstantInstImpl<InstT, true, true> {
+struct FunctionTypeForEvalConstantInstImpl<
+    InstT, true, SemIR::InstConstantNeedsInstIdKind::LocOnly> {
+  // Can be evaluated, evaluation doesn't need InstId, but needs a location
+  // and the original instruction for diagnostics. `orig_inst` is the
+  // instruction prior to its operands being replaced by their evaluated
+  // values.
+  using Type = auto(Context& context, SemIR::LocId loc_id, InstT orig_inst,
+                    InstT inst) -> ConstantEvalResult;
+};
+template <typename InstT>
+struct FunctionTypeForEvalConstantInstImpl<
+    InstT, true, SemIR::InstConstantNeedsInstIdKind::Permanent> {
   // Can be evaluated, evaluation needs InstId.
   using Type = auto(Context& context, SemIR::InstId inst_id, InstT inst)
       -> ConstantEvalResult;
@@ -143,8 +156,7 @@ template <typename InstT>
 using FunctionTypeForEvalConstantInst =
     typename FunctionTypeForEvalConstantInstImpl<
         InstT, ConstantKindHasEvalConstantInst(InstT::Kind.constant_kind()),
-        InstT::Kind.constant_needs_inst_id() !=
-            SemIR::InstConstantNeedsInstIdKind::No>::Type;
+        InstT::Kind.constant_needs_inst_id()>::Type;
 
 }  // namespace Internal
 
@@ -171,16 +183,23 @@ auto EvalConstantInst() -> void = delete;
 // context itself. Those cases are handled by explicit specialization of
 // `TryEvalTypedInst` in `eval.cpp` instead.
 //
-// The signature of an overload is
+// The signature of an overload depends on
+// `InstT::Kind.constant_needs_inst_id()`. For `Permanent`, it is
 //
 //   auto EvalConstantInst(Context& context, SemIR::InstId inst_id, InstT inst)
 //       -> ConstantEvalResult;
 //
-// if `InstT::Kind.constant_needs_inst_id()` is true, and
+// For `LocOnly`, the overload receives a location for any diagnostics and the
+// original instruction whose operands haven't been replaced by their evaluated
+// values, rather than an `InstId`, so that evaluation doesn't require the
+// instruction to be allocated:
+//
+//   auto EvalConstantInst(Context& context, SemIR::LocId loc_id,
+//                         InstT orig_inst, InstT inst) -> ConstantEvalResult;
+//
+// For `No`, it is
 //
 //   auto EvalConstantInst(Context& context, InstT inst) -> ConstantEvalResult;
-//
-// otherwise.
 //
 // Overloads are *declared* for all types, because there isn't a good way to
 // declare only the overloads we want here without duplicating the list of

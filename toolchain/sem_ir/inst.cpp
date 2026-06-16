@@ -149,6 +149,11 @@ auto LocIdAndInst::RuntimeVerified(const File& file, LocId loc_id, Inst inst)
       break;
 
     case LocId::Kind::NodeId: {
+      // A desugared location doesn't directly represent the node, so any
+      // instruction kind can be generated for it.
+      if (loc_id.is_desugared()) {
+        break;
+      }
       auto node_kind = file.parse_tree().node_kind(loc_id.node_id());
       CARBON_CHECK(inst.kind().IsAllowedNodeKind(node_kind),
                    "Unexpected `NodeKind` {0} for {1}", node_kind, inst);

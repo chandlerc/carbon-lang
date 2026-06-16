@@ -107,7 +107,7 @@ struct AccessOptionalMemberAction {
 struct AcquireValue {
   static constexpr auto Kind = InstKind::AcquireValue.Define<Parse::NodeId>({
       .ir_name = "acquire_value",
-      .constant_needs_inst_id = InstConstantNeedsInstIdKind::DuringEvaluation,
+      .constant_needs_inst_id = InstConstantNeedsInstIdKind::LocOnly,
   });
 
   TypeId type_id;
@@ -182,7 +182,7 @@ struct ArrayType {
       {.ir_name = "array_type",
        .is_type = InstIsType::Always,
        .constant_kind = InstConstantKind::Conditional,
-       .constant_needs_inst_id = InstConstantNeedsInstIdKind::DuringEvaluation,
+       .constant_needs_inst_id = InstConstantNeedsInstIdKind::LocOnly,
        .deduce_through = true});
 
   TypeId type_id;
@@ -378,8 +378,7 @@ struct Call {
        .expr_category = ComputedExprCategory::DependsOnOperands,
        .is_type = InstIsType::Maybe,
        .constant_kind = InstConstantKind::SymbolicOnly,
-       .constant_needs_inst_id =
-           InstConstantNeedsInstIdKind::DuringEvaluation});
+       .constant_needs_inst_id = InstConstantNeedsInstIdKind::LocOnly});
 
   TypeId type_id;
   InstId callee_id;
@@ -771,7 +770,7 @@ struct FloatType {
       {.ir_name = "float_type",
        .is_type = InstIsType::Always,
        .constant_kind = InstConstantKind::Conditional,
-       .constant_needs_inst_id = InstConstantNeedsInstIdKind::DuringEvaluation,
+       .constant_needs_inst_id = InstConstantNeedsInstIdKind::LocOnly,
        .deduce_through = true});
 
   TypeId type_id;
@@ -953,8 +952,7 @@ struct ImplWitnessAccess {
           {.ir_name = "impl_witness_access",
            .is_type = InstIsType::Maybe,
            .constant_kind = InstConstantKind::Conditional,
-           .constant_needs_inst_id =
-               InstConstantNeedsInstIdKind::DuringEvaluation,
+           .constant_needs_inst_id = InstConstantNeedsInstIdKind::LocOnly,
            .is_lowered = false});
 
   TypeId type_id;
@@ -1199,7 +1197,7 @@ struct IntType {
       {.ir_name = "int_type",
        .is_type = InstIsType::Always,
        .constant_kind = InstConstantKind::Conditional,
-       .constant_needs_inst_id = InstConstantNeedsInstIdKind::DuringEvaluation,
+       .constant_needs_inst_id = InstConstantNeedsInstIdKind::LocOnly,
        .deduce_through = true});
 
   TypeId type_id;
@@ -1229,8 +1227,7 @@ struct LookupImplWitness {
       InstKind::LookupImplWitness.Define<Parse::NodeId>(
           {.ir_name = "lookup_impl_witness",
            .constant_kind = InstConstantKind::Conditional,
-           .constant_needs_inst_id =
-               InstConstantNeedsInstIdKind::DuringEvaluation,
+           .constant_needs_inst_id = InstConstantNeedsInstIdKind::LocOnly,
            .is_lowered = false});
 
   // Always the type of the builtin `WitnessType` singleton instruction.
@@ -1603,8 +1600,7 @@ struct RequireCompleteType {
       InstKind::RequireCompleteType.Define<Parse::NodeId>(
           {.ir_name = "require_complete_type",
            .constant_kind = InstConstantKind::SymbolicOnly,
-           .constant_needs_inst_id =
-               InstConstantNeedsInstIdKind::DuringEvaluation,
+           .constant_needs_inst_id = InstConstantNeedsInstIdKind::LocOnly,
            .is_lowered = false});
   // Always the builtin `WitnessType` type.
   TypeId type_id;

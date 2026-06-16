@@ -2716,10 +2716,12 @@ static auto ReplaceCallArgsFieldWithConstantValue(EvalContext& eval_context,
   return IsConstantOrError(*phase);
 }
 
-// Makes a constant for a call instruction.
+// Makes a constant for a call instruction. `inst_id` is the call's
+// instruction ID if it has one; the location `loc_id` is used for diagnostics
+// regardless.
 static auto MakeConstantForCall(EvalContext& eval_context,
-                                SemIR::InstId inst_id, SemIR::Call call)
-    -> SemIR::ConstantId {
+                                SemIR::InstId inst_id, SemIR::LocId loc_id,
+                                SemIR::Call call) -> SemIR::ConstantId {
   Phase phase = Phase::Concrete;
 
   // A call with an invalid argument list is used to represent an erroneous
@@ -2781,7 +2783,7 @@ static auto MakeConstantForCall(EvalContext& eval_context,
       const auto& function = eval_context.functions().Get(
           std::get<SemIR::CalleeFunction>(callee).function_id);
       eval_context.emitter()
-          .Build(inst_id, NonConstantCallToCompTimeOnlyFunction)
+          .Build(loc_id, NonConstantCallToCompTimeOnlyFunction)
           .Note(function.latest_decl_id(), CompTimeOnlyFunctionHere)
           .Emit();
     }
@@ -2791,7 +2793,7 @@ static auto MakeConstantForCall(EvalContext& eval_context,
   // Handle calls to builtins.
   if (builtin_kind != SemIR::BuiltinFunctionKind::None) {
     return MakeConstantForBuiltinCall(
-        eval_context, SemIR::LocId(inst_id), call, builtin_kind,
+        eval_context, loc_id, call, builtin_kind,
         eval_context.inst_blocks().Get(call.args_id), phase);
   }
 
@@ -2808,7 +2810,7 @@ static auto MakeConstantForCall(EvalContext& eval_context,
     // TODO: Instead of performing the call immediately, add it to a work queue
     // and do it non-recursively.
     return TryEvalCall(
-        eval_context, SemIR::LocId(inst_id), *function,
+        eval_context, loc_id, *function,
         std::get<SemIR::CalleeFunction>(callee).resolved_specific_id,
         call.args_id);
   }
@@ -2879,6 +2881,10 @@ static auto TryEvalTypedInst(EvalContext& eval_context, SemIR::InstId inst_id,
     CARBON_CHECK(inst_id.has_value());
     return SemIR::ConstantId::ForConcreteConstant(inst_id);
   } else {
+    // The original instruction, prior to replacing its operands with their
+    // constant values, for kinds whose evaluation refers back to the original
+    // operands.
+    [[maybe_unused]] SemIR::Inst orig_inst = inst;
     // Build a constant instruction by replacing each non-constant operand with
     // its constant value.
     Phase phase = Phase::Concrete;
@@ -2922,12 +2928,23 @@ static auto TryEvalTypedInst(EvalContext& eval_context, SemIR::InstId inst_id,
       // Couldn't perform the action because it's still dependent.
       return MakeConstantResult(eval_context.context(), inst,
                                 Phase::TemplateSymbolic);
-    } else if constexpr (InstT::Kind.constant_needs_inst_id() !=
-                         SemIR::InstConstantNeedsInstIdKind::No) {
+    } else if constexpr (InstT::Kind.constant_needs_inst_id() ==
+                         SemIR::InstConstantNeedsInstIdKind::Permanent) {
       CARBON_CHECK(inst_id.has_value());
       return ConvertEvalResultToConstantId(
           eval_context.context(),
           EvalConstantInst(eval_context.context(), inst_id, inst.As<InstT>()),
+          InstT::Kind, phase);
+    } else if constexpr (InstT::Kind.constant_needs_inst_id() ==
+                         SemIR::InstConstantNeedsInstIdKind::LocOnly) {
+      // Evaluation only needs a location and the original operands for
+      // diagnostics, not an allocated instruction.
+      auto loc_id = inst_id.has_value() ? SemIR::LocId(inst_id)
+                                        : eval_context.fallback_loc_id();
+      return ConvertEvalResultToConstantId(
+          eval_context.context(),
+          EvalConstantInst(eval_context.context(), loc_id,
+                           orig_inst.As<InstT>(), inst.As<InstT>()),
           InstT::Kind, phase);
     } else {
       return ConvertEvalResultToConstantId(
@@ -2955,7 +2972,10 @@ template <>
 auto TryEvalTypedInst<SemIR::Call>(EvalContext& eval_context,
                                    SemIR::InstId inst_id, SemIR::Inst inst)
     -> SemIR::ConstantId {
-  return MakeConstantForCall(eval_context, inst_id, inst.As<SemIR::Call>());
+  auto loc_id = inst_id.has_value() ? SemIR::LocId(inst_id)
+                                    : eval_context.fallback_loc_id();
+  return MakeConstantForCall(eval_context, inst_id, loc_id,
+                             inst.As<SemIR::Call>());
 }
 
 // ImportRefLoaded can have a constant value, but it's owned and maintained by
@@ -3303,6 +3323,15 @@ auto TryEvalInstUnsafe(Context& context, SemIR::InstId inst_id,
                        SemIR::Inst inst) -> SemIR::ConstantId {
   EvalContext eval_context(&context, SemIR::LocId(inst_id));
   return TryEvalInstInContext(eval_context, inst_id, inst);
+}
+
+auto TryEvalInstUnsafe(Context& context, SemIR::LocId loc_id, SemIR::Inst inst)
+    -> SemIR::ConstantId {
+  CARBON_CHECK(inst.kind().constant_needs_inst_id() !=
+                   SemIR::InstConstantNeedsInstIdKind::Permanent,
+               "{0} requires a permanent InstId to evaluate", inst.kind());
+  EvalContext eval_context(&context, loc_id);
+  return TryEvalInstInContext(eval_context, SemIR::InstId::None, inst);
 }
 
 auto TryEvalBlockForSpecific(Context& context, SemIR::LocId loc_id,

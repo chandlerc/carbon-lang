@@ -57,8 +57,9 @@ auto EvalConstantInst(Context& /*context*/, SemIR::ArrayInit inst)
       SemIR::TupleValue{.type_id = inst.type_id, .elements_id = inst.inits_id});
 }
 
-auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
-                      SemIR::ArrayType inst) -> ConstantEvalResult {
+auto EvalConstantInst(Context& context, SemIR::LocId /*loc_id*/,
+                      SemIR::ArrayType orig_inst, SemIR::ArrayType inst)
+    -> ConstantEvalResult {
   auto bound_inst = context.insts().Get(inst.bound_id);
   auto int_bound = bound_inst.TryAs<SemIR::IntValue>();
   if (!int_bound) {
@@ -74,17 +75,15 @@ auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
       bound_val.isNegative()) {
     CARBON_DIAGNOSTIC(ArrayBoundNegative, Error,
                       "array bound of {0} is negative", TypedInt);
-    context.emitter().Emit(
-        context.insts().GetAs<SemIR::ArrayType>(inst_id).bound_id,
-        ArrayBoundNegative, {.type = int_bound->type_id, .value = bound_val});
+    context.emitter().Emit(orig_inst.bound_id, ArrayBoundNegative,
+                           {.type = int_bound->type_id, .value = bound_val});
     return ConstantEvalResult::Error;
   }
   if (bound_val.getActiveBits() > 64) {
     CARBON_DIAGNOSTIC(ArrayBoundTooLarge, Error,
                       "array bound of {0} is too large", TypedInt);
-    context.emitter().Emit(
-        context.insts().GetAs<SemIR::ArrayType>(inst_id).bound_id,
-        ArrayBoundTooLarge, {.type = int_bound->type_id, .value = bound_val});
+    context.emitter().Emit(orig_inst.bound_id, ArrayBoundTooLarge,
+                           {.type = int_bound->type_id, .value = bound_val});
     return ConstantEvalResult::Error;
   }
   return ConstantEvalResult::NewSamePhase(inst);
@@ -126,12 +125,12 @@ auto EvalConstantInst(Context& /*context*/, SemIR::ValueBinding /*inst*/)
   return ConstantEvalResult::NotConstant;
 }
 
-auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
+auto EvalConstantInst(Context& context, SemIR::LocId loc_id,
+                      SemIR::AcquireValue /*orig_inst*/,
                       SemIR::AcquireValue inst) -> ConstantEvalResult {
   SemIR::ConstantId const_id = SemIR::ConstantId::NotConstant;
   if (const auto* var_decl = GetAsClangVarDecl(context, inst.value_id)) {
-    const_id =
-        EvalCppVarDecl(context, SemIR::LocId(inst_id), var_decl, inst.type_id);
+    const_id = EvalCppVarDecl(context, loc_id, var_decl, inst.type_id);
   } else if (auto temporary =
                  context.insts().TryGetAs<SemIR::Temporary>(inst.value_id)) {
     const_id = context.constant_values().Get(temporary->init_id);
@@ -246,9 +245,10 @@ auto EvalConstantInst(Context& context, SemIR::FacetValue inst)
   return ConstantEvalResult::NewSamePhase(inst);
 }
 
-auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
-                      SemIR::FloatType inst) -> ConstantEvalResult {
-  return ValidateFloatTypeAndSetKind(context, SemIR::LocId(inst_id), inst)
+auto EvalConstantInst(Context& context, SemIR::LocId loc_id,
+                      SemIR::FloatType /*orig_inst*/, SemIR::FloatType inst)
+    -> ConstantEvalResult {
+  return ValidateFloatTypeAndSetKind(context, loc_id, inst)
              ? ConstantEvalResult::NewSamePhase(inst)
              : ConstantEvalResult::Error;
 }
@@ -262,7 +262,8 @@ auto EvalConstantInst(Context& /*context*/, SemIR::FunctionDecl inst)
       .type_id = inst.type_id, .elements_id = SemIR::InstBlockId::Empty});
 }
 
-auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
+auto EvalConstantInst(Context& context, SemIR::LocId loc_id,
+                      SemIR::LookupImplWitness /*orig_inst*/,
                       SemIR::LookupImplWitness inst) -> ConstantEvalResult {
   // Canonicalize the query self to reduce the number of unique witness
   // instructions and enable constant value comparisons.
@@ -272,8 +273,8 @@ auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
           context, context.constant_values().Get(inst.query_self_inst_id),
           &self_facet_value_inst_id));
 
-  auto witness_id = EvalLookupSingleFinalWitness(context, SemIR::LocId(inst_id),
-                                                 inst, self_facet_value_inst_id,
+  auto witness_id = EvalLookupSingleFinalWitness(context, loc_id, inst,
+                                                 self_facet_value_inst_id,
                                                  EvalImplLookupMode::Normal);
   if (witness_id == SemIR::ErrorInst::ConstantId) {
     return ConstantEvalResult::Error;
@@ -435,7 +436,8 @@ static auto TryFindValueInRewriteConstraints(
   return SemIR::ConstantId::None;
 }
 
-auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
+auto EvalConstantInst(Context& context, SemIR::LocId loc_id,
+                      SemIR::ImplWitnessAccess /*orig_inst*/,
                       SemIR::ImplWitnessAccess inst) -> ConstantEvalResult {
   CARBON_DIAGNOSTIC(ImplAccessMemberBeforeSet, Error,
                     "accessing member from impl before it has a defined value");
@@ -461,7 +463,7 @@ auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
       // If we get here, this impl witness table entry has not been populated
       // yet, because the impl was referenced within its own definition.
       // TODO: Add note pointing to the impl declaration.
-      context.emitter().Emit(inst_id, ImplAccessMemberBeforeSet);
+      context.emitter().Emit(loc_id, ImplAccessMemberBeforeSet);
       return ConstantEvalResult::Error;
     }
     case CARBON_KIND(SemIR::CustomWitness custom_witness): {
@@ -476,7 +478,7 @@ auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
       // If we get here, this synthesized witness table entry has not been
       // populated yet.
       // TODO: Is this reachable? We have no test coverage for this diagnostic.
-      context.emitter().Emit(inst_id, ImplAccessMemberBeforeSet);
+      context.emitter().Emit(loc_id, ImplAccessMemberBeforeSet);
       return ConstantEvalResult::Error;
     }
     case CARBON_KIND(SemIR::LookupImplWitness witness): {
@@ -491,7 +493,7 @@ auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
       auto search_facet = witness.query_self_inst_id;
       while (true) {
         auto const_id = TryFindValueInRewriteConstraints(
-            context, SemIR::LocId(inst_id), access_qualifiers,
+            context, loc_id, access_qualifiers,
             witness.query_specific_interface_id, inst.index, search_facet);
         if (const_id.has_value()) {
           return ConstantEvalResult::Existing(const_id);
@@ -542,9 +544,10 @@ auto EvalConstantInst(Context& context, SemIR::InPlaceInit inst)
       context.constant_values().Get(inst.src_id));
 }
 
-auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
-                      SemIR::IntType inst) -> ConstantEvalResult {
-  return ValidateIntType(context, SemIR::LocId(inst_id), inst)
+auto EvalConstantInst(Context& context, SemIR::LocId loc_id,
+                      SemIR::IntType /*orig_inst*/, SemIR::IntType inst)
+    -> ConstantEvalResult {
+  return ValidateIntType(context, loc_id, inst)
              ? ConstantEvalResult::NewSamePhase(inst)
              : ConstantEvalResult::Error;
 }
@@ -600,7 +603,8 @@ auto EvalConstantInst(Context& context, SemIR::NameRef inst)
       context.constant_values().Get(inst.value_id));
 }
 
-auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
+auto EvalConstantInst(Context& context, SemIR::LocId loc_id,
+                      SemIR::RequireCompleteType orig_inst,
                       SemIR::RequireCompleteType inst) -> ConstantEvalResult {
   auto witness_type_id =
       GetSingletonType(context, SemIR::WitnessType::TypeInstId);
@@ -614,17 +618,14 @@ auto EvalConstantInst(Context& context, SemIR::InstId inst_id,
           CARBON_DIAGNOSTIC(IncompleteTypeInMonomorphization, Context,
                             "{0} evaluates to incomplete type {1}",
                             InstIdAsType, InstIdAsType);
-          builder.Context(inst_id, IncompleteTypeInMonomorphization,
-                          context.insts()
-                              .GetAs<SemIR::RequireCompleteType>(inst_id)
-                              .complete_type_inst_id,
+          builder.Context(loc_id, IncompleteTypeInMonomorphization,
+                          orig_inst.complete_type_inst_id,
                           inst.complete_type_inst_id);
         });
     // We use TryToCompleteType() instead of RequireCompleteType() because we
     // are currently evaluating a RequireCompleteType instruction, and calling
     // RequireCompleteType() would insert another copy of the same instruction.
-    if (!TryToCompleteType(context, complete_type_id, SemIR::LocId(inst_id),
-                           true)) {
+    if (!TryToCompleteType(context, complete_type_id, loc_id, true)) {
       return ConstantEvalResult::Error;
     }
     return ConstantEvalResult::NewAnyPhase(SemIR::CompleteTypeWitness{

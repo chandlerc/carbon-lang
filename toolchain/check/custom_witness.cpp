@@ -823,6 +823,16 @@ auto LookupCustomWitness(Context& context, SemIR::LocId loc_id,
                          SemIR::ConstantId query_self_const_id,
                          SemIR::SpecificInterfaceId query_specific_interface_id,
                          bool build_witness) -> std::optional<SemIR::InstId> {
+  // Instructions generated for the witness don't directly represent the code
+  // at `loc_id`, which is an arbitrary use that required the witness. Mark
+  // the location as desugared so the generated instructions aren't validated
+  // against the use's node, and drop locations within imported files, which
+  // can't be marked.
+  loc_id = context.insts().GetLocIdForDesugaring(loc_id);
+  if (loc_id.kind() == SemIR::LocId::Kind::ImportIRInstId) {
+    loc_id = SemIR::LocId::None;
+  }
+
   switch (core_interface) {
     case SemIR::CoreInterface::Destroy:
       return LookupDestroyWitness(context, loc_id, query_self_const_id,

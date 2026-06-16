@@ -129,40 +129,16 @@ auto GetOrAddInst(Context& context, SemIR::LocIdAndInst loc_id_and_inst)
   };
 
   // If the instruction is from desugaring, produce its constant value instead
-  // if possible.
-  if (loc_id_and_inst.loc_id.is_desugared()) {
-    switch (loc_id_and_inst.inst.kind().constant_needs_inst_id()) {
-      case SemIR::InstConstantNeedsInstIdKind::No: {
-        // Evaluation doesn't need an InstId. Just do it.
-        auto const_id = TryEvalInstUnsafe(context, SemIR::InstId::None,
-                                          loc_id_and_inst.inst);
-        if (auto result_inst_id = handle_constant_id(const_id);
-            result_inst_id.has_value()) {
-          return result_inst_id;
-        }
-        break;
-      }
-
-      case SemIR::InstConstantNeedsInstIdKind::DuringEvaluation: {
-        // Evaluation temporarily needs an InstId. Add one for now.
-        auto inst_id = AddInstInNoBlock(context, loc_id_and_inst);
-        auto const_id = context.constant_values().Get(inst_id);
-        if (auto result_inst_id = handle_constant_id(const_id);
-            result_inst_id.has_value()) {
-          // TODO: We didn't end up needing the `inst_id` instruction. Consider
-          // removing it from `insts` if it's still the most recently added
-          // instruction.
-          CARBON_CHECK(result_inst_id != inst_id);
-          return result_inst_id;
-        }
-        context.inst_block_stack().AddInstId(inst_id);
-        return inst_id;
-      }
-
-      case SemIR::InstConstantNeedsInstIdKind::Permanent: {
-        // Evaluation needs a permanent InstId. Add the instruction.
-        break;
-      }
+  // if possible. Evaluation needing a permanent InstId is the only case where
+  // we can't evaluate without adding the instruction.
+  if (loc_id_and_inst.loc_id.is_desugared() &&
+      loc_id_and_inst.inst.kind().constant_needs_inst_id() !=
+          SemIR::InstConstantNeedsInstIdKind::Permanent) {
+    auto const_id = TryEvalInstUnsafe(context, loc_id_and_inst.loc_id,
+                                      loc_id_and_inst.inst);
+    if (auto result_inst_id = handle_constant_id(const_id);
+        result_inst_id.has_value()) {
+      return result_inst_id;
     }
   }
 
@@ -174,33 +150,17 @@ auto EvalOrAddInst(Context& context, SemIR::LocIdAndInst loc_id_and_inst)
     -> SemIR::ConstantId {
   CARBON_CHECK(!loc_id_and_inst.inst.kind().has_cleanup());
 
-  switch (loc_id_and_inst.inst.kind().constant_needs_inst_id()) {
-    case SemIR::InstConstantNeedsInstIdKind::No: {
-      // Evaluation doesn't need an InstId. Just do it.
-      return TryEvalInstUnsafe(context, SemIR::InstId::None,
-                               loc_id_and_inst.inst);
-    }
-
-    case SemIR::InstConstantNeedsInstIdKind::DuringEvaluation: {
-      // Evaluation temporarily needs an InstId. Add one for now. We add the
-      // instruction outside of a block, and never call `FinishInst` for this
-      // non-canonical instruction. This means it never gets attached to the
-      // constant value, and is not added to any enclosing generic context's
-      // eval block.
-      auto inst_id = context.sem_ir().insts().AddInNoBlock(loc_id_and_inst);
-      CARBON_VLOG_TO(context.vlog_stream(), "AddInst: {0}\n",
-                     loc_id_and_inst.inst);
-      // TODO: Consider removing `inst_id` from `insts` if it's still the most
-      // recently added instruction.
-      return TryEvalInstUnsafe(context, inst_id, loc_id_and_inst.inst);
-    }
-
-    case SemIR::InstConstantNeedsInstIdKind::Permanent: {
-      // Evaluation needs a permanent InstId. Add the instruction.
-      auto inst_id = AddInst(context, loc_id_and_inst);
-      return context.constant_values().Get(inst_id);
-    }
+  // If evaluation needs a permanent InstId, add the instruction.
+  if (loc_id_and_inst.inst.kind().constant_needs_inst_id() ==
+      SemIR::InstConstantNeedsInstIdKind::Permanent) {
+    auto inst_id = AddInst(context, loc_id_and_inst);
+    return context.constant_values().Get(inst_id);
   }
+
+  // Otherwise, evaluate without allocating an instruction, providing the
+  // location for any diagnostics produced by evaluation.
+  return TryEvalInstUnsafe(context, loc_id_and_inst.loc_id,
+                           loc_id_and_inst.inst);
 }
 
 auto AddPlaceholderInstInNoBlock(Context& context,

@@ -26,6 +26,12 @@ auto AddImportedConstant(Context& context, SemIR::Inst inst)
 auto TryEvalInstUnsafe(Context& context, SemIR::InstId inst_id,
                        SemIR::Inst inst) -> SemIR::ConstantId;
 
+// Evaluates the instruction `inst`, which doesn't have an `InstId`, using
+// `loc_id` as the location for any diagnostics produced by evaluation. The
+// instruction's kind must not require a permanent `InstId` to evaluate.
+auto TryEvalInstUnsafe(Context& context, SemIR::LocId loc_id, SemIR::Inst inst)
+    -> SemIR::ConstantId;
+
 // Determines the phase of the instruction `inst_id`, and returns its constant
 // value if it has constant phase. If it has runtime phase, returns
 // `SemIR::ConstantId::NotConstant`.
