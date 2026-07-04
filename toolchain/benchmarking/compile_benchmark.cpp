@@ -263,6 +263,9 @@ static auto DenseDeclParams() -> SourceGen::DenseDeclParams {
   // declarations, so that bodies are present but rare and short.
   params.class_params.inline_function_defs = 2;
   params.class_params.max_body_locals = 3;
+  // A small pool of free function declarations for the bodies' calls to
+  // target.
+  params.free_function_decls_per_class = 2;
   return params;
 }
 

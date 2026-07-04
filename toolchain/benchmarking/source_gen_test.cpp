@@ -707,6 +707,60 @@ TEST(SourceGenTest, GenApiFileDenseDeclsOutOfLineDefs) {
   }
 }
 
+// Generated call graphs: bodies call the file's free function declarations,
+// consuming each result into the accumulator. The line and byte counts must
+// stay seed-independent, the result must compile cleanly, and the calls (and
+// their `acc64` companion accumulator, whose presence is guaranteed by the
+// deterministic count multisets) must actually appear.
+TEST(SourceGenTest, GenApiFileDenseDeclsCallGraphs) {
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  // The dense pattern with inline bodies making calls.
+  param_set.push_back({.class_params = {.inline_function_defs = 3,
+                                        .max_body_locals = 3,
+                                        .max_body_calls = 3},
+                       .free_function_decls_per_class = 2});
+  // The split pattern: every body (inline and out-of-line) makes calls.
+  param_set.push_back(
+      {.class_params = {.inline_function_defs = 2, .max_body_calls = 2},
+       .define_decls_out_of_line = true,
+       .free_function_decls_per_class = 2});
+
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    for (SourceGen::Language language :
+         {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+      std::optional<size_t> expected_bytes;
+      std::optional<ssize_t> expected_lines;
+      std::optional<std::string> first_source;
+      bool any_different = false;
+      constexpr int NumSeeds = 16;
+      for (int _ : llvm::seq(NumSeeds)) {
+        SourceGen gen(language);
+        std::string source = gen.GenApiFileDenseDecls(3000, params);
+        if (!expected_bytes) {
+          expected_bytes = source.size();
+          expected_lines = CountLines(source);
+          first_source = source;
+          EXPECT_THAT(source, HasSubstr("acc64"));
+          if (language == SourceGen::Language::Carbon) {
+            EXPECT_TRUE(TestCompile(source));
+          }
+          continue;
+        }
+        EXPECT_THAT(source.size(), Eq(*expected_bytes))
+            << "Byte count varied across seeds for language="
+            << static_cast<int>(language);
+        EXPECT_THAT(CountLines(source), Eq(*expected_lines))
+            << "Line count varied across seeds for language="
+            << static_cast<int>(language);
+        if (source != *first_source) {
+          any_different = true;
+        }
+      }
+      EXPECT_TRUE(any_different);
+    }
+  }
+}
+
 // The line estimates must track the actual emission closely in every
 // generation mode, or files drift away from their target size. Body-generating
 // classes are large (hundreds of lines in the defined-decls pattern), so use a
@@ -715,13 +769,16 @@ TEST(SourceGenTest, GenApiFileDenseDeclsOutOfLineDefs) {
 // for its unmodeled access-section lines.
 TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
   llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
-  // The benchmarked dense-declaration shape, with a couple of inline bodies.
+  // The benchmarked dense-declaration shape, with a couple of inline bodies
+  // making calls to free functions.
   param_set.push_back(
-      {.class_params = {.inline_function_defs = 2, .max_body_locals = 3}});
+      {.class_params = {.inline_function_defs = 2, .max_body_locals = 3},
+       .free_function_decls_per_class = 2});
   // The benchmarked defined-decls shape.
   param_set.push_back(
       {.class_params = {.inline_function_defs = 2, .max_body_locals = 3},
-       .define_decls_out_of_line = true});
+       .define_decls_out_of_line = true,
+       .free_function_decls_per_class = 2});
 
   constexpr int TargetLines = 20000;
   for (const SourceGen::DenseDeclParams& params : param_set) {

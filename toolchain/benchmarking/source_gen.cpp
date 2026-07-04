@@ -175,10 +175,26 @@ static auto AvgCfgConstructLines() -> double {
 // Detailed comments for out-of-line methods are on their definitions.
 class SourceGen::ClassGenState {
  public:
-  ClassGenState(SourceGen& gen, int num_classes,
-                const ClassParams& class_params,
-                const TypeUseParams& type_use_params,
-                bool define_decls_out_of_line);
+  // A free function declaration: the callable API targeted by generated call
+  // graphs. The signature (over fixed types only, since these declarations
+  // precede every class), the rendered argument list for calls, and the name
+  // are all bound deterministically before any shuffling, so however many
+  // calls land on each function, the byte total is seed-independent.
+  struct FreeFunction {
+    llvm::StringRef name;
+    llvm::SmallVector<llvm::StringRef> param_types;
+    std::string args_text;
+    llvm::StringRef return_type;
+  };
+
+  // One generated call: the callee and the consumer template applied to the
+  // call's result.
+  struct CallRef {
+    int callee;
+    llvm::StringRef consumer;
+  };
+
+  ClassGenState(SourceGen& gen, int num_classes, const DenseDeclParams& params);
 
   auto public_function_param_counts() -> llvm::SmallVectorImpl<int>& {
     return public_function_param_counts_;
@@ -209,6 +225,40 @@ class SourceGen::ClassGenState {
   auto outofline_block_kinds() -> llvm::SmallVectorImpl<int>& {
     return outofline_block_kinds_;
   }
+  auto inline_call_counts() -> llvm::SmallVectorImpl<int>& {
+    return inline_call_counts_;
+  }
+  auto outofline_call_counts() -> llvm::SmallVectorImpl<int>& {
+    return outofline_call_counts_;
+  }
+  auto inline_call_refs() -> llvm::SmallVectorImpl<CallRef>& {
+    return inline_call_refs_;
+  }
+  auto outofline_call_refs() -> llvm::SmallVectorImpl<CallRef>& {
+    return outofline_call_refs_;
+  }
+  auto free_functions() -> llvm::ArrayRef<FreeFunction> {
+    return free_functions_;
+  }
+  // The order in which to emit the free function declarations; shuffled
+  // independently of the (unshuffled) `free_functions()` list that call
+  // references index into.
+  auto free_emission_order() -> llvm::ArrayRef<int> {
+    return free_emission_order_;
+  }
+  auto free_param_names() -> llvm::SmallVectorImpl<llvm::StringRef>& {
+    return free_param_names_;
+  }
+
+  // Emits `call_count` calls from one of the per-role reference pools into a
+  // body, consuming each result into the accumulator. Bodies with any calls
+  // first declare (and unconditionally consume) a standard `acc64` companion
+  // accumulator that pointer-typed call arguments point at, so its presence
+  // depends only on the deterministically-distributed counts. Detailed
+  // comments on the definition.
+  auto EmitBodyCalls(bool is_cpp, llvm::SmallVectorImpl<CallRef>& refs,
+                     int call_count, llvm::StringRef body_indent,
+                     llvm::raw_ostream& os) -> void;
 
   auto class_names() -> llvm::SmallVectorImpl<llvm::StringRef>& {
     return class_names_;
@@ -237,11 +287,12 @@ class SourceGen::ClassGenState {
     valid_type_names_.Insert(type_name);
   }
 
-  // The set of all declared class names, for excluding from identifier pools
-  // so that names introduced into a scope (parameters, members, fields) can't
-  // shadow a class name that a body relies on (for example via a `Make` call).
-  auto class_name_set() -> const Set<llvm::StringRef>& {
-    return class_name_set_;
+  // The set of all file-scope names -- classes and free functions -- for
+  // excluding from identifier pools so that names introduced into a scope
+  // (parameters, members, fields) can't shadow a name that a body relies on
+  // (for example via a `Make` or free-function call).
+  auto file_scope_name_set() -> const Set<llvm::StringRef>& {
+    return file_scope_name_set_;
   }
 
   // Emits an expression producing a value of the given type. For a class type
@@ -340,8 +391,15 @@ class SourceGen::ClassGenState {
   auto GetValidTypeUse(TypePool& pool) -> TypeUse;
 
   auto BuildClassAndTypeNames(SourceGen& gen, int num_classes,
-                              const ClassParams& class_params,
-                              const TypeUseParams& type_use_params) -> void;
+                              const DenseDeclParams& params) -> void;
+  // Builds one free function declaration; see the definition for how its
+  // signature is deterministically bound.
+  auto BuildFreeFunction(SourceGen& gen, int i, llvm::StringRef name,
+                         const FunctionDeclParams& decl_params,
+                         const TypeUseParams& type_use_params) -> FreeFunction;
+  // Builds one role's pool of call references targeting the free functions.
+  auto BuildCallRefs(SourceGen& gen, int num_calls,
+                     llvm::SmallVectorImpl<CallRef>* refs) -> void;
   // Builds one type pool of `num_types` references. `max_refs_per_class` caps
   // class references so the search always drains (see comment on the
   // definition). When `producible_only` is set, only builtins with a value
@@ -373,6 +431,22 @@ class SourceGen::ClassGenState {
   // different indentation, so their per-kind byte costs differ.
   llvm::SmallVector<int> inline_block_kinds_;
   llvm::SmallVector<int> outofline_block_kinds_;
+  // Call counts per body, and per-role pools of call references. The
+  // references distribute the role's total call count as evenly as possible
+  // across the free functions in their unshuffled order -- so the extra call
+  // some functions receive lands on a deterministic subset -- pairing each
+  // with a result-consumer template round-robin per return type, and are then
+  // shuffled. Kept per role because the roles emit at different indentation.
+  llvm::SmallVector<int> inline_call_counts_;
+  llvm::SmallVector<int> outofline_call_counts_;
+  llvm::SmallVector<CallRef> inline_call_refs_;
+  llvm::SmallVector<CallRef> outofline_call_refs_;
+
+  // The free function declarations, in their deterministic build order, and
+  // the shuffled order to emit them in.
+  llvm::SmallVector<FreeFunction> free_functions_;
+  llvm::SmallVector<int> free_emission_order_;
+  llvm::SmallVector<llvm::StringRef> free_param_names_;
 
   llvm::SmallVector<llvm::StringRef> class_names_;
   // Names for declared functions and methods are kept separate from field names
@@ -419,6 +493,8 @@ class SourceGen::ClassGenState {
   // method) from builtin types (produced via a value expression, consumed via
   // a consumer template) in `ProduceValue` and when assigning consumers.
   Set<llvm::StringRef> class_name_set_;
+  // All file-scope names: the class names plus the free function names.
+  Set<llvm::StringRef> file_scope_name_set_;
   // Maps each builtin type's spelling to the expression that produces a value
   // of that type, and to the list of templates consuming such a value, for the
   // language being generated. The consumer lists (and `class_consumers_`)
@@ -441,12 +517,11 @@ static auto Sum(const T& range) -> int {
 // generated so that we can distribute random components across all the
 // definitions.
 SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
-                                        const ClassParams& class_params,
-                                        const TypeUseParams& type_use_params,
-                                        bool define_decls_out_of_line)
-    : generate_bodies_(class_params.inline_function_defs > 0 ||
-                       define_decls_out_of_line),
-      split_type_pools_(define_decls_out_of_line) {
+                                        const DenseDeclParams& params)
+    : generate_bodies_(params.class_params.inline_function_defs > 0 ||
+                       params.define_decls_out_of_line),
+      split_type_pools_(params.define_decls_out_of_line) {
+  const ClassParams& class_params = params.class_params;
   public_function_param_counts_ =
       gen.GetShuffledInts(num_classes * class_params.public_function_decls, 0,
                           class_params.public_function_decl_params.max_params);
@@ -521,6 +596,22 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
       gen.GetShuffledInts(Sum(inline_block_counts_), 0, NumCfgConstructs - 1);
   outofline_block_kinds_ = gen.GetShuffledInts(Sum(outofline_block_counts_), 0,
                                                NumCfgConstructs - 1);
+  // Call counts for every generated body, only nonzero when the file declares
+  // free functions to call, along with a dedicated name pool for the free
+  // function declarations' parameters (emitted exactly once each). The
+  // per-function parameter counts cycle deterministically through
+  // [0, max_params]; see `BuildFreeFunctions`.
+  int num_free_functions = num_classes * params.free_function_decls_per_class;
+  int max_body_calls = num_free_functions > 0 ? class_params.max_body_calls : 0;
+  inline_call_counts_ =
+      gen.GetShuffledInts(num_inline_functions, 0, max_body_calls);
+  outofline_call_counts_ = gen.GetShuffledInts(
+      split_type_pools_ ? num_classes * decls_per_class : 0, 0, max_body_calls);
+  int num_free_params = 0;
+  for (int i : llvm::seq(num_free_functions)) {
+    num_free_params += i % (params.free_function_decl_params.max_params + 1);
+  }
+  free_param_names_ = gen.GetShuffledIdentifiers(num_free_params);
   int num_inline_params = Sum(inline_function_param_counts_);
   int num_locals = Sum(local_counts_);
   // Inline-definition parameters are consumed by their bodies, giving them a
@@ -541,7 +632,7 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
   // Inline functions add type uses too: one return type plus one per parameter.
   // They also add return-type slots that can reference the enclosing class, so
   // they raise the guaranteed per-class capacity for class references.
-  BuildClassAndTypeNames(gen, num_classes, class_params, type_use_params);
+  BuildClassAndTypeNames(gen, num_classes, params);
 }
 
 auto SourceGen::ClassGenState::GetValidTypeUse(TypePool& pool) -> TypeUse {
@@ -715,14 +806,26 @@ auto SourceGen::ClassGenState::BuildTypePool(
 // guaranteed self-absorbing slots per class in that pool (the return slots),
 // which is what lets an even distribution always drain.
 auto SourceGen::ClassGenState::BuildClassAndTypeNames(
-    SourceGen& gen, int num_classes, const ClassParams& class_params,
-    const TypeUseParams& type_use_params) -> void {
-  // Initially get the sequence of class names without shuffling so we can
-  // compute our type name pools from them prior to any shuffling.
-  class_names_ =
-      gen.GetUniqueIdentifiers(num_classes, /*min_length=*/MinClassNameLength);
+    SourceGen& gen, int num_classes, const DenseDeclParams& params) -> void {
+  const ClassParams& class_params = params.class_params;
+  const TypeUseParams& type_use_params = params.type_use_params;
+  // Initially get the sequence of class and free function names without
+  // shuffling so we can compute our type name and call pools from them prior
+  // to any shuffling. Drawing them from a single unique pool guarantees the
+  // two kinds of file-scope names never collide with each other.
+  int num_free_functions = num_classes * params.free_function_decls_per_class;
+  llvm::SmallVector<llvm::StringRef> file_scope_names =
+      gen.GetUniqueIdentifiers(num_classes + num_free_functions,
+                               /*min_length=*/MinClassNameLength);
+  class_names_.assign(file_scope_names.begin(),
+                      file_scope_names.begin() + num_classes);
+  llvm::ArrayRef<llvm::StringRef> free_function_names =
+      llvm::ArrayRef(file_scope_names).slice(num_classes);
   for (llvm::StringRef name : class_names_) {
     class_name_set_.Insert(name);
+  }
+  for (llvm::StringRef name : file_scope_names) {
+    file_scope_name_set_.Insert(name);
   }
 
   // Seed the valid-type set and the value-expression and consumer-template
@@ -814,7 +917,121 @@ auto SourceGen::ClassGenState::BuildClassAndTypeNames(
         /*producible_only=*/false, /*consumed=*/true, type_use_params);
   }
 
+  // Build the free function declarations and call pools before shuffling
+  // anything: their names, signatures, and per-function call counts must all
+  // bind in the deterministic order.
+  free_functions_.reserve(num_free_functions);
+  for (auto [i, name] : llvm::enumerate(free_function_names)) {
+    free_functions_.push_back(
+        BuildFreeFunction(gen, static_cast<int>(i), name,
+                          params.free_function_decl_params, type_use_params));
+  }
+  BuildCallRefs(gen, Sum(inline_call_counts_), &inline_call_refs_);
+  BuildCallRefs(gen, Sum(outofline_call_counts_), &outofline_call_refs_);
+  free_emission_order_.resize(num_free_functions);
+  std::iota(free_emission_order_.begin(), free_emission_order_.end(), 0);
+  std::shuffle(free_emission_order_.begin(), free_emission_order_.end(),
+               gen.rng_);
+
   std::shuffle(class_names_.begin(), class_names_.end(), gen.rng_);
+}
+
+// Builds the `i`th free function declaration around its pre-drawn `name`. The
+// parameter count cycles deterministically through [0, max_params], and the
+// parameter and return types cycle through a weight-expanded list of the
+// fixed types, so the whole signature -- and the rendered call argument list
+// -- is a pure function of the declaration's index.
+auto SourceGen::ClassGenState::BuildFreeFunction(
+    SourceGen& gen, int i, llvm::StringRef name,
+    const FunctionDeclParams& decl_params, const TypeUseParams& type_use_params)
+    -> FreeFunction {
+  FreeFunction fn;
+  fn.name = name;
+
+  // A weight-expanded cycle over the fixed types: each type appears `weight`
+  // times so the deterministic assignment roughly matches the configured
+  // distribution. The expansion interleaves the types (appending each type
+  // with remaining weight in rounds) rather than repeating each in a block,
+  // so consecutive assignments vary.
+  llvm::SmallVector<const TypeUseParams::FixedTypeWeight*> weighted;
+  for (int round = 0;; ++round) {
+    bool any = false;
+    for (const auto& fw : type_use_params.fixed_type_weights) {
+      if (fw.weight > round) {
+        weighted.push_back(&fw);
+        any = true;
+      }
+    }
+    if (!any) {
+      break;
+    }
+  }
+  CARBON_CHECK(!weighted.empty());
+  // Deterministically derived starting offset that spreads consecutive
+  // declarations across the cycle.
+  int offset = i * (decl_params.max_params + 2);
+
+  auto next_type = [&]() -> const TypeUseParams::FixedTypeWeight* {
+    return weighted[offset++ % weighted.size()];
+  };
+
+  int param_count = i % (decl_params.max_params + 1);
+  RawStringOstream args;
+  llvm::ListSeparator sep;
+  for ([[maybe_unused]] auto _ : llvm::seq(param_count)) {
+    const auto& fw = *next_type();
+    fn.param_types.push_back(gen.IsCpp() ? fw.cpp_spelling
+                                         : fw.carbon_spelling);
+    llvm::StringRef arg = gen.IsCpp() ? fw.cpp_arg : fw.carbon_arg;
+    if (arg.empty()) {
+      arg = gen.IsCpp() ? fw.cpp_value : fw.carbon_value;
+    }
+    CARBON_CHECK(!arg.empty(),
+                 "Fixed type `{0}` needs an argument or value expression.",
+                 fn.param_types.back());
+    args << sep << arg;
+  }
+  fn.args_text = args.TakeStr();
+  fn.return_type =
+      gen.IsCpp() ? next_type()->cpp_spelling : next_type()->carbon_spelling;
+  return fn;
+}
+
+// Builds one role's pool of `num_calls` call references, distributing the
+// calls as evenly as possible across the free function declarations in their
+// deterministic order, assigning each call a result-consumer template
+// round-robin per return type, and shuffling the result.
+auto SourceGen::ClassGenState::BuildCallRefs(
+    SourceGen& gen, int num_calls, llvm::SmallVectorImpl<CallRef>* refs)
+    -> void {
+  if (num_calls == 0) {
+    return;
+  }
+  int num_free = free_functions_.size();
+  CARBON_CHECK(num_free > 0);
+  refs->reserve(num_calls);
+  Map<llvm::StringRef, int> consumer_counters;
+  auto append_ref = [&](int callee) {
+    llvm::StringRef ret = free_functions_[callee].return_type;
+    llvm::ArrayRef<llvm::StringRef> consumers =
+        fixed_consumers_.Lookup(ret).value();
+    int& counter = consumer_counters.Insert(ret, 0).value();
+    refs->push_back({.callee = callee,
+                     .consumer = consumers[counter++ % consumers.size()]});
+  };
+  int full_copies = num_calls / num_free;
+  int remainder = num_calls % num_free;
+  for ([[maybe_unused]] auto _ : llvm::seq(full_copies)) {
+    for (int callee : llvm::seq(num_free)) {
+      append_ref(callee);
+    }
+  }
+  // The remainder of extra calls lands on a deterministic prefix of the
+  // (unshuffled) declarations, so the byte total stays seed-independent.
+  for (int callee : llvm::seq(remainder)) {
+    append_ref(callee);
+  }
+  std::shuffle(refs->begin(), refs->end(), gen.rng_);
 }
 
 // Some heuristic numbers used when formatting generated code. These heuristics
@@ -862,17 +1079,32 @@ static auto EstimateAvgMethodDeclLines(SourceGen::MethodDeclParams params,
   return 1.0 + static_cast<double>(param_lines) / (params.max_params + 1);
 }
 
+// The average number of lines a body's free-function calls add: one line per
+// call (half the maximum count on average) plus the two `acc64` companion
+// lines whenever the body makes any calls at all. Zero when the file declares
+// no free functions to call.
+static auto EstimateAvgBodyCallLines(const SourceGen::DenseDeclParams& params)
+    -> double {
+  if (params.free_function_decls_per_class == 0) {
+    return 0.0;
+  }
+  double max_calls = params.class_params.max_body_calls;
+  double prob_any_call = max_calls / (max_calls + 1.0);
+  return max_calls / 2.0 + 2.0 * prob_any_call;
+}
+
 // Estimates the average number of lines in an inline function definition,
 // including its signature and body but not the leading comment. The body has,
 // on average: an accumulator line, one consumption line per parameter
 // (including the guaranteed mirror parameter, modeled by `extra_params` = 1 in
-// the signature estimate too; see `EstimateAvgFunctionDeclLines`), half of
-// `max_body_locals` local-variable lines (one per local), a write-back line
-// whenever there is at least one local, control-flow blocks averaging half the
-// maximum count at the average construct size, a return line, and a closing
-// brace line.
-static auto EstimateAvgInlineFunctionDefLines(SourceGen::ClassParams params)
-    -> double {
+// the signature estimate too; see `EstimateAvgFunctionDeclLines`), the body's
+// average free-function call lines, half of `max_body_locals` local-variable
+// lines (one per local), a write-back line whenever there is at least one
+// local, control-flow blocks averaging half the maximum count at the average
+// construct size, a return line, and a closing brace line.
+static auto EstimateAvgInlineFunctionDefLines(
+    const SourceGen::DenseDeclParams& dense_params) -> double {
+  const SourceGen::ClassParams& params = dense_params.class_params;
   constexpr int MirrorParams = 1;
   double avg_params =
       params.inline_function_decl_params.max_params / 2.0 + MirrorParams;
@@ -883,15 +1115,27 @@ static auto EstimateAvgInlineFunctionDefLines(SourceGen::ClassParams params)
       AvgCfgConstructLines() * params.max_body_blocks / 2.0;
   return EstimateAvgFunctionDeclLines(params.inline_function_decl_params,
                                       MirrorParams) +
-         1.0 + avg_params + avg_locals + prob_any_local + avg_block_lines + 2.0;
+         1.0 + avg_params + EstimateAvgBodyCallLines(dense_params) +
+         avg_locals + prob_any_local + avg_block_lines + 2.0;
 }
 
 // Note that this should match the heuristics used when formatting.
 // TODO: See top-level TODO about line estimates and formatting.
-static auto EstimateAvgClassDefLines(SourceGen::ClassParams params,
-                                     bool define_decls_out_of_line) -> double {
+//
+// The file's free function declarations are also charged here, scaled per
+// class, since their total count scales with the class count.
+static auto EstimateAvgClassDefLines(
+    const SourceGen::DenseDeclParams& dense_params) -> double {
+  const SourceGen::ClassParams& params = dense_params.class_params;
+  bool define_decls_out_of_line = dense_params.define_decls_out_of_line;
   // Comment line, and class open line.
   double avg = 2.0;
+
+  // The per-class share of the free function declarations: a blank line, a
+  // comment line, and the declaration lines for each.
+  avg += dense_params.free_function_decls_per_class *
+         (2.0 +
+          EstimateAvgFunctionDeclLines(dense_params.free_function_decl_params));
 
   // When declarations are defined out-of-line, each one gains a guaranteed
   // "mirror" parameter beyond its random count; model that in the signature
@@ -911,7 +1155,7 @@ static auto EstimateAvgClassDefLines(SourceGen::ClassParams params,
   avg += (2.0 + EstimateAvgMethodDeclLines(params.private_method_decl_params,
                                            decl_extra_params)) *
          params.private_method_decls;
-  avg += (2.0 + EstimateAvgInlineFunctionDefLines(params)) *
+  avg += (2.0 + EstimateAvgInlineFunctionDefLines(dense_params)) *
          params.inline_function_defs;
 
   bool generate_bodies =
@@ -936,14 +1180,18 @@ static auto EstimateAvgClassDefLines(SourceGen::ClassParams params,
   // definition after the class: a blank separator line, a comment line, a
   // single-line signature, an accumulator line, a consumption line per
   // parameter (the average random count plus the guaranteed mirror parameter,
-  // plus one for `self` on methods), control-flow blocks averaging half the
-  // maximum count at the average construct size, a return line, and a closing
-  // brace line.
+  // plus one for `self` on methods), the body's average free-function call
+  // lines (with their `acc64` companion lines), control-flow blocks averaging
+  // half the maximum count at the average construct size, a return line, and
+  // a closing brace line.
   if (define_decls_out_of_line) {
     double avg_block_lines =
         AvgCfgConstructLines() * params.max_body_blocks / 2.0;
-    auto out_of_line_lines = [avg_block_lines](int max_params, bool is_method) {
-      return 7.0 + max_params / 2.0 + (is_method ? 1.0 : 0.0) + avg_block_lines;
+    double avg_call_lines = EstimateAvgBodyCallLines(dense_params);
+    auto out_of_line_lines = [avg_block_lines, avg_call_lines](int max_params,
+                                                               bool is_method) {
+      return 7.0 + max_params / 2.0 + (is_method ? 1.0 : 0.0) +
+             avg_block_lines + avg_call_lines;
     };
     avg += out_of_line_lines(params.public_function_decl_params.max_params,
                              /*is_method=*/false) *
@@ -974,8 +1222,7 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   // Note that we want a blank line after our file comment block, so every class
   // needs a blank line.
   constexpr int NumFileCommentLines = 4;
-  double avg_class_lines = EstimateAvgClassDefLines(
-      params.class_params, params.define_decls_out_of_line);
+  double avg_class_lines = EstimateAvgClassDefLines(params);
   CARBON_CHECK(target_lines > NumFileCommentLines + avg_class_lines,
                "Not enough target lines to generate a single class!");
   // Round to the nearest whole class: truncating can leave the file up to a
@@ -1005,9 +1252,8 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
     source << "#include <utility>\n";
   }
 
-  auto class_gen_state =
-      ClassGenState(*this, num_classes, params.class_params,
-                    params.type_use_params, params.define_decls_out_of_line);
+  auto class_gen_state = ClassGenState(*this, num_classes, params);
+  GenerateFreeFunctionDecls(class_gen_state, source);
   for ([[maybe_unused]] auto _ : llvm::seq(num_classes)) {
     source << "\n";
     GenerateClassDef(params.class_params, class_gen_state, source);
@@ -1034,6 +1280,11 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   CARBON_CHECK(class_gen_state.outofline_block_counts().empty());
   CARBON_CHECK(class_gen_state.inline_block_kinds().empty());
   CARBON_CHECK(class_gen_state.outofline_block_kinds().empty());
+  CARBON_CHECK(class_gen_state.inline_call_counts().empty());
+  CARBON_CHECK(class_gen_state.outofline_call_counts().empty());
+  CARBON_CHECK(class_gen_state.inline_call_refs().empty());
+  CARBON_CHECK(class_gen_state.outofline_call_refs().empty());
+  CARBON_CHECK(class_gen_state.free_param_names().empty());
   CARBON_CHECK(class_gen_state.inline_function_names().empty());
   CARBON_CHECK(class_gen_state.inline_param_names().empty());
   CARBON_CHECK(class_gen_state.local_names().empty());
@@ -1151,7 +1402,7 @@ static constexpr llvm::StringRef NonCarbonCppKeywords[] = {
 // (for example, an inline function named `Make` would clash with the class's
 // `Make` factory), so they are excluded from identifier generation.
 static constexpr llvm::StringRef ReservedGeneratedNames[] = {
-    "Make", "Checksum", "acc", "tag", "idx"};
+    "Make", "Checksum", "acc", "acc64", "tag", "idx"};
 
 // Returns a random identifier string of the specified length.
 //
@@ -1494,6 +1745,69 @@ class SourceGen::UniqueIdentifierPopper {
   Set<llvm::StringRef> set_;
 };
 
+// Emits `call_count` calls to free functions into a body: each call consumes
+// its result into the accumulator via the reference's consumer template, and
+// the body first declares (and unconditionally consumes) a standard `acc64`
+// companion accumulator that pointer-typed call arguments point at. `acc64`
+// is emitted for every body with a nonzero call count -- whether or not the
+// drawn callees take pointers -- so its presence depends only on the
+// deterministically-distributed counts.
+auto SourceGen::ClassGenState::EmitBodyCalls(
+    bool is_cpp, llvm::SmallVectorImpl<CallRef>& refs, int call_count,
+    llvm::StringRef body_indent, llvm::raw_ostream& os) -> void {
+  if (call_count == 0) {
+    return;
+  }
+  if (!is_cpp) {
+    os << body_indent << "var acc64: i64 = 0;\n";
+    os << body_indent << "acc = acc + (acc64 as i32);\n";
+  } else {
+    os << body_indent << "std::int64_t acc64 = 0;\n";
+    os << body_indent << "acc = acc + static_cast<int>(acc64);\n";
+  }
+  for ([[maybe_unused]] auto _ : llvm::seq(call_count)) {
+    CallRef ref = refs.pop_back_val();
+    const FreeFunction& callee = free_functions_[ref.callee];
+    auto [prefix, suffix] = ref.consumer.split("{0}");
+    os << body_indent << "acc = acc + " << prefix << callee.name << "("
+       << callee.args_text << ")" << suffix << ";\n";
+  }
+}
+
+// Generates the file's free function declarations, in a shuffled order, each
+// with a comment and blank separator line. The signatures were bound
+// deterministically when the state was built; only the parameter names are
+// drawn here, from a dedicated pool.
+auto SourceGen::GenerateFreeFunctionDecls(ClassGenState& state,
+                                          llvm::raw_ostream& os) -> void {
+  for (int i : state.free_emission_order()) {
+    const ClassGenState::FreeFunction& fn = state.free_functions()[i];
+    os << "\n// TODO: make better comment text\n";
+    os << (IsCpp() ? "auto " : "fn ") << fn.name << "(";
+    int param_count = fn.param_types.size();
+    if (param_count > NumSingleLineFunctionParams) {
+      os << "\n    ";
+    }
+    UniqueIdentifierPopper unique_param_names(*this, state.free_param_names());
+    for (auto [j, type] : llvm::enumerate(fn.param_types)) {
+      if (j > 0) {
+        if ((j % MaxParamsPerLine) == 0) {
+          os << ",\n    ";
+        } else {
+          os << ", ";
+        }
+      }
+      llvm::StringRef param = unique_param_names.Pop();
+      if (!IsCpp()) {
+        os << param << ": " << type;
+      } else {
+        os << type << " " << param;
+      }
+    }
+    os << ") -> " << fn.return_type << ";\n";
+  }
+}
+
 // Generates a function declaration and writes it to the provided stream.
 //
 // The declaration can be configured with a function name, private modifier,
@@ -1557,7 +1871,7 @@ auto SourceGen::GenerateFunctionDecl(ClassGenState& state, llvm::StringRef name,
   // Exclude class names: a declaration defined out-of-line has its parameters
   // in scope of a body that references the return type class via `Make`.
   UniqueIdentifierPopper unique_param_names(*this, state.param_names(),
-                                            &state.class_name_set());
+                                            &state.file_scope_name_set());
   for (int i : llvm::seq(param_count)) {
     // `self` occupies the first slot for Carbon methods, so shift the index
     // used for separators and line wrapping.
@@ -1646,8 +1960,9 @@ static auto EmitBodyBlocks(int block_count,
 // there is always at least the mirror parameter to consume.
 auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
                                      llvm::StringRef class_name,
-                                     const FunctionSig& sig, int block_count,
-                                     llvm::raw_ostream& os) -> void {
+                                     const FunctionSig& sig, int call_count,
+                                     int block_count, llvm::raw_ostream& os)
+    -> void {
   os << "// TODO: make better comment text\n";
   if (!IsCpp()) {
     os << "fn " << class_name << "." << sig.name;
@@ -1689,6 +2004,8 @@ auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
     EmitConsumer(consumer, param, os);
     os << ";\n";
   }
+  state.EmitBodyCalls(IsCpp(), state.outofline_call_refs(), call_count,
+                      /*body_indent=*/"  ", os);
   EmitBodyBlocks(block_count, state.outofline_block_kinds(), IsCpp(),
                  /*body_indent=*/"  ", os);
 
@@ -1717,7 +2034,8 @@ auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
 // is always at least the mirror parameter to consume.
 auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
                                           llvm::StringRef name, int param_count,
-                                          int local_count, int block_count,
+                                          int local_count, int call_count,
+                                          int block_count,
                                           llvm::StringRef indent,
                                           llvm::raw_ostream& os) -> void {
   os << indent << "// TODO: make better comment text\n";
@@ -1733,10 +2051,10 @@ auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
     os << "\n" << indent << "    ";
   }
   // Parameter names use the full length distribution, so they can collide
-  // with a class name; exclude the class names so a parameter never shadows
-  // the class produced by this body's `Make` call.
+  // with a file-scope name; exclude those so a parameter never shadows a
+  // class or free function that this body references.
   UniqueIdentifierPopper unique_param_names(*this, state.inline_param_names(),
-                                            &state.class_name_set());
+                                            &state.file_scope_name_set());
   llvm::SmallVector<std::pair<llvm::StringRef, ClassGenState::TypeUse>>
       sig_params;
   sig_params.reserve(param_count);
@@ -1771,6 +2089,8 @@ auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
     EmitConsumer(type.consumer, param, os);
     os << ";\n";
   }
+  state.EmitBodyCalls(IsCpp(), state.inline_call_refs(), call_count,
+                      body_indent, os);
 
   // Emit the local variables, each initialized by a small sub-expression. The
   // first uses a literal; each subsequent one references the previous local so
@@ -1898,7 +2218,7 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
   // names from them. Inline function names can't collide with class names by
   // length alone and need no exclusion.
   UniqueIdentifierPopper unique_member_names(
-      *this, state.method_function_names(), &state.class_name_set());
+      *this, state.method_function_names(), &state.file_scope_name_set());
   UniqueIdentifierPopper unique_inline_names(*this,
                                              state.inline_function_names());
 
@@ -1932,6 +2252,7 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
         state, unique_inline_names.Pop(),
         state.inline_function_param_counts().pop_back_val(),
         state.local_counts().pop_back_val(),
+        state.inline_call_counts().pop_back_val(),
         state.inline_block_counts().pop_back_val(), /*indent=*/"  ", os);
   }
   for ([[maybe_unused]] auto _ : llvm::seq(params.public_method_decls)) {
@@ -1968,7 +2289,7 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
   // class names for the same reason as members. Pair each field name with its
   // type for both the `Make` factory and the field declarations.
   UniqueIdentifierPopper unique_field_names(*this, state.field_names(),
-                                            &state.class_name_set());
+                                            &state.file_scope_name_set());
   unique_field_names.Reserve(unique_member_names.used());
   llvm::SmallVector<std::pair<llvm::StringRef, llvm::StringRef>> fields;
   fields.reserve(field_type_names.size());
@@ -2018,6 +2339,7 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
   for (const FunctionSig& sig : decl_sigs) {
     os << "\n";
     GenerateOutOfLineDef(state, name, sig,
+                         state.outofline_call_counts().pop_back_val(),
                          state.outofline_block_counts().pop_back_val(), os);
   }
 }

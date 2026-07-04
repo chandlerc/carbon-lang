@@ -119,6 +119,14 @@ class SourceGen {
     // distributed) count varies. The actual count for each body is sampled
     // from a deterministic distribution over `[0, max_body_blocks]`.
     int max_body_blocks = 2;
+
+    // The maximum number of calls a generated function body makes to the
+    // file's free function declarations (see
+    // `DenseDeclParams::free_function_decls_per_class`), consuming each
+    // call's result into the accumulator. The count for each body is sampled
+    // from a deterministic distribution over `[0, max_body_calls]`; no calls
+    // are generated when the file declares no free functions.
+    int max_body_calls = 2;
   };
 
   // Parameters used to select type _uses_, as opposed to definitions.
@@ -168,6 +176,12 @@ class SourceGen {
     // as its type allows: an `if`/ternary expression for `bool`, arithmetic
     // or an explicit narrowing conversion for integers, a dereference for
     // pointers, and element access for tuples.
+    // Finally, each type provides an expression producing an argument of the
+    // type for a generated call. When empty, the value expression is used;
+    // types without a value expression (pointers) must provide one. Argument
+    // expressions may reference the standard body accumulators `acc` (`i32`)
+    // and `acc64` (`i64`), which are in scope in every generated body that
+    // makes calls.
     struct FixedTypeWeight {
       llvm::StringRef carbon_spelling;
       llvm::StringRef cpp_spelling;
@@ -176,6 +190,8 @@ class SourceGen {
       llvm::StringRef cpp_value;
       llvm::SmallVector<llvm::StringRef> carbon_consumers;
       llvm::SmallVector<llvm::StringRef> cpp_consumers;
+      llvm::StringRef carbon_arg;
+      llvm::StringRef cpp_arg;
     };
 
     llvm::SmallVector<FixedTypeWeight> fixed_type_weights = {
@@ -207,13 +223,17 @@ class SourceGen {
          .cpp_spelling = "int*",
          .weight = 5,
          .carbon_consumers = {"*{0} + 1", "*{0} * 2"},
-         .cpp_consumers = {"*{0} + 1", "*{0} * 2"}},
+         .cpp_consumers = {"*{0} + 1", "*{0} * 2"},
+         .carbon_arg = "&acc",
+         .cpp_arg = "&acc"},
         {.carbon_spelling = "i64*",
          .cpp_spelling = "std::int64_t*",
          .weight = 5,
          .carbon_consumers = {"(*{0} as i32) - 2", "((*{0} * 2) as i32)"},
          .cpp_consumers = {"static_cast<int>(*{0}) - 2",
-                           "static_cast<int>(*{0} * 2)"}},
+                           "static_cast<int>(*{0} * 2)"},
+         .carbon_arg = "&acc64",
+         .cpp_arg = "&acc64"},
 
         // A weight of 5 distributed across tuple structures
         {.carbon_spelling = "(bool, i64)",
@@ -229,7 +249,9 @@ class SourceGen {
          .weight = 3,
          .carbon_consumers = {"{0}.0 + 1", "{0}.0 * 2", "(*{0}.1 as i32) - 1"},
          .cpp_consumers = {"{0}.first + 1", "{0}.first * 2",
-                           "static_cast<int>(*{0}.second) - 1"}},
+                           "static_cast<int>(*{0}.second) - 1"},
+         .carbon_arg = "(0, &acc64)",
+         .cpp_arg = "{0, &acc64}"},
     };
 
     // Consumer templates for class-typed values, all built on the generated
@@ -262,6 +284,16 @@ class SourceGen {
     // declaration-heavy output, while keeping the same ratio of inline
     // definitions.
     bool define_decls_out_of_line = false;
+
+    // The number of free function declarations emitted at the top of the
+    // file, scaled by the number of classes. These form the callable API that
+    // generated bodies' calls target (see `ClassParams::max_body_calls`).
+    // Their signatures use only fixed types -- they precede every class
+    // declaration -- and are fully determined, with names bound, before any
+    // shuffling, so the varying number of calls each function receives never
+    // changes the byte total.
+    int free_function_decls_per_class = 0;
+    FunctionDeclParams free_function_decl_params = {.max_params = 4};
   };
 
   // Access a global instance of this type to generate Carbon code for
@@ -396,19 +428,26 @@ class SourceGen {
                             bool is_private, bool is_method, int param_count,
                             llvm::StringRef indent, llvm::raw_ostream& os,
                             FunctionSig* captured = nullptr) -> void;
+  // Generates the file's free function declarations, the targets of the call
+  // graph generated into bodies.
+  auto GenerateFreeFunctionDecls(ClassGenState& state, llvm::raw_ostream& os)
+      -> void;
   // Generates an out-of-line definition matching a captured declaration; its
-  // body consumes every parameter, runs `block_count` control-flow blocks, and
-  // produces the return value via `ProduceValue`.
+  // body consumes every parameter, makes `call_count` calls to free
+  // functions, runs `block_count` control-flow blocks, and produces the
+  // return value via `ProduceValue`.
   auto GenerateOutOfLineDef(ClassGenState& state, llvm::StringRef class_name,
-                            const FunctionSig& sig, int block_count,
-                            llvm::raw_ostream& os) -> void;
+                            const FunctionSig& sig, int call_count,
+                            int block_count, llvm::raw_ostream& os) -> void;
   // Generates an inline function definition: a body consuming every parameter,
-  // with local variables and `block_count` control-flow blocks, followed by a
-  // `return` that produces the return value via `ProduceValue`.
+  // with free-function calls, local variables, and `block_count` control-flow
+  // blocks, followed by a `return` that produces the return value via
+  // `ProduceValue`.
   auto GenerateInlineFunctionDef(ClassGenState& state, llvm::StringRef name,
                                  int param_count, int local_count,
-                                 int block_count, llvm::StringRef indent,
-                                 llvm::raw_ostream& os) -> void;
+                                 int call_count, int block_count,
+                                 llvm::StringRef indent, llvm::raw_ostream& os)
+      -> void;
   // Generates a class's nested `Make` factory, constructing a value of the
   // class from a struct literal whose fields are produced via `ProduceValue`.
   auto GenerateMakeFunction(
