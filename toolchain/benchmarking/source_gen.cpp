@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <numeric>
+#include <random>
 #include <string>
 #include <utility>
 
@@ -73,6 +74,398 @@ static auto WeightedFixedTypes(
   }
 }
 
+// The kinds of statement in a body plan. A plan fixes how many statements of
+// each kind a body has at each depth of nesting, and the body arranges them
+// randomly. A statement has the same size wherever it lands at its depth, so
+// the arrangement doesn't change the body's size.
+//
+// TODO: Plans only declare and update `i32` locals, read each parameter once,
+// and make no calls. Real bodies have locals of many types, read parameters and
+// fields throughout, and make calls in most statements. Add those statements
+// and expressions, fixing each one's spelling before the shuffle as the type
+// use pools do, so that sizes stay the same for every seed.
+enum class PlanKind : uint8_t {
+  // `var <local>: i32 = <expr>;`
+  Local,
+  // `<local> = <expr>;`
+  Update,
+  // `if (<cond>) {`, a block, and `}`.
+  If,
+  // `if (<cond>) {`, a block, `} else {`, a block, and `}`.
+  IfElse,
+  // `if (<cond>) {`, a block, `} else if (<cond>) {`, a block, and `}`.
+  ElseIf,
+  // `while (<cond>) {`, a block, and `}`.
+  While,
+  // `if (<cond>) {`, `return <value>;`, and `}`.
+  GuardReturn,
+  // `if (<cond>) {`, `break;` or `continue;`, and `}`, in a loop's block.
+  GuardExit,
+  // `<local> = <local> + <reads>;`, where the reads apply a consumer template
+  // to each parameter, and read `self` in a method. Bodies add one of these to
+  // their plan's statements at depth 0.
+  ReadParams,
+};
+
+// The number of blocks that a statement of `kind` opens.
+static auto NumPlanBlocks(PlanKind kind) -> int {
+  switch (kind) {
+    case PlanKind::If:
+    case PlanKind::While:
+      return 1;
+    case PlanKind::IfElse:
+    case PlanKind::ElseIf:
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+// A statement in a body plan. `form` selects among the kind's spellings.
+struct PlanStmt {
+  PlanKind kind;
+  int form;
+};
+
+// The expressions and conditions in plan statements. `{0}` and `{1}` are
+// locals, which all have the same length. Conditions compare a single local, so
+// that they can't compare a local with itself.
+static constexpr llvm::StringLiteral PlanExprs[] = {
+    "{0} + 1", "{0} * 2", "{0} - {1}", "({0} % 7) + {1}"};
+static constexpr llvm::StringLiteral PlanConds[] = {"{0} > 3", "{0} < 9",
+                                                    "{0} == 2", "{0} != 5"};
+
+// The statements of a body plan at each depth. The statement that a guard
+// returns or exits with is one depth below the guard, and isn't listed.
+struct BodyPlan {
+  llvm::SmallVector<llvm::SmallVector<PlanStmt>> levels;
+  // The number of lines, and of locals, in the plan's statements.
+  int lines = 0;
+  int locals = 0;
+};
+
+// The calibration of body plans, which approximates the bodies in a sample of
+// the Carbon toolchain's, LLVM's, and Clang's implementation files, as
+// classified with libclang. Bodies with a `switch` are excluded.
+//
+// By the plan's size, the percentages of plans with each maximum depth, and
+// the number of guards at a depth per statement at the next depth.
+struct PlanShapeRow {
+  int min_statements;
+  std::array<int, 6> max_depth_percents;
+  double guards_per_next_statement;
+};
+static constexpr PlanShapeRow PlanShapeTable[] = {
+    {.min_statements = 0,
+     .max_depth_percents = {100, 0, 0, 0, 0, 0},
+     .guards_per_next_statement = 0.0},
+    {.min_statements = 2,
+     .max_depth_percents = {25, 62, 13, 0, 0, 0},
+     .guards_per_next_statement = 0.65},
+    {.min_statements = 5,
+     .max_depth_percents = {8, 64, 25, 3, 0, 0},
+     .guards_per_next_statement = 0.47},
+    {.min_statements = 8,
+     .max_depth_percents = {7, 46, 34, 11, 2, 0},
+     .guards_per_next_statement = 0.32},
+    {.min_statements = 13,
+     .max_depth_percents = {2, 36, 39, 18, 4, 1},
+     .guards_per_next_statement = 0.21},
+    {.min_statements = 20,
+     .max_depth_percents = {2, 21, 42, 25, 7, 3},
+     .guards_per_next_statement = 0.155},
+    {.min_statements = 29,
+     .max_depth_percents = {0, 11, 32, 35, 17, 5},
+     .guards_per_next_statement = 0.12},
+    {.min_statements = 43,
+     .max_depth_percents = {0, 2, 23, 42, 21, 12},
+     .guards_per_next_statement = 0.1},
+    {.min_statements = 67,
+     .max_depth_percents = {0, 5, 4, 29, 30, 32},
+     .guards_per_next_statement = 0.115},
+};
+// By a plan's maximum depth, the shares of its statements at each depth. Every
+// body also has three statements at depth 0, so plans have a lower share there
+// than real bodies.
+static constexpr std::array<double, 6> PlanDepthShares[] = {
+    {1.0, 0.0, 0.0, 0.0, 0.0, 0.0},      {0.6, 0.4, 0.0, 0.0, 0.0, 0.0},
+    {0.38, 0.45, 0.17, 0.0, 0.0, 0.0},   {0.25, 0.38, 0.27, 0.10, 0.0, 0.0},
+    {0.17, 0.29, 0.28, 0.18, 0.08, 0.0}, {0.13, 0.25, 0.24, 0.19, 0.13, 0.06},
+};
+// The number of guard exits per loop.
+static constexpr double ExitsPerLoop = 0.35;
+// The average number of statements in a block of an `if`, `else`, or `while`.
+static constexpr double StatementsPerBlock = 2.1;
+// The shares of those blocks that are a loop's, and that are one of the two
+// blocks of an `if` with an `else` or `else if`.
+static constexpr double LoopBlockShare = 0.15;
+static constexpr double ElseBlockShare = 0.3;
+// The share of those `if` statements with an `else if`.
+static constexpr double ElseIfShare = 0.42;
+// How many times more likely a loop body is than another block of the same size
+// to get each further statement when arranging a body.
+static constexpr int LoopBodyWeight = 3;
+// The shares of the statements at depth 0, and deeper, that are locals.
+static constexpr double TopLocalShare = 0.35;
+static constexpr double NestedLocalShare = 0.25;
+
+// Rounds a fractional count down or up, up with a probability of its
+// fractional part.
+using RoundCountFn = llvm::function_ref<auto(double count)->int>;
+
+// Returns the maximum depth of the `variant`th plan with `statements`
+// statements. The variants of a size follow the distribution in its row of
+// `PlanShapeTable`: multiples of the golden ratio spread their choices evenly.
+static auto ChoosePlanMaxDepth(const PlanShapeRow& shape, int statements,
+                               int variant) -> int {
+  int choice = static_cast<int>(
+      std::fmod((variant + 0.5) * 0.6180339887498949, 1.0) * 100);
+  int max_depth = 0;
+  for (int percent : shape.max_depth_percents) {
+    choice -= percent;
+    if (choice < 0) {
+      break;
+    }
+    ++max_depth;
+  }
+  return std::min(max_depth, statements - 1);
+}
+
+// Splits `statements` statements between depths 0 through `max_depth`,
+// following `PlanDepthShares` and giving each depth at least one.
+static auto SplitPlanDepths(int statements, int max_depth,
+                            RoundCountFn round_count)
+    -> llvm::SmallVector<int> {
+  llvm::SmallVector<int> depth_counts;
+  double cumulative = 0.0;
+  int assigned = 0;
+  for (double share :
+       llvm::ArrayRef(PlanDepthShares[max_depth]).take_front(max_depth)) {
+    cumulative += share;
+    int upto = std::min(statements, round_count(cumulative * statements));
+    depth_counts.push_back(upto - assigned);
+    assigned = upto;
+  }
+  depth_counts.push_back(statements - assigned);
+  for (int& count : depth_counts) {
+    if (count == 0) {
+      ++count;
+      --*llvm::max_element(depth_counts);
+    }
+  }
+  return depth_counts;
+}
+
+// Composes the plan of a body with `statements` statements, for the
+// `variant`th body of that size. Fractional counts round with a generator
+// seeded with the size and variant, so that bodies of one size vary while their
+// average follows the calibration, and nothing depends on the seed.
+static auto ComposeBodyPlan(int statements, int variant) -> BodyPlan {
+  BodyPlan plan;
+  if (statements == 0) {
+    return plan;
+  }
+  std::mt19937 phases(statements * 7919 + variant);
+  auto round_count = [&](double count) {
+    double phase = static_cast<double>(phases()) / (1ULL << 32);
+    return static_cast<int>(std::floor(count + phase));
+  };
+
+  const PlanShapeRow* shape = PlanShapeTable;
+  for (const PlanShapeRow& row : PlanShapeTable) {
+    if (statements >= row.min_statements) {
+      shape = &row;
+    }
+  }
+  llvm::SmallVector<int> depth_counts = SplitPlanDepths(
+      statements, ChoosePlanMaxDepth(*shape, statements, variant), round_count);
+
+  plan.levels.resize(depth_counts.size());
+  // Each kind's statements take its forms in turn.
+  std::array<int, static_cast<int>(PlanKind::ReadParams) + 1> next_forms = {};
+  auto add = [&](int depth, PlanKind kind, int count) {
+    for ([[maybe_unused]] auto _ : llvm::seq(count)) {
+      int& next_form = next_forms[static_cast<int>(kind)];
+      plan.levels[depth].push_back({.kind = kind, .form = variant + next_form});
+      ++next_form;
+    }
+  };
+
+  // The statements at a depth that guards at the previous depth imply.
+  int guard_children = 0;
+  // The blocks at a depth, and how many of them are loop bodies.
+  int blocks = 1;
+  int loop_blocks = 0;
+  int num_depths = depth_counts.size();
+  for (int depth : llvm::seq(num_depths)) {
+    int count = depth_counts[depth];
+    int heads = count - guard_children;
+    int next = depth + 1 < num_depths ? depth_counts[depth + 1] : 0;
+    int guards = 0;
+    int exits = 0;
+    int ifs = 0;
+    int pairs = 0;
+    int loops = 0;
+    int next_blocks = 0;
+    if (next > 0) {
+      // Guards' statements can't hold deeper ones, so leave a free statement at
+      // the next depth when there are any.
+      int min_free = depth + 2 < num_depths ? 1 : 0;
+      exits = std::min({loop_blocks, round_count(ExitsPerLoop * loop_blocks),
+                        heads, next - min_free});
+      guards = std::min({round_count(shape->guards_per_next_statement * next),
+                         heads - exits, next - exits - min_free});
+      int free = next - guards - exits;
+      // Keep a statement at this depth to hold the next depth's free
+      // statements.
+      if (free > 0 && heads == guards + exits) {
+        if (guards > 0) {
+          --guards;
+        } else {
+          --exits;
+        }
+        ++free;
+      }
+      if (free > 0) {
+        next_blocks =
+            std::clamp(round_count(free / StatementsPerBlock), 1, free);
+        loops =
+            std::min(round_count(LoopBlockShare * next_blocks), next_blocks);
+        pairs = std::min(round_count(ElseBlockShare * next_blocks / 2),
+                         (next_blocks - loops) / 2);
+        ifs = next_blocks - loops - 2 * pairs;
+        // Fit the statements that open blocks into this depth, merging blocks
+        // when they don't fit.
+        int room = heads - guards - exits;
+        while (ifs + pairs + loops > room) {
+          if (ifs >= 2) {
+            ifs -= 2;
+            ++pairs;
+          } else if (ifs > 0) {
+            --ifs;
+            --next_blocks;
+          } else if (loops > 0) {
+            --loops;
+            --next_blocks;
+          } else {
+            --pairs;
+            next_blocks -= 2;
+          }
+        }
+      }
+    }
+
+    int fixed = guards + exits + ifs + pairs + loops;
+    // Each block at this depth ends with a statement that isn't a local.
+    int max_locals = heads - fixed - std::max(0, blocks - fixed);
+    double local_share = depth == 0 ? TopLocalShare : NestedLocalShare;
+    int locals = std::clamp(round_count(local_share * heads), 0, max_locals);
+    int else_ifs = std::min(round_count(ElseIfShare * pairs), pairs);
+    add(depth, PlanKind::Local, locals);
+    add(depth, PlanKind::Update, heads - fixed - locals);
+    add(depth, PlanKind::If, ifs);
+    add(depth, PlanKind::IfElse, pairs - else_ifs);
+    add(depth, PlanKind::ElseIf, else_ifs);
+    add(depth, PlanKind::While, loops);
+    add(depth, PlanKind::GuardReturn, guards);
+    add(depth, PlanKind::GuardExit, exits);
+
+    // Each statement takes a line, and so does the `}` that ends each block and
+    // guard, and the line between the blocks of a pair.
+    plan.lines += count + ifs + loops + 2 * pairs + guards + exits;
+    plan.locals += locals;
+    guard_children = guards + exits;
+    blocks = next_blocks;
+    loop_blocks = loops;
+  }
+  return plan;
+}
+
+// Returns how many of `num_bodies` bodies have each size in `sizes`, in
+// proportion to its weight. The bodies left over from rounding down go to the
+// sizes with the largest remainders, the earliest first on ties.
+static auto ApportionBodySizes(int num_bodies,
+                               llvm::ArrayRef<SourceGen::BodySizeWeight> sizes)
+    -> llvm::SmallVector<int> {
+  int64_t total_weight = 0;
+  for (const SourceGen::BodySizeWeight& size : sizes) {
+    CARBON_CHECK(size.statements >= 0 && size.weight >= 0,
+                 "Body sizes and weights can't be negative.");
+    total_weight += size.weight;
+  }
+  CARBON_CHECK(total_weight > 0, "Body sizes need a positive total weight.");
+  llvm::SmallVector<int> counts;
+  llvm::SmallVector<int64_t> remainders;
+  int left_over = num_bodies;
+  for (const SourceGen::BodySizeWeight& size : sizes) {
+    int64_t share = static_cast<int64_t>(num_bodies) * size.weight;
+    counts.push_back(share / total_weight);
+    remainders.push_back(share % total_weight);
+    left_over -= counts.back();
+  }
+  llvm::SmallVector<int> order(sizes.size());
+  std::iota(order.begin(), order.end(), 0);
+  llvm::stable_sort(order, [&](int lhs, int rhs) {
+    return remainders[lhs] > remainders[rhs];
+  });
+  for (int index : llvm::ArrayRef(order).take_front(left_over)) {
+    ++counts[index];
+  }
+  return counts;
+}
+
+// Builds the plans for `num_bodies` bodies, with sizes following `sizes`. Each
+// size's plans spread evenly through the order, so that any stretch of the
+// order has a mix of sizes.
+static auto BuildBodyPlans(int num_bodies,
+                           llvm::ArrayRef<SourceGen::BodySizeWeight> sizes)
+    -> llvm::SmallVector<BodyPlan> {
+  struct Entry {
+    double position;
+    int statements;
+    int variant;
+  };
+  llvm::SmallVector<Entry> entries;
+  entries.reserve(num_bodies);
+  llvm::SmallVector<int> counts = ApportionBodySizes(num_bodies, sizes);
+  for (auto [size, count] : llvm::zip_equal(sizes, counts)) {
+    for (int variant : llvm::seq(count)) {
+      entries.push_back({.position = (variant + 0.5) / count,
+                         .statements = size.statements,
+                         .variant = variant});
+    }
+  }
+  llvm::stable_sort(entries, [](const Entry& lhs, const Entry& rhs) {
+    return lhs.position < rhs.position;
+  });
+  llvm::SmallVector<BodyPlan> plans;
+  plans.reserve(num_bodies);
+  for (const Entry& entry : entries) {
+    plans.push_back(ComposeBodyPlan(entry.statements, entry.variant));
+  }
+  return plans;
+}
+
+// Estimates the average number of lines in the plans of bodies with sizes
+// following `sizes`.
+static auto EstimateAvgBodyPlanLines(
+    llvm::ArrayRef<SourceGen::BodySizeWeight> sizes) -> double {
+  // Average over enough variants that their rounding evens out.
+  constexpr int NumVariants = 16;
+  double lines = 0.0;
+  int64_t total_weight = 0;
+  for (const SourceGen::BodySizeWeight& size : sizes) {
+    int size_lines = 0;
+    for (int variant : llvm::seq(NumVariants)) {
+      size_lines += ComposeBodyPlan(size.statements, variant).lines;
+    }
+    lines += static_cast<double>(size_lines) / NumVariants * size.weight;
+    total_weight += size.weight;
+  }
+  CARBON_CHECK(total_weight > 0, "Body sizes need a positive total weight.");
+  return lines / total_weight;
+}
+
 // The shuffled state used to generate some number of classes.
 //
 // This state encodes everything used to generate class definitions. The state
@@ -81,9 +474,7 @@ static auto WeightedFixedTypes(
 // Detailed comments for out-of-line methods are on their definitions.
 class SourceGen::ClassGenState {
  public:
-  ClassGenState(SourceGen& gen, int num_classes,
-                const ClassParams& class_params,
-                const TypeUseParams& type_use_params);
+  ClassGenState(SourceGen& gen, int num_classes, const DenseDeclParams& params);
 
   auto public_function_param_counts() -> llvm::SmallVectorImpl<int>& {
     return public_function_param_counts_;
@@ -105,6 +496,9 @@ class SourceGen::ClassGenState {
   auto forwarder_param_counts() -> llvm::SmallVectorImpl<int>& {
     return forwarder_param_counts_;
   }
+  // The plans of the out-of-line definitions' bodies. A definition uses the
+  // plan with the index of its return type's use; see `BuildTypePool`.
+  auto body_plans() -> llvm::ArrayRef<BodyPlan> { return body_plans_; }
 
   auto getter_field_types() -> llvm::SmallVectorImpl<llvm::StringRef>& {
     return getter_field_types_;
@@ -171,11 +565,13 @@ class SourceGen::ClassGenState {
     }
   }
 
-  // A use of a type drawn from a pool. A consumed use also has the consumer
-  // template that reads it.
+  // A use of a type drawn from a pool, and its index in the pool before the
+  // pool was shuffled. A consumed use also has the consumer template that reads
+  // it.
   struct TypeUse {
     llvm::StringRef name;
     llvm::StringRef consumer;
+    int index = -1;
   };
 
   // Each kind of type use draws from its own pool, so that every use in a pool
@@ -184,8 +580,8 @@ class SourceGen::ClassGenState {
   // constructs a value of its type, and "consumed" when a body reads it with a
   // consumer template.
 
-  // Return and parameter types of declarations, and field types when the file
-  // has no bodies.
+  // Return and parameter types of declarations without out-of-line
+  // definitions, and field types when the file has no bodies.
   auto GetDeclType() -> TypeUse { return GetValidTypeUse(decl_type_pool_); }
   // Parameter types of inline definitions, which are consumed.
   auto GetInlineParamType() -> TypeUse {
@@ -195,6 +591,16 @@ class SourceGen::ClassGenState {
   // bodies, which are produced.
   auto GetProducedType() -> TypeUse {
     return GetValidTypeUse(produced_type_pool_);
+  }
+  // Return types of declarations with out-of-line definitions, which are
+  // spelled twice and produced.
+  auto GetOutOfLineReturnType() -> TypeUse {
+    return GetValidTypeUse(out_of_line_return_pool_);
+  }
+  // Parameter types of declarations with out-of-line definitions, which are
+  // spelled twice and consumed.
+  auto GetOutOfLineParamType() -> TypeUse {
+    return GetValidTypeUse(out_of_line_param_pool_);
   }
   // `Make` produces every field when the file has bodies. Without bodies,
   // fields share the declaration pool, which can include types that have no
@@ -209,9 +615,13 @@ class SourceGen::ClassGenState {
   }
 
   auto has_bodies() -> bool { return has_bodies_; }
+  auto define_decls_out_of_line() -> bool { return define_decls_out_of_line_; }
   auto type_pools_empty() -> bool {
     return decl_type_pool_.uses.empty() && inline_param_pool_.uses.empty() &&
-           produced_type_pool_.uses.empty() && forward_type_pool_.uses.empty();
+           produced_type_pool_.uses.empty() &&
+           forward_type_pool_.uses.empty() &&
+           out_of_line_return_pool_.uses.empty() &&
+           out_of_line_param_pool_.uses.empty();
   }
 
  private:
@@ -239,6 +649,7 @@ class SourceGen::ClassGenState {
   llvm::SmallVector<int> inline_function_param_counts_;
   llvm::SmallVector<int> local_counts_;
   llvm::SmallVector<int> forwarder_param_counts_;
+  llvm::SmallVector<BodyPlan> body_plans_;
 
   // Getters return a copy of their field, and `Make` initializes it, so getter
   // and predicate fields have fixed types with a value expression. These types
@@ -248,8 +659,9 @@ class SourceGen::ClassGenState {
   llvm::SmallVector<PredicateField> predicate_fields_;
 
   llvm::SmallVector<llvm::StringRef> class_names_;
-  // Field names have their own pool because Carbon's `Make` spells each field
-  // name a second time.
+  // Out-of-line definitions spell declared function and method names a second
+  // time, and Carbon's `Make` does the same for field names, so these have
+  // separate pools.
   llvm::SmallVector<llvm::StringRef> decl_names_;
   llvm::SmallVector<llvm::StringRef> field_names_;
   llvm::SmallVector<llvm::StringRef> param_names_;
@@ -270,10 +682,13 @@ class SourceGen::ClassGenState {
   // Whether the file has any bodies. Then each class also gets a `Make`
   // function, a `Checksum` method, and a `tag` field.
   bool has_bodies_;
+  bool define_decls_out_of_line_;
   TypePool decl_type_pool_;
   TypePool inline_param_pool_;
   TypePool produced_type_pool_;
   TypePool forward_type_pool_;
+  TypePool out_of_line_return_pool_;
+  TypePool out_of_line_param_pool_;
   Set<llvm::StringRef> valid_type_names_;
 
   Set<llvm::StringRef> class_name_set_;
@@ -298,10 +713,12 @@ static auto Sum(const T& range) -> int {
 // generated so that we can distribute random components across all the
 // definitions.
 SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
-                                        const ClassParams& class_params,
-                                        const TypeUseParams& type_use_params)
+                                        const DenseDeclParams& params)
     : is_cpp_(gen.IsCpp()),
-      has_bodies_(NumInlineDefsPerClass(class_params) > 0) {
+      has_bodies_(NumInlineDefsPerClass(params.class_params) > 0 ||
+                  params.define_decls_out_of_line),
+      define_decls_out_of_line_(params.define_decls_out_of_line) {
+  const ClassParams& class_params = params.class_params;
   public_function_param_counts_ =
       gen.GetShuffledInts(num_classes * class_params.public_function_decls, 0,
                           class_params.public_function_decl_params.max_params);
@@ -322,9 +739,15 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
   field_names_ =
       gen.GetShuffledIdentifiers(num_classes * class_params.private_field_decls,
                                  /*min_length=*/MinMemberNameLength);
-  int num_params =
-      Sum(public_function_param_counts_) + Sum(public_method_param_counts_) +
-      Sum(private_function_param_counts_) + Sum(private_method_param_counts_);
+  int num_out_of_line_defs = define_decls_out_of_line_
+                                 ? num_classes * NumDeclsPerClass(class_params)
+                                 : 0;
+  // Each out-of-line definition has one parameter beyond its random count; see
+  // `BuildClassAndTypeNames`.
+  int num_params = Sum(public_function_param_counts_) +
+                   Sum(public_method_param_counts_) +
+                   Sum(private_function_param_counts_) +
+                   Sum(private_method_param_counts_) + num_out_of_line_defs;
   param_names_ = gen.GetShuffledIdentifiers(num_params);
 
   inline_function_param_counts_ =
@@ -336,7 +759,12 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
   // `BuildClassAndTypeNames`.
   int num_inline_params =
       Sum(inline_function_param_counts_) + num_inline_functions;
+  body_plans_ =
+      BuildBodyPlans(num_out_of_line_defs, params.out_of_line_body_sizes);
   int num_locals = Sum(local_counts_);
+  for (const BodyPlan& plan : body_plans_) {
+    num_locals += plan.locals;
+  }
   int num_getters = num_classes * class_params.inline_getters;
   int num_predicates = num_classes * class_params.inline_predicates;
   int num_forwarders = num_classes * class_params.inline_forwarders;
@@ -358,7 +786,8 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
   forwarder_param_names_ =
       gen.GetShuffledIdentifiers(Sum(forwarder_param_counts_));
 
-  BuildClassAndTypeNames(gen, num_classes, class_params, type_use_params);
+  BuildClassAndTypeNames(gen, num_classes, class_params,
+                         params.type_use_params);
 }
 
 auto SourceGen::ClassGenState::GetValidTypeUse(TypePool& pool) -> TypeUse {
@@ -396,7 +825,9 @@ auto SourceGen::ClassGenState::GetValidTypeUse(TypePool& pool) -> TypeUse {
 // With `producible_only`, the pool only uses fixed types that have a value
 // expression. With `consumed`, each use gets one of its type's consumer
 // templates, round-robin per type before the shuffle, so that the mix of
-// templates doesn't depend on the seed.
+// templates doesn't depend on the seed. Each use also records its index before
+// the shuffle, which pairs it with something else that doesn't depend on the
+// seed.
 //
 // `valid_type_names_` must already contain the fixed type spellings.
 auto SourceGen::ClassGenState::BuildTypePool(
@@ -503,6 +934,9 @@ auto SourceGen::ClassGenState::BuildTypePool(
   CARBON_CHECK(static_cast<int>(pool.uses.size()) == num_types);
   pool.last_index = num_types;
 
+  for (auto [index, use] : llvm::enumerate(pool.uses)) {
+    use.index = static_cast<int>(index);
+  }
   std::shuffle(pool.uses.begin(), pool.uses.end(), gen.rng_);
   return pool;
 }
@@ -571,13 +1005,29 @@ auto SourceGen::ClassGenState::BuildClassAndTypeNames(
       class_params.inline_function_defs,
       /*producible_only=*/false, /*consumed=*/true, type_use_params);
 
-  // Each class draws `decls_per_class` return types from this pool after its
-  // fields.
-  decl_type_pool_ = BuildTypePool(
-      gen,
-      num_decl_returns + num_decl_params + (num_fields - num_produced_fields),
-      decls_per_class,
-      /*producible_only=*/false, /*consumed=*/false, type_use_params);
+  if (!define_decls_out_of_line_) {
+    // Each class draws `decls_per_class` return types from this pool after its
+    // fields.
+    decl_type_pool_ = BuildTypePool(
+        gen,
+        num_decl_returns + num_decl_params + (num_fields - num_produced_fields),
+        decls_per_class,
+        /*producible_only=*/false, /*consumed=*/false, type_use_params);
+  } else {
+    // Each class draws `decls_per_class` return types from this pool after its
+    // fields. A body's guards also produce a value of its return type, so each
+    // use's index pairs it with the body plan that has the same index.
+    out_of_line_return_pool_ = BuildTypePool(
+        gen, num_decl_returns, decls_per_class,
+        /*producible_only=*/true, /*consumed=*/false, type_use_params);
+    // As for inline definitions, each declaration has one parameter beyond its
+    // random count, so that each class draws at least `decls_per_class`
+    // parameter types from this pool.
+    int num_decl_extra_params = num_decl_returns;
+    out_of_line_param_pool_ = BuildTypePool(
+        gen, num_decl_params + num_decl_extra_params, decls_per_class,
+        /*producible_only=*/false, /*consumed=*/true, type_use_params);
+  }
 
   // Each class draws `inline_forwarders` return types from this pool after its
   // fields.
@@ -687,20 +1137,28 @@ static auto EstimateAvgInlineFunctionDefLines(SourceGen::ClassParams params)
 
 // Note that this should match the heuristics used when formatting.
 // TODO: See top-level TODO about line estimates and formatting.
-static auto EstimateAvgClassDefLines(SourceGen::ClassParams params) -> double {
+static auto EstimateAvgClassDefLines(
+    const SourceGen::DenseDeclParams& dense_params) -> double {
+  const SourceGen::ClassParams& params = dense_params.class_params;
+  bool define_decls_out_of_line = dense_params.define_decls_out_of_line;
   // Comment line, and class open line.
   double avg = 2.0;
 
+  // Declarations with out-of-line definitions have an extra parameter.
+  int decl_extra_params = define_decls_out_of_line ? 1 : 0;
+
   // One comment line and blank line per function, plus the function lines.
-  avg +=
-      (2.0 + EstimateAvgFunctionDeclLines(params.public_function_decl_params)) *
-      params.public_function_decls;
-  avg += (2.0 + EstimateAvgMethodDeclLines(params.public_method_decl_params)) *
+  avg += (2.0 + EstimateAvgFunctionDeclLines(params.public_function_decl_params,
+                                             decl_extra_params)) *
+         params.public_function_decls;
+  avg += (2.0 + EstimateAvgMethodDeclLines(params.public_method_decl_params,
+                                           decl_extra_params)) *
          params.public_method_decls;
-  avg += (2.0 +
-          EstimateAvgFunctionDeclLines(params.private_function_decl_params)) *
+  avg += (2.0 + EstimateAvgFunctionDeclLines(
+                    params.private_function_decl_params, decl_extra_params)) *
          params.private_function_decls;
-  avg += (2.0 + EstimateAvgMethodDeclLines(params.private_method_decl_params)) *
+  avg += (2.0 + EstimateAvgMethodDeclLines(params.private_method_decl_params,
+                                           decl_extra_params)) *
          params.private_method_decls;
   avg += (2.0 + EstimateAvgInlineFunctionDefLines(params)) *
          params.inline_function_defs;
@@ -714,7 +1172,8 @@ static auto EstimateAvgClassDefLines(SourceGen::ClassParams params) -> double {
           forwarder_signature_lines) *
          params.inline_forwarders;
 
-  bool has_bodies = NumInlineDefsPerClass(params) > 0;
+  bool has_bodies =
+      NumInlineDefsPerClass(params) > 0 || define_decls_out_of_line;
 
   // A blank line and all the fields (if any), including `tag` when the file has
   // bodies.
@@ -728,6 +1187,15 @@ static auto EstimateAvgClassDefLines(SourceGen::ClassParams params) -> double {
   // line, a return line, and a closing brace line.
   if (has_bodies) {
     avg += 10.0;
+  }
+
+  // Each out-of-line definition has a blank line, a comment line, a signature
+  // line, an accumulator line, a line reading the parameters, its plan's lines,
+  // a return line, and a closing brace line.
+  if (define_decls_out_of_line) {
+    avg +=
+        (7.0 + EstimateAvgBodyPlanLines(dense_params.out_of_line_body_sizes)) *
+        NumDeclsPerClass(params);
   }
 
   // No need to account for the class close line, we have an extra blank line
@@ -745,7 +1213,7 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   // Note that we want a blank line after our file comment block, so every class
   // needs a blank line.
   constexpr int NumFileCommentLines = 4;
-  double avg_class_lines = EstimateAvgClassDefLines(params.class_params);
+  double avg_class_lines = EstimateAvgClassDefLines(params);
   CARBON_CHECK(target_lines > NumFileCommentLines + avg_class_lines,
                "Not enough target lines to generate a single class!");
   // Round to the nearest whole class. Truncating can leave the file nearly a
@@ -762,7 +1230,11 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
                 "// {0} target lines: {1} classes, {2} expected lines",
                 target_lines, num_classes, expected_lines)
          << "\n";
-  source << "//\n// Generating as an API file with dense declarations.\n";
+  source << "//\n// Generating as "
+         << (params.define_decls_out_of_line
+                 ? "an implementation file with out-of-line definitions"
+                 : "an API file with dense declarations")
+         << ".\n";
 
   // Carbon uses an implicitly imported prelude to get builtin types, but C++
   // requires header files so include those.
@@ -774,11 +1246,18 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
     source << "#include <utility>\n";
   }
 
-  auto class_gen_state = ClassGenState(*this, num_classes, params.class_params,
-                                       params.type_use_params);
+  auto class_gen_state = ClassGenState(*this, num_classes, params);
+  llvm::SmallVector<OutOfLineDef, 0> out_of_line_defs;
   for ([[maybe_unused]] auto _ : llvm::seq(num_classes)) {
     source << "\n";
-    GenerateClassDef(params.class_params, class_gen_state, source);
+    GenerateClassDef(params.class_params, class_gen_state, source,
+                     out_of_line_defs);
+  }
+  // Out-of-line definitions follow every class, as in an implementation file,
+  // where all of the API's declarations are visible.
+  for (const OutOfLineDef& def : out_of_line_defs) {
+    source << "\n";
+    GenerateOutOfLineDef(class_gen_state, def.class_name, def.sig, source);
   }
 
   // Make sure we consumed all the state.
@@ -1311,20 +1790,41 @@ auto SourceGen::EmitFunctionDecl(llvm::StringRef name, bool is_private,
 //
 // The declaration can be configured with a function name, private modifier,
 // whether it is a method, the parameter count, and how indented it is. Its
-// parameter names and types come from `state`.
+// parameter names and types come from `state`. With `captured`, the declaration
+// has an out-of-line definition, and records its signature in `captured`.
 auto SourceGen::GenerateFunctionDecl(ClassGenState& state, llvm::StringRef name,
                                      bool is_private, bool is_method,
                                      int param_count, llvm::StringRef indent,
-                                     llvm::raw_ostream& os) -> void {
-  UniqueIdentifierPopper unique_param_names(*this, state.param_names());
-  llvm::SmallVector<TypedName> params;
-  params.reserve(param_count);
-  for ([[maybe_unused]] auto _ : llvm::seq(param_count)) {
-    params.push_back(
-        {.name = unique_param_names.Pop(), .type = state.GetDeclType().name});
+                                     llvm::raw_ostream& os,
+                                     FunctionSig* captured) -> void {
+  bool out_of_line = captured != nullptr;
+  // Add the extra parameter; see `BuildClassAndTypeNames`.
+  if (out_of_line) {
+    param_count += 1;
   }
-  EmitFunctionDecl(name, is_private, is_method, params,
-                   state.GetDeclType().name, indent, os);
+  // Exclude class names so that a parameter can't shadow a class that an
+  // out-of-line definition names.
+  UniqueIdentifierPopper unique_param_names(*this, state.param_names(),
+                                            &state.class_name_set());
+  FunctionSig sig = {.name = name, .is_method = is_method};
+  sig.params.reserve(param_count);
+  sig.param_consumers.reserve(param_count);
+  for ([[maybe_unused]] auto _ : llvm::seq(param_count)) {
+    llvm::StringRef param = unique_param_names.Pop();
+    ClassGenState::TypeUse type =
+        out_of_line ? state.GetOutOfLineParamType() : state.GetDeclType();
+    sig.params.push_back({.name = param, .type = type.name});
+    sig.param_consumers.push_back(type.consumer);
+  }
+  ClassGenState::TypeUse return_type =
+      out_of_line ? state.GetOutOfLineReturnType() : state.GetDeclType();
+  sig.return_type = return_type.name;
+  sig.body_plan = return_type.index;
+  EmitFunctionDecl(name, is_private, is_method, sig.params, sig.return_type,
+                   indent, os);
+  if (captured) {
+    *captured = std::move(sig);
+  }
 }
 
 // Emits `format` with `name` substituted for its `{0}`.
@@ -1335,12 +1835,358 @@ static auto EmitTemplate(llvm::StringRef format, llvm::StringRef name,
   os << prefix << name << suffix;
 }
 
+// A statement of an arranged body. A statement that opens blocks opens them at
+// `first_block` and, for a second block, the index after it.
+struct ArrangedStmt {
+  PlanStmt plan;
+  int first_block = -1;
+};
+
+// A block of an arranged body: its statements, and whether it is a loop's body.
+struct ArrangedBlock {
+  llvm::SmallVector<int> stmts;
+  bool is_loop_body = false;
+};
+
+// A body plan's statements, arranged in blocks. The first block is the body's.
+struct ArrangedBody {
+  llvm::SmallVector<ArrangedStmt> stmts;
+  llvm::SmallVector<ArrangedBlock> blocks;
+};
+
+// Randomly arranges the statements of `plan`, along with a `ReadParams`
+// statement at depth 0. Each block gets at least one statement, and ends with a
+// statement that isn't a local, so that the statement after each local can read
+// it. Guard exits go in distinct loop bodies.
+//
+// The statements beyond the first in each block go in a block chosen with
+// probability proportional to its statements so far, counting loop bodies
+// `LoopBodyWeight` times. This gives a wider spread of block sizes than
+// choosing uniformly, and larger loop bodies, as in real bodies.
+static auto ArrangeBody(const BodyPlan& plan, absl::BitGen& rng)
+    -> ArrangedBody {
+  ArrangedBody body;
+  body.blocks.emplace_back();
+  llvm::SmallVector<int> level_blocks = {0};
+  int num_depths = std::max<int>(plan.levels.size(), 1);
+  for (int depth : llvm::seq(num_depths)) {
+    llvm::SmallVector<PlanStmt> exits;
+    llvm::SmallVector<PlanStmt> others;
+    llvm::SmallVector<PlanStmt> locals;
+    if (depth < static_cast<int>(plan.levels.size())) {
+      for (PlanStmt stmt : plan.levels[depth]) {
+        switch (stmt.kind) {
+          case PlanKind::GuardExit:
+            exits.push_back(stmt);
+            break;
+          case PlanKind::Local:
+            locals.push_back(stmt);
+            break;
+          default:
+            others.push_back(stmt);
+            break;
+        }
+      }
+    }
+    if (depth == 0) {
+      others.push_back({.kind = PlanKind::ReadParams, .form = 0});
+    }
+    std::shuffle(others.begin(), others.end(), rng);
+
+    // The block of each statement placed at this depth.
+    llvm::SmallVector<int> placed_blocks;
+    auto place = [&](int block, PlanStmt stmt) {
+      body.blocks[block].stmts.push_back(body.stmts.size());
+      body.stmts.push_back({.plan = stmt});
+      placed_blocks.push_back(block);
+    };
+    llvm::SmallVector<int> loop_bodies;
+    for (int block : level_blocks) {
+      if (body.blocks[block].is_loop_body) {
+        loop_bodies.push_back(block);
+      }
+    }
+    CARBON_CHECK(exits.size() <= loop_bodies.size());
+    std::shuffle(loop_bodies.begin(), loop_bodies.end(), rng);
+    for (auto [block, exit] : llvm::zip(loop_bodies, exits)) {
+      place(block, exit);
+    }
+    for (int block : level_blocks) {
+      if (body.blocks[block].stmts.empty()) {
+        CARBON_CHECK(!others.empty(), "Not enough statements to end blocks.");
+        place(block, others.pop_back_val());
+      }
+    }
+    for (int block : loop_bodies) {
+      placed_blocks.append(LoopBodyWeight - 1, block);
+    }
+    for (PlanStmt stmt : llvm::concat<PlanStmt>(others, locals)) {
+      int block =
+          placed_blocks[absl::Uniform<int>(rng, 0, placed_blocks.size())];
+      place(block, stmt);
+      if (body.blocks[block].is_loop_body) {
+        placed_blocks.append(LoopBodyWeight - 1, block);
+      }
+    }
+
+    for (int block : level_blocks) {
+      llvm::SmallVector<int>& stmts = body.blocks[block].stmts;
+      std::shuffle(stmts.begin(), stmts.end(), rng);
+      auto is_local = [&](int stmt) {
+        return body.stmts[stmt].plan.kind == PlanKind::Local;
+      };
+      if (is_local(stmts.back())) {
+        llvm::SmallVector<int> non_locals;
+        for (int i : llvm::seq<int>(stmts.size())) {
+          if (!is_local(stmts[i])) {
+            non_locals.push_back(i);
+          }
+        }
+        std::swap(
+            stmts.back(),
+            stmts[non_locals[absl::Uniform<int>(rng, 0, non_locals.size())]]);
+      }
+    }
+
+    // Open the blocks for the next depth.
+    llvm::SmallVector<int> next_blocks;
+    for (int block : level_blocks) {
+      for (int i : llvm::seq<int>(body.blocks[block].stmts.size())) {
+        ArrangedStmt& stmt = body.stmts[body.blocks[block].stmts[i]];
+        int num_blocks = NumPlanBlocks(stmt.plan.kind);
+        if (num_blocks == 0) {
+          continue;
+        }
+        stmt.first_block = body.blocks.size();
+        for ([[maybe_unused]] auto _ : llvm::seq(num_blocks)) {
+          next_blocks.push_back(body.blocks.size());
+          body.blocks.push_back(
+              {.is_loop_body = stmt.plan.kind == PlanKind::While});
+        }
+      }
+    }
+    level_blocks = std::move(next_blocks);
+  }
+  CARBON_CHECK(level_blocks.empty());
+  return body;
+}
+
+// Emits the statements of `body` after its `acc` declaration. Locals take
+// their names from `locals` in turn, the `ReadParams` statement adds `reads`,
+// and guards return `return_value`.
+//
+// The first operand of each statement after a local is that local, so that
+// every local is read. Every other operand, and the target of each update, is a
+// random local in scope.
+static auto EmitArrangedBody(const ArrangedBody& body,
+                             llvm::ArrayRef<llvm::StringRef> locals,
+                             llvm::StringRef reads,
+                             llvm::StringRef return_value, bool is_cpp,
+                             absl::BitGen& rng, llvm::raw_ostream& os) -> void {
+  llvm::SmallVector<llvm::StringRef> scope = {"acc"};
+  llvm::StringRef pending = "acc";
+  int next_local = 0;
+  auto pick_local = [&]() {
+    return scope[absl::Uniform<int>(rng, 0, scope.size())];
+  };
+  auto emit_expr = [&](llvm::StringRef format) {
+    while (!format.empty()) {
+      if (format.starts_with("{0}") || format.starts_with("{1}")) {
+        os << (pending.empty() ? pick_local() : std::exchange(pending, {}));
+        format = format.drop_front(3);
+      } else {
+        os << format.front();
+        format = format.drop_front();
+      }
+    }
+  };
+  auto emit_cond = [&](int form) {
+    emit_expr(PlanConds[form % std::size(PlanConds)]);
+  };
+  auto indent = [&](int depth) { os.indent(2 * depth); };
+
+  // The blocks being emitted, with the index of the next statement in each,
+  // and the size of the scope outside it.
+  struct Frame {
+    int block;
+    int next_stmt;
+    int outer_scope_size;
+  };
+  llvm::SmallVector<Frame> stack = {
+      {.block = 0, .next_stmt = 0, .outer_scope_size = 1}};
+  while (!stack.empty()) {
+    Frame& frame = stack.back();
+    int depth = stack.size();
+    const ArrangedBlock& block = body.blocks[frame.block];
+    if (frame.next_stmt == static_cast<int>(block.stmts.size())) {
+      // End the block, and start the second block of an `else` or `else if`.
+      scope.truncate(frame.outer_scope_size);
+      int ended = frame.block;
+      stack.pop_back();
+      if (stack.empty()) {
+        break;
+      }
+      const Frame& owner_frame = stack.back();
+      const ArrangedStmt& owner =
+          body.stmts[body.blocks[owner_frame.block]
+                         .stmts[owner_frame.next_stmt - 1]];
+      indent(depth - 1);
+      if (NumPlanBlocks(owner.plan.kind) == 1 || ended != owner.first_block) {
+        os << "}\n";
+        continue;
+      }
+      if (owner.plan.kind == PlanKind::IfElse) {
+        os << "} else {\n";
+      } else {
+        os << "} else if (";
+        emit_cond(owner.plan.form + 1);
+        os << ") {\n";
+      }
+      stack.push_back({.block = ended + 1,
+                       .next_stmt = 0,
+                       .outer_scope_size = static_cast<int>(scope.size())});
+      continue;
+    }
+
+    const ArrangedStmt& stmt = body.stmts[block.stmts[frame.next_stmt]];
+    ++frame.next_stmt;
+    PlanStmt planned = stmt.plan;
+    indent(depth);
+    switch (planned.kind) {
+      case PlanKind::Local: {
+        llvm::StringRef name = locals[next_local++];
+        os << (is_cpp ? "int " : "var ") << name
+           << (is_cpp ? " = " : ": i32 = ");
+        emit_expr(PlanExprs[planned.form % std::size(PlanExprs)]);
+        os << ";\n";
+        scope.push_back(name);
+        pending = name;
+        break;
+      }
+      case PlanKind::Update:
+        os << pick_local() << " = ";
+        emit_expr(PlanExprs[planned.form % std::size(PlanExprs)]);
+        os << ";\n";
+        break;
+      case PlanKind::ReadParams:
+        os << pick_local() << " = ";
+        emit_expr("{0}");
+        os << " + " << reads << ";\n";
+        break;
+      case PlanKind::If:
+      case PlanKind::IfElse:
+      case PlanKind::ElseIf:
+      case PlanKind::While:
+        os << (planned.kind == PlanKind::While ? "while (" : "if (");
+        emit_cond(planned.form);
+        os << ") {\n";
+        stack.push_back({.block = stmt.first_block,
+                         .next_stmt = 0,
+                         .outer_scope_size = static_cast<int>(scope.size())});
+        break;
+      case PlanKind::GuardReturn:
+      case PlanKind::GuardExit:
+        os << "if (";
+        emit_cond(planned.form);
+        os << ") {\n";
+        indent(depth + 1);
+        if (planned.kind == PlanKind::GuardReturn) {
+          os << "return " << return_value << ";\n";
+        } else {
+          os << (planned.form % 2 == 0 ? "break;\n" : "continue;\n");
+        }
+        indent(depth);
+        os << "}\n";
+        break;
+    }
+  }
+}
+
+// Generates an out-of-line definition for the declaration `sig`, and writes it
+// to the provided stream.
+//
+// The body declares an `i32` accumulator, `acc`, and then has its plan's
+// statements arranged randomly, along with a statement at depth 0 that reads
+// every parameter with its consumer template, and `self` in a method with
+// `Checksum`. The signature and that statement are each on one line however
+// long they are, which the line estimates assume.
+auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
+                                     llvm::StringRef class_name,
+                                     const FunctionSig& sig,
+                                     llvm::raw_ostream& os) -> void {
+  os << "// TODO: make better comment text\n";
+  if (!IsCpp()) {
+    os << "fn " << class_name << "." << sig.name;
+  } else {
+    os << "auto " << class_name << "::" << sig.name;
+  }
+
+  os << "(";
+  // For Carbon methods, `self` is the first parameter, as in the declaration.
+  bool is_carbon_method = sig.is_method && !IsCpp();
+  if (is_carbon_method) {
+    os << "self";
+  }
+  bool first_param = !is_carbon_method;
+  for (const TypedName& param : sig.params) {
+    if (!first_param) {
+      os << ", ";
+    }
+    first_param = false;
+    if (!IsCpp()) {
+      os << param.name << ": " << param.type;
+    } else {
+      os << param.type << " " << param.name;
+    }
+  }
+  os << ") -> " << sig.return_type << " {\n";
+  os << (IsCpp() ? "  int acc = 0;\n" : "  var acc: i32 = 0;\n");
+
+  RawStringOstream reads;
+  llvm::ListSeparator read_sep(" + ");
+  if (sig.is_method) {
+    reads << read_sep << (IsCpp() ? "Checksum()" : "self.Checksum()");
+  }
+  for (auto [param, consumer] : llvm::zip(sig.params, sig.param_consumers)) {
+    reads << read_sep;
+    EmitTemplate(consumer, param.name, reads);
+  }
+
+  // Locals and parameters draw from the same identifiers of each length, so
+  // exclude this function's parameter names: C++ rejects a local that
+  // redeclares a parameter.
+  const BodyPlan& plan = state.body_plans()[sig.body_plan];
+  Set<llvm::StringRef> param_names;
+  for (const TypedName& param : sig.params) {
+    param_names.Insert(param.name);
+  }
+  UniqueIdentifierPopper unique_local_names(*this, state.local_names(),
+                                            &param_names);
+  llvm::SmallVector<llvm::StringRef> locals;
+  locals.reserve(plan.locals);
+  for ([[maybe_unused]] auto _ : llvm::seq(plan.locals)) {
+    locals.push_back(unique_local_names.Pop());
+  }
+
+  RawStringOstream return_value;
+  state.ProduceValue(sig.return_type, return_value);
+  EmitArrangedBody(ArrangeBody(plan, rng_), locals, reads.TakeStr(),
+                   return_value.TakeStr(), IsCpp(), rng_, os);
+  os << "  return ";
+  state.ProduceValue(sig.return_type, os);
+  os << ";\n}\n";
+}
+
 // Generates an inline function definition and writes it to the provided
 // stream.
 //
 // The body adds every parameter to an `i32` accumulator, declares a chain of
 // `i32` locals, and returns a value of the return type. Reading every parameter
 // and local keeps the code free of unused-binding warnings.
+//
+// TODO: Build these bodies from plans, as out-of-line definitions do, so that
+// one builder makes every body except the fixed shapes of getters, predicates,
+// and forwarders.
 auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
                                           llvm::StringRef name, int param_count,
                                           int local_count,
@@ -1504,10 +2350,11 @@ auto SourceGen::GenerateChecksumFunction(llvm::raw_ostream& os) -> void {
 // Generate a class definition and write it to the provided stream.
 //
 // The structure of the definition is guided by the `params` provided, and it
-// consumes the provided state.
-auto SourceGen::GenerateClassDef(const ClassParams& params,
-                                 ClassGenState& state, llvm::raw_ostream& os)
-    -> void {
+// consumes the provided state. With out-of-line definitions, it appends the
+// declarations to define to `out_of_line_defs`.
+auto SourceGen::GenerateClassDef(
+    const ClassParams& params, ClassGenState& state, llvm::raw_ostream& os,
+    llvm::SmallVectorImpl<OutOfLineDef>& out_of_line_defs) -> void {
   llvm::StringRef name = state.class_names().pop_back_val();
   os << "// TODO: make better comment text\n";
   os << "class " << name << " {\n";
@@ -1557,13 +2404,22 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
   UniqueIdentifierPopper unique_inline_names(*this,
                                              state.inline_function_names());
 
+  // Capture each declaration's signature for its out-of-line definition.
+  bool define_out_of_line = state.define_decls_out_of_line();
+  auto capture_sig = [&]() -> FunctionSig* {
+    if (!define_out_of_line) {
+      return nullptr;
+    }
+    return &out_of_line_defs.emplace_back(OutOfLineDef{.class_name = name}).sig;
+  };
+
   llvm::ListSeparator line_sep("\n");
   for ([[maybe_unused]] auto _ : llvm::seq(params.public_function_decls)) {
     os << line_sep;
     GenerateFunctionDecl(state, unique_member_names.Pop(), /*is_private=*/false,
                          /*is_method=*/false,
                          state.public_function_param_counts().pop_back_val(),
-                         /*indent=*/"  ", os);
+                         /*indent=*/"  ", os, capture_sig());
   }
   for ([[maybe_unused]] auto _ : llvm::seq(params.inline_function_defs)) {
     os << line_sep;
@@ -1577,7 +2433,7 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
     GenerateFunctionDecl(state, unique_member_names.Pop(), /*is_private=*/false,
                          /*is_method=*/true,
                          state.public_method_param_counts().pop_back_val(),
-                         /*indent=*/"  ", os);
+                         /*indent=*/"  ", os, capture_sig());
   }
   for (TypedName field : getter_fields) {
     os << line_sep;
@@ -1628,14 +2484,14 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
     GenerateFunctionDecl(state, unique_member_names.Pop(), /*is_private=*/true,
                          /*is_method=*/false,
                          state.private_function_param_counts().pop_back_val(),
-                         /*indent=*/"  ", os);
+                         /*indent=*/"  ", os, capture_sig());
   }
   for ([[maybe_unused]] auto _ : llvm::seq(params.private_method_decls)) {
     os << line_sep;
     GenerateFunctionDecl(state, unique_member_names.Pop(), /*is_private=*/true,
                          /*is_method=*/true,
                          state.private_method_param_counts().pop_back_val(),
-                         /*indent=*/"  ", os);
+                         /*indent=*/"  ", os, capture_sig());
   }
   for (const Forwarder& forwarder : forwarders) {
     os << line_sep;
