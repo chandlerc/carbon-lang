@@ -10,8 +10,10 @@
 #include <optional>
 #include <string>
 
+#include "common/raw_string_ostream.h"
 #include "common/set.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "testing/base/global_exe_path.h"
 #include "toolchain/base/install_paths_test_helpers.h"
@@ -27,6 +29,7 @@ using ::testing::Each;
 using ::testing::Eq;
 using ::testing::Ge;
 using ::testing::Gt;
+using ::testing::HasSubstr;
 using ::testing::Le;
 using ::testing::MatchesRegex;
 using ::testing::SizeIs;
@@ -234,23 +237,30 @@ TEST(SourceGenTest, UniqueIdentifiers) {
   }
 }
 
-// Check that the source code doesn't have compiler errors.
+// Check that the source code compiles cleanly: no errors, and also no other
+// diagnostic output. Generated code must be entirely warning-free -- warnings
+// would distort compile benchmarks into measuring diagnostic emission rather
+// than compilation, and flood benchmark output.
 auto TestCompile(llvm::StringRef source) -> bool {
   llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> fs =
       new llvm::vfs::InMemoryFileSystem;
   InstallPaths installation(
       InstallPaths::MakeForBazelRunfiles(Testing::GetExePath()));
+  RawStringOstream error_stream;
   Driver driver(fs, &installation, /*input_stream=*/nullptr, &llvm::outs(),
-                &llvm::errs());
+                &error_stream);
 
   AddPreludeFilesToVfs(installation, fs);
 
   fs->addFile("test.carbon", /*ModificationTime=*/0,
               llvm::MemoryBuffer::getMemBuffer(source));
-  return driver
-      .RunCommand({"compile", "--phase=check", "--no-include-carbon-core",
-                   "test.carbon"})
-      .success;
+  bool success = driver
+                     .RunCommand({"compile", "--phase=check",
+                                  "--no-include-carbon-core", "test.carbon"})
+                     .success;
+  std::string errors = error_stream.TakeStr();
+  EXPECT_TRUE(errors.empty()) << errors;
+  return success && errors.empty();
 }
 
 TEST(SourceGenTest, GenApiFileDenseDeclsTest) {
@@ -380,7 +390,7 @@ TEST(SourceGenTest, GenApiFileDenseDeclsStableSizeWithVariedParams) {
 // cannot reference the class currently being defined (nor any not-yet-defined
 // class), so with these shapes almost every type use must be a fixed type or an
 // earlier class; the generator's per-class reference cap is what keeps
-// `GetValidTypeName` from running out of valid names, for any shuffle. Covers
+// `GetValidTypeUse` from running out of valid names, for any shuffle. Covers
 // many seeds and extreme shapes, and also checks that the byte and line counts
 // are seed-independent and that the output compiles.
 TEST(SourceGenTest, GenApiFileDenseDeclsRobustForFieldHeavyParams) {
@@ -429,6 +439,236 @@ TEST(SourceGenTest, GenApiFileDenseDeclsRobustForFieldHeavyParams) {
         EXPECT_THAT(source.size(), Eq(*expected_bytes));
         EXPECT_THAT(CountLines(source), Eq(*expected_lines));
       }
+    }
+  }
+}
+
+// Inline function definitions: some functions are emitted with a body rather
+// than as a forward declaration. The bodies must keep the line and byte counts
+// seed-independent, must vary their content across seeds, and must compile --
+// including bodies for functions that return non-copyable class types, which
+// work by constructing the value via the class's `Make` factory.
+TEST(SourceGenTest, GenApiFileDenseDeclsInlineBodies) {
+  SourceGen::DenseDeclParams params;
+  params.class_params.inline_function_defs = 3;
+  params.class_params.max_body_locals = 4;
+
+  for (SourceGen::Language language :
+       {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+    std::optional<size_t> expected_bytes;
+    std::optional<ssize_t> expected_lines;
+    std::optional<std::string> first_source;
+    bool any_different = false;
+
+    constexpr int NumSeeds = 16;
+    for (int _ : llvm::seq(NumSeeds)) {
+      SourceGen gen(language);
+      std::string source = gen.GenApiFileDenseDecls(2000, params);
+
+      if (!expected_bytes) {
+        expected_bytes = source.size();
+        expected_lines = CountLines(source);
+        first_source = source;
+        // The bodies should actually be present and consume their parameters
+        // into the accumulator, including class-typed ones via `Checksum`.
+        EXPECT_THAT(source, HasSubstr("return "));
+        EXPECT_THAT(source, HasSubstr("acc = acc + "));
+        EXPECT_THAT(source, HasSubstr(".Checksum()"));
+        // The generated Carbon must compile, including the `Make`-producing
+        // bodies of functions returning non-copyable class types.
+        if (language == SourceGen::Language::Carbon) {
+          EXPECT_TRUE(TestCompile(source));
+        }
+        continue;
+      }
+      EXPECT_THAT(source.size(), Eq(*expected_bytes))
+          << "Byte count varied across seeds for language="
+          << static_cast<int>(language);
+      EXPECT_THAT(CountLines(source), Eq(*expected_lines))
+          << "Line count varied across seeds for language="
+          << static_cast<int>(language);
+      if (source != *first_source) {
+        any_different = true;
+      }
+    }
+    EXPECT_TRUE(any_different);
+  }
+}
+
+// Inline bodies must also stay robust and deterministic under extreme shapes:
+// many small bodies, large bodies, and field-heavy classes (whose functions
+// often return non-copyable class types) all at once, across many seeds.
+TEST(SourceGenTest, GenApiFileDenseDeclsInlineBodiesRobust) {
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  // Inline-heavy classes with large bodies and few other declarations.
+  param_set.push_back({.class_params = {.public_function_decls = 1,
+                                        .public_method_decls = 1,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 4,
+                                        .inline_function_defs = 8,
+                                        .max_body_locals = 12}});
+  // Field-heavy classes with a few inline bodies; most functions return
+  // class types, exercising the `Make`-production path heavily.
+  param_set.push_back({.class_params = {.public_function_decls = 1,
+                                        .public_method_decls = 1,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 24,
+                                        .inline_function_defs = 2,
+                                        .max_body_locals = 3}});
+
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    for (SourceGen::Language language :
+         {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+      std::optional<size_t> expected_bytes;
+      std::optional<ssize_t> expected_lines;
+      constexpr int NumSeeds = 24;
+      for (int _ : llvm::seq(NumSeeds)) {
+        SourceGen gen(language);
+        std::string source = gen.GenApiFileDenseDecls(3000, params);
+        if (!expected_bytes) {
+          expected_bytes = source.size();
+          expected_lines = CountLines(source);
+          if (language == SourceGen::Language::Carbon) {
+            EXPECT_TRUE(TestCompile(source));
+          }
+          continue;
+        }
+        EXPECT_THAT(source.size(), Eq(*expected_bytes));
+        EXPECT_THAT(CountLines(source), Eq(*expected_lines));
+      }
+    }
+  }
+}
+
+// Scans generated Carbon source and collects, for each function definition,
+// its parameter names (spelled `NAME: Type` in the signature) and its body's
+// local-variable names (spelled `var NAME: ...`), checking that no local
+// collides with a parameter of the same function. Also accumulates all
+// parameter and local names seen across the file into the two out-params so
+// the caller can check the scan isn't vacuous.
+static auto CheckBodyLocalsAvoidParamNames(llvm::StringRef source,
+                                           Set<llvm::StringRef>* all_params,
+                                           Set<llvm::StringRef>* all_locals)
+    -> void {
+  Set<llvm::StringRef> func_params;
+  bool in_signature = false;
+  bool in_body = false;
+  llvm::SmallVector<llvm::StringRef> lines;
+  source.split(lines, '\n');
+  for (llvm::StringRef line : lines) {
+    llvm::StringRef trimmed = line.trim();
+    if (!in_signature && !in_body &&
+        (trimmed.starts_with("fn ") || trimmed.starts_with("private fn "))) {
+      in_signature = true;
+      func_params.Clear();
+    }
+    if (in_signature) {
+      // Collect the identifier preceding each `:` on this signature line;
+      // within a signature those are exactly the parameter names.
+      for (auto [i, c] : llvm::enumerate(line)) {
+        if (c != ':') {
+          continue;
+        }
+        size_t begin = i;
+        while (begin > 0 &&
+               (llvm::isAlnum(line[begin - 1]) || line[begin - 1] == '_')) {
+          --begin;
+        }
+        if (begin == i) {
+          continue;
+        }
+        llvm::StringRef name = line.substr(begin, i - begin);
+        func_params.Insert(name);
+        all_params->Insert(name);
+      }
+      if (trimmed.ends_with(";")) {
+        // A forward declaration; no body follows.
+        in_signature = false;
+      } else if (trimmed.ends_with("{")) {
+        in_signature = false;
+        in_body = true;
+      }
+    } else if (in_body) {
+      if (trimmed.starts_with("var ")) {
+        llvm::StringRef name =
+            trimmed.drop_front(strlen("var ")).take_until([](char c) {
+              return c == ':';
+            });
+        all_locals->Insert(name);
+        EXPECT_FALSE(func_params.Contains(name))
+            << "Local `" << name
+            << "` collides with a parameter of the same function.";
+      } else if (trimmed == "}") {
+        in_body = false;
+      }
+    }
+  }
+}
+
+// Body locals and parameters draw from identifier pools that share strings per
+// length, and parameter names span the local-name length, so the generator
+// must explicitly keep a body's locals disjoint from its parameters: Carbon
+// would just shadow, but the same name pools feed C++ generation, where
+// redeclaring a parameter in the function's outermost block is an error that
+// would abort compile benchmarks. Scan the generated Carbon (the name pools
+// are language-independent) across seeds and an inline-heavy shape.
+TEST(SourceGenTest, GenApiFileDenseDeclsBodyLocalsAvoidParamNames) {
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  // Inline-heavy classes: enough parameter names that the length distribution
+  // reaches the fixed local-name length, plus many locals.
+  param_set.push_back({.class_params = {.public_function_decls = 1,
+                                        .public_method_decls = 1,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 4,
+                                        .inline_function_defs = 8,
+                                        .max_body_locals = 12}});
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    Set<llvm::StringRef> all_params;
+    Set<llvm::StringRef> all_locals;
+    llvm::SmallVector<std::string> sources;
+    constexpr int NumSeeds = 8;
+    for (int _ : llvm::seq(NumSeeds)) {
+      SourceGen gen;
+      sources.push_back(gen.GenApiFileDenseDecls(5000, params));
+      CheckBodyLocalsAvoidParamNames(sources.back(), &all_params, &all_locals);
+    }
+    // Check the scan wasn't vacuous: across the file the parameter and local
+    // name pools really do share identifiers (they must only stay disjoint
+    // within a single function), so the hazard is genuinely exercised.
+    bool any_shared = false;
+    all_params.ForEach([&](llvm::StringRef name) {
+      any_shared = any_shared || all_locals.Contains(name);
+    });
+    EXPECT_TRUE(any_shared)
+        << "Expected parameter and local name pools to share identifiers.";
+  }
+}
+
+// The line estimates must track the actual emission closely or files drift
+// away from their target size. Use a large target where the whole-class
+// quantization of the file is small relative to the tolerance. Carbon is
+// modeled tightly; C++ gets extra slack for its unmodeled access-section
+// lines.
+TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
+  // The benchmarked dense-declaration shape, with a couple of inline bodies.
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.inline_function_defs = 2, .max_body_locals = 3}};
+
+  constexpr int TargetLines = 20000;
+  for (SourceGen::Language language :
+       {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+    SourceGen gen(language);
+    std::string source = gen.GenApiFileDenseDecls(TargetLines, params);
+    ssize_t lines = CountLines(source);
+    if (language == SourceGen::Language::Carbon) {
+      // Within 2% of the requested line count.
+      EXPECT_THAT(lines, AllOf(Ge(19600), Le(20400)));
+    } else {
+      // Within 10% of the requested line count.
+      EXPECT_THAT(lines, AllOf(Ge(18000), Le(22000)));
     }
   }
 }

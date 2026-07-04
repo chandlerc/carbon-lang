@@ -35,6 +35,7 @@ cc_test(
     deps = [
         ":source_gen_lib",
         "//common:all_llvm_targets",
+        "//common:raw_string_ostream",
         "//common:set",
         "//testing/base:global_exe_path",
         "//testing/base:gtest_main",

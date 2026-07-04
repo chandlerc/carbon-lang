@@ -94,6 +94,24 @@ class SourceGen {
     MethodDeclParams private_method_decl_params = {.max_params = 6};
 
     int private_field_decls = 6;
+
+    // The number of public functions per class that are emitted as inline
+    // definitions with a body rather than as forward declarations. Defaults to
+    // zero, leaving classes as pure declarations.
+    //
+    // The bodies are intentionally small and simple: an accumulator that
+    // consumes every parameter through a small per-type expression, a shuffled
+    // sequence of local variables initialized by sub-expressions, and a
+    // terminating return. Their count and shape are drawn from deterministic
+    // distributions so that, like the rest of generation, the total line and
+    // byte counts are independent of the random seed.
+    int inline_function_defs = 0;
+    FunctionDeclParams inline_function_decl_params = {.max_params = 4};
+
+    // The maximum number of local variables in a generated function body. The
+    // actual count for each body is sampled from a deterministic distribution
+    // over `[0, max_body_locals]`.
+    int max_body_locals = 4;
   };
 
   // Parameters used to select type _uses_, as opposed to definitions.
@@ -121,32 +139,97 @@ class SourceGen {
   struct TypeUseParams {
     // The weights in the histogram start with a sequence fixed types described
     // with a Carbon and C++ string, and their associated weight.
+    //
+    // Each type also provides an expression that produces a value of that type,
+    // used when a function body must return a value of the type or a field of
+    // the type must be constructed. An empty value expression marks a type that
+    // can't be produced as a simple expression (for example a pointer, which
+    // would need a local to take the address of); such types are still used in
+    // declarations but are not selected for produced positions (return and
+    // field types of defined classes).
+    //
+    // Each type additionally provides consumer templates: strings with a
+    // single `{0}` placeholder naming a value of the type, each forming an
+    // expression of type `i32` (`int` in C++) that reads the value. These
+    // consume parameters in generated function bodies so that no parameter is
+    // unused; each consumed type use is assigned one template from the type's
+    // list, round-robin, when the type pools are built, so which template a
+    // given use gets is shuffled while the overall mix -- and thus the byte
+    // total -- is independent of the seed. Every fixed type must have at least
+    // one consumer for each language, since any of them can appear as a
+    // parameter type. The templates are chosen to read the value as directly
+    // as its type allows: an `if`/ternary expression for `bool`, arithmetic
+    // or an explicit narrowing conversion for integers, a dereference for
+    // pointers, and element access for tuples.
     struct FixedTypeWeight {
       llvm::StringRef carbon_spelling;
       llvm::StringRef cpp_spelling;
       int weight;
+      llvm::StringRef carbon_value;
+      llvm::StringRef cpp_value;
+      llvm::SmallVector<llvm::StringRef> carbon_consumers;
+      llvm::SmallVector<llvm::StringRef> cpp_consumers;
     };
 
     llvm::SmallVector<FixedTypeWeight> fixed_type_weights = {
         // Combined weight of 65 for a core set of builtin types.
-        {.carbon_spelling = "bool", .cpp_spelling = "bool", .weight = 25},
-        {.carbon_spelling = "i32", .cpp_spelling = "int", .weight = 20},
+        {.carbon_spelling = "bool",
+         .cpp_spelling = "bool",
+         .weight = 25,
+         .carbon_value = "true",
+         .cpp_value = "true",
+         .carbon_consumers = {"(if {0} then 1 else 0)",
+                              "(if {0} then 2 else 3)"},
+         .cpp_consumers = {"({0} ? 1 : 0)", "({0} ? 2 : 3)"}},
+        {.carbon_spelling = "i32",
+         .cpp_spelling = "int",
+         .weight = 20,
+         .carbon_value = "0",
+         .cpp_value = "0",
+         .carbon_consumers = {"{0} + 1", "{0} * 2", "({0} % 7) + 1"},
+         .cpp_consumers = {"{0} + 1", "{0} * 2", "({0} % 7) + 1"}},
         {.carbon_spelling = "i64",
          .cpp_spelling = "std::int64_t",
-         .weight = 10},
-        {.carbon_spelling = "i32*", .cpp_spelling = "int*", .weight = 5},
+         .weight = 10,
+         .carbon_value = "0",
+         .cpp_value = "0",
+         .carbon_consumers = {"({0} as i32) - 2", "(({0} + 1) as i32)"},
+         .cpp_consumers = {"static_cast<int>({0}) - 2",
+                           "static_cast<int>({0} + 1)"}},
+        {.carbon_spelling = "i32*",
+         .cpp_spelling = "int*",
+         .weight = 5,
+         .carbon_consumers = {"*{0} + 1", "*{0} * 2"},
+         .cpp_consumers = {"*{0} + 1", "*{0} * 2"}},
         {.carbon_spelling = "i64*",
          .cpp_spelling = "std::int64_t*",
-         .weight = 5},
+         .weight = 5,
+         .carbon_consumers = {"(*{0} as i32) - 2", "((*{0} * 2) as i32)"},
+         .cpp_consumers = {"static_cast<int>(*{0}) - 2",
+                           "static_cast<int>(*{0} * 2)"}},
 
         // A weight of 5 distributed across tuple structures
         {.carbon_spelling = "(bool, i64)",
          .cpp_spelling = "std::pair<bool, std::int64_t>",
-         .weight = 2},
+         .weight = 2,
+         .carbon_value = "(true, 0)",
+         .cpp_value = "{true, 0}",
+         .carbon_consumers = {"(if {0}.0 then 1 else 0)", "({0}.1 as i32) + 1"},
+         .cpp_consumers = {"({0}.first ? 1 : 0)",
+                           "static_cast<int>({0}.second) + 1"}},
         {.carbon_spelling = "(i32, i64*)",
          .cpp_spelling = "std::pair<int, std::int64_t*>",
-         .weight = 3},
+         .weight = 3,
+         .carbon_consumers = {"{0}.0 + 1", "{0}.0 * 2", "(*{0}.1 as i32) - 1"},
+         .cpp_consumers = {"{0}.first + 1", "{0}.first * 2",
+                           "static_cast<int>(*{0}.second) - 1"}},
     };
+
+    // Consumer templates for class-typed values, all built on the generated
+    // `Checksum` method so their cost doesn't depend on which class is
+    // consumed. The same spellings work in both languages.
+    llvm::SmallVector<llvm::StringRef> class_consumers = {
+        "{0}.Checksum()", "{0}.Checksum() + 1", "{0}.Checksum() * 2"};
 
     // The weight for using types declared in the file. These will be randomly
     // shuffled references, and when there are more type references than
@@ -276,12 +359,26 @@ class SourceGen {
 
   auto GetShuffledInts(int number, int min, int max) -> llvm::SmallVector<int>;
 
-  auto GenerateFunctionDecl(
-      llvm::StringRef name, bool is_private, bool is_method, int param_count,
-      llvm::StringRef indent,
-      llvm::SmallVectorImpl<llvm::StringRef>& param_names,
-      llvm::function_ref<auto()->llvm::StringRef> get_type_name,
+  // Generates a function declaration.
+  auto GenerateFunctionDecl(ClassGenState& state, llvm::StringRef name,
+                            bool is_private, bool is_method, int param_count,
+                            llvm::StringRef indent, llvm::raw_ostream& os)
+      -> void;
+  // Generates an inline function definition: a body of local variables followed
+  // by a `return` that produces the return value via `ProduceValue`.
+  auto GenerateInlineFunctionDef(ClassGenState& state, llvm::StringRef name,
+                                 int param_count, int local_count,
+                                 llvm::StringRef indent, llvm::raw_ostream& os)
+      -> void;
+  // Generates a class's nested `Make` factory, constructing a value of the
+  // class from a struct literal whose fields are produced via `ProduceValue`.
+  auto GenerateMakeFunction(
+      ClassGenState& state, llvm::StringRef class_name,
+      llvm::ArrayRef<std::pair<llvm::StringRef, llvm::StringRef>> fields,
       llvm::raw_ostream& os) -> void;
+  // Generates a class's `Checksum` method, which consumes a value of the class
+  // by reading its guaranteed `tag` field.
+  auto GenerateChecksumFunction(llvm::raw_ostream& os) -> void;
   auto GenerateClassDef(const ClassParams& params, ClassGenState& state,
                         llvm::raw_ostream& os) -> void;
 
