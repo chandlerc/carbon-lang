@@ -247,6 +247,14 @@ class SourceGen {
 
     // Parameters used to guide the selection of types for use in declarations.
     TypeUseParams type_use_params = {};
+
+    // When set, every function and method that is only declared inside a class
+    // (that is, not one of the `inline_function_defs` inline definitions) is
+    // additionally given an out-of-line definition after the class. This makes
+    // the file a "definition-heavy" counterpart to the otherwise
+    // declaration-heavy output, while keeping the same ratio of inline
+    // definitions.
+    bool define_decls_out_of_line = false;
   };
 
   // Access a global instance of this type to generate Carbon code for
@@ -359,10 +367,32 @@ class SourceGen {
 
   auto GetShuffledInts(int number, int min, int max) -> llvm::SmallVector<int>;
 
-  // Generates a function declaration.
+  // A captured function or method signature, used to emit an out-of-line
+  // definition that matches an earlier declaration.
+  struct FunctionSig {
+    llvm::StringRef name;
+    bool is_method;
+    llvm::SmallVector<llvm::StringRef> param_names;
+    llvm::SmallVector<llvm::StringRef> param_types;
+    // The consumer template assigned to each parameter's type use, applied in
+    // the out-of-line definition's body.
+    llvm::SmallVector<llvm::StringRef> param_consumers;
+    llvm::StringRef return_type;
+  };
+
+  // Generates a function declaration. When `captured` is non-null, the function
+  // is also defined out-of-line, so its return and parameter types are drawn
+  // from the out-of-line pools and the emitted signature is recorded in
+  // `captured` for the matching out-of-line definition; otherwise it is a pure
+  // declaration drawing from the unproduced pool.
   auto GenerateFunctionDecl(ClassGenState& state, llvm::StringRef name,
                             bool is_private, bool is_method, int param_count,
-                            llvm::StringRef indent, llvm::raw_ostream& os)
+                            llvm::StringRef indent, llvm::raw_ostream& os,
+                            FunctionSig* captured = nullptr) -> void;
+  // Generates an out-of-line definition matching a captured declaration; its
+  // body produces the return value via `ProduceValue`.
+  auto GenerateOutOfLineDef(ClassGenState& state, llvm::StringRef class_name,
+                            const FunctionSig& sig, llvm::raw_ostream& os)
       -> void;
   // Generates an inline function definition: a body of local variables followed
   // by a `return` that produces the return value via `ProduceValue`.

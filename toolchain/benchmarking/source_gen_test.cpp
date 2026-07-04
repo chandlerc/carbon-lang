@@ -613,7 +613,7 @@ static auto CheckBodyLocalsAvoidParamNames(llvm::StringRef source,
 // would just shadow, but the same name pools feed C++ generation, where
 // redeclaring a parameter in the function's outermost block is an error that
 // would abort compile benchmarks. Scan the generated Carbon (the name pools
-// are language-independent) across seeds and an inline-heavy shape.
+// are language-independent) across seeds and both body-generating patterns.
 TEST(SourceGenTest, GenApiFileDenseDeclsBodyLocalsAvoidParamNames) {
   llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
   // Inline-heavy classes: enough parameter names that the length distribution
@@ -625,6 +625,11 @@ TEST(SourceGenTest, GenApiFileDenseDeclsBodyLocalsAvoidParamNames) {
                                         .private_field_decls = 4,
                                         .inline_function_defs = 8,
                                         .max_body_locals = 12}});
+  // The split pattern with the benchmarked shape of inline definitions.
+  param_set.push_back(
+      {.class_params = {.inline_function_defs = 8, .max_body_locals = 6},
+       .define_decls_out_of_line = true});
+
   for (const SourceGen::DenseDeclParams& params : param_set) {
     Set<llvm::StringRef> all_params;
     Set<llvm::StringRef> all_locals;
@@ -647,28 +652,133 @@ TEST(SourceGenTest, GenApiFileDenseDeclsBodyLocalsAvoidParamNames) {
   }
 }
 
-// The line estimates must track the actual emission closely or files drift
-// away from their target size. Use a large target where the whole-class
-// quantization of the file is small relative to the tolerance. Carbon is
-// modeled tightly; C++ gets extra slack for its unmodeled access-section
-// lines.
-TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
-  // The benchmarked dense-declaration shape, with a couple of inline bodies.
-  SourceGen::DenseDeclParams params = {
-      .class_params = {.inline_function_defs = 2, .max_body_locals = 3}};
+// Out-of-line definitions: every declared function and method is additionally
+// defined out-of-line after its class (alongside the in-class inline
+// definitions). The line and byte counts must stay seed-independent, the
+// content must vary across seeds, and the result must compile -- including the
+// out-of-line bodies that produce class-typed returns via `Make`.
+TEST(SourceGenTest, GenApiFileDenseDeclsOutOfLineDefs) {
+  SourceGen::DenseDeclParams params;
+  params.define_decls_out_of_line = true;
+  params.class_params.inline_function_defs = 2;
+  params.class_params.max_body_locals = 3;
 
-  constexpr int TargetLines = 20000;
   for (SourceGen::Language language :
        {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
-    SourceGen gen(language);
-    std::string source = gen.GenApiFileDenseDecls(TargetLines, params);
-    ssize_t lines = CountLines(source);
-    if (language == SourceGen::Language::Carbon) {
-      // Within 2% of the requested line count.
-      EXPECT_THAT(lines, AllOf(Ge(19600), Le(20400)));
-    } else {
-      // Within 10% of the requested line count.
-      EXPECT_THAT(lines, AllOf(Ge(18000), Le(22000)));
+    std::optional<size_t> expected_bytes;
+    std::optional<ssize_t> expected_lines;
+    std::optional<std::string> first_source;
+    bool any_different = false;
+
+    constexpr int NumSeeds = 16;
+    for (int _ : llvm::seq(NumSeeds)) {
+      SourceGen gen(language);
+      std::string source = gen.GenApiFileDenseDecls(3000, params);
+
+      if (!expected_bytes) {
+        expected_bytes = source.size();
+        expected_lines = CountLines(source);
+        first_source = source;
+        if (language == SourceGen::Language::Carbon) {
+          EXPECT_TRUE(TestCompile(source));
+        }
+        continue;
+      }
+      EXPECT_THAT(source.size(), Eq(*expected_bytes))
+          << "Byte count varied across seeds for language="
+          << static_cast<int>(language);
+      EXPECT_THAT(CountLines(source), Eq(*expected_lines))
+          << "Line count varied across seeds for language="
+          << static_cast<int>(language);
+      if (source != *first_source) {
+        any_different = true;
+      }
+    }
+    EXPECT_TRUE(any_different);
+  }
+}
+
+// The line estimates must track the actual emission closely in every
+// generation mode, or files drift away from their target size. Body-generating
+// classes are large (hundreds of lines in the defined-decls pattern), so use a
+// large target where the whole-class quantization of the file is small
+// relative to the tolerance. Carbon is modeled tightly; C++ gets extra slack
+// for its unmodeled access-section lines.
+TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  // The benchmarked dense-declaration shape, with a couple of inline bodies.
+  param_set.push_back(
+      {.class_params = {.inline_function_defs = 2, .max_body_locals = 3}});
+  // The benchmarked defined-decls shape.
+  param_set.push_back(
+      {.class_params = {.inline_function_defs = 2, .max_body_locals = 3},
+       .define_decls_out_of_line = true});
+
+  constexpr int TargetLines = 20000;
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    for (SourceGen::Language language :
+         {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+      SourceGen gen(language);
+      std::string source = gen.GenApiFileDenseDecls(TargetLines, params);
+      ssize_t lines = CountLines(source);
+      if (language == SourceGen::Language::Carbon) {
+        // Within 2% of the requested line count.
+        EXPECT_THAT(lines, AllOf(Ge(19600), Le(20400)))
+            << "define_decls_out_of_line=" << params.define_decls_out_of_line;
+      } else {
+        // Within 10% of the requested line count.
+        EXPECT_THAT(lines, AllOf(Ge(18000), Le(22000)))
+            << "define_decls_out_of_line=" << params.define_decls_out_of_line;
+      }
+    }
+  }
+}
+
+// Out-of-line definitions must also stay robust and deterministic for extreme,
+// field-heavy class shapes, where most declared functions return non-copyable
+// class types and there are few non-field slots.
+TEST(SourceGenTest, GenApiFileDenseDeclsOutOfLineDefsRobust) {
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  // Field-heavy classes with no inline definitions: every (few) declared
+  // function/method is defined out-of-line, and the field type pool is built
+  // entirely from fixed types.
+  param_set.push_back({.class_params = {.public_function_decls = 2,
+                                        .public_method_decls = 2,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 24,
+                                        .inline_function_defs = 0},
+                       .define_decls_out_of_line = true});
+  // A mix of inline and out-of-line definitions with larger bodies.
+  param_set.push_back({.class_params = {.public_function_decls = 4,
+                                        .public_method_decls = 6,
+                                        .private_function_decls = 2,
+                                        .private_method_decls = 4,
+                                        .private_field_decls = 6,
+                                        .inline_function_defs = 4,
+                                        .max_body_locals = 8},
+                       .define_decls_out_of_line = true});
+
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    for (SourceGen::Language language :
+         {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+      std::optional<size_t> expected_bytes;
+      std::optional<ssize_t> expected_lines;
+      constexpr int NumSeeds = 24;
+      for (int _ : llvm::seq(NumSeeds)) {
+        SourceGen gen(language);
+        std::string source = gen.GenApiFileDenseDecls(3000, params);
+        if (!expected_bytes) {
+          expected_bytes = source.size();
+          expected_lines = CountLines(source);
+          if (language == SourceGen::Language::Carbon) {
+            EXPECT_TRUE(TestCompile(source));
+          }
+          continue;
+        }
+        EXPECT_THAT(source.size(), Eq(*expected_bytes));
+        EXPECT_THAT(CountLines(source), Eq(*expected_lines));
+      }
     }
   }
 }

@@ -266,6 +266,17 @@ static auto DenseDeclParams() -> SourceGen::DenseDeclParams {
   return params;
 }
 
+// Parameters for the "defined declarations" pattern: the same class shape and
+// ratio of inline definitions as `DenseDeclParams`, but additionally every
+// otherwise-declared function and method is defined out-of-line after its
+// class. This models a definition-heavy translation unit (an impl file) rather
+// than a header.
+static auto DefinedDeclParams() -> SourceGen::DenseDeclParams {
+  SourceGen::DenseDeclParams params = DenseDeclParams();
+  params.define_decls_out_of_line = true;
+  return params;
+}
+
 // Benchmark on multiple files of the same size but with different source code
 // in order to avoid branch prediction perfectly learning a particular file's
 // structure and shape, and to get closer to a cache-cold benchmark number which
@@ -386,6 +397,13 @@ static auto BM_CompileApiFileDenseDecls(benchmark::State& state) -> void {
   RunApiFileBenchmark<L, P, M>(state, DenseDeclParams());
 }
 
+// Benchmarks the "defined declarations" pattern (a definition-heavy impl-like
+// file), where every declaration also has an out-of-line definition.
+template <Lang L, Phase P, Mode M = Mode::InProcess>
+static auto BM_CompileApiFileDefinedDecls(benchmark::State& state) -> void {
+  RunApiFileBenchmark<L, P, M>(state, DefinedDeclParams());
+}
+
 // A thin wrapper for the subprocess benchmarks: they reuse the shared
 // implementation above, but register under their own (terser) name rather than
 // spelling out `Mode::Subprocess` at each registration.
@@ -394,10 +412,17 @@ static auto BM_CompileExecApiFileDenseDecls(benchmark::State& state) -> void {
   BM_CompileApiFileDenseDecls<L, P, Mode::Subprocess>(state);
 }
 
-// Applies the shared range configuration used by every compile benchmark:
-// 256-line test cases through 256k-line test cases.
+// Applies the range configuration shared by the dense-decls compile
+// benchmarks: 256-line test cases through 256k-line test cases.
 static auto ConfigureCompileBenchmark(benchmark::Benchmark* b) -> void {
   b->RangeMultiplier(4)->Range(256, static_cast<int64_t>(256 * 1024));
+}
+
+// The defined-decls benchmarks use the same range but start at 1024 lines:
+// their fully-defined classes each run to several hundred lines, so a 256-line
+// file can't fit even one class.
+static auto ConfigureDefinedDeclsBenchmark(benchmark::Benchmark* b) -> void {
+  b->RangeMultiplier(4)->Range(1024, static_cast<int64_t>(256 * 1024));
 }
 
 // In-process benchmarks measure the compiler as a library across each phase of
@@ -432,6 +457,18 @@ BENCHMARK(BM_CompileExecApiFileDenseDecls<Lang::Cpp, Phase::Lex>)
 BENCHMARK(BM_CompileExecApiFileDenseDecls<Lang::Cpp, Phase::Check>)
     ->Apply(ConfigureCompileBenchmark)
     ->UseRealTime();
+
+BENCHMARK(BM_CompileApiFileDefinedDecls<Lang::Carbon, Phase::Lex>)
+    ->Apply(ConfigureDefinedDeclsBenchmark);
+BENCHMARK(BM_CompileApiFileDefinedDecls<Lang::Carbon, Phase::Parse>)
+    ->Apply(ConfigureDefinedDeclsBenchmark);
+BENCHMARK(BM_CompileApiFileDefinedDecls<Lang::Carbon, Phase::Check>)
+    ->Apply(ConfigureDefinedDeclsBenchmark);
+
+BENCHMARK(BM_CompileApiFileDefinedDecls<Lang::Cpp, Phase::Lex>)
+    ->Apply(ConfigureDefinedDeclsBenchmark);
+BENCHMARK(BM_CompileApiFileDefinedDecls<Lang::Cpp, Phase::Check>)
+    ->Apply(ConfigureDefinedDeclsBenchmark);
 
 }  // namespace
 }  // namespace Carbon::Testing
