@@ -554,12 +554,14 @@ static auto CheckBodyLocalsAvoidParamNames(llvm::StringRef source,
     -> void {
   Set<llvm::StringRef> func_params;
   bool in_signature = false;
-  bool in_body = false;
+  // Brace depth within a function body; zero when outside a body. Control-flow
+  // blocks within a body open nested braces.
+  int body_depth = 0;
   llvm::SmallVector<llvm::StringRef> lines;
   source.split(lines, '\n');
   for (llvm::StringRef line : lines) {
     llvm::StringRef trimmed = line.trim();
-    if (!in_signature && !in_body &&
+    if (!in_signature && body_depth == 0 &&
         (trimmed.starts_with("fn ") || trimmed.starts_with("private fn "))) {
       in_signature = true;
       func_params.Clear();
@@ -588,9 +590,9 @@ static auto CheckBodyLocalsAvoidParamNames(llvm::StringRef source,
         in_signature = false;
       } else if (trimmed.ends_with("{")) {
         in_signature = false;
-        in_body = true;
+        body_depth = 1;
       }
-    } else if (in_body) {
+    } else if (body_depth > 0) {
       if (trimmed.starts_with("var ")) {
         llvm::StringRef name =
             trimmed.drop_front(strlen("var ")).take_until([](char c) {
@@ -600,8 +602,15 @@ static auto CheckBodyLocalsAvoidParamNames(llvm::StringRef source,
         EXPECT_FALSE(func_params.Contains(name))
             << "Local `" << name
             << "` collides with a parameter of the same function.";
-      } else if (trimmed == "}") {
-        in_body = false;
+      } else {
+        // Track the brace depth. Note that a line like `} else {` both
+        // closes and opens a brace for a net change of zero.
+        if (trimmed.starts_with("}")) {
+          --body_depth;
+        }
+        if (trimmed.ends_with("{")) {
+          ++body_depth;
+        }
       }
     }
   }

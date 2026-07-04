@@ -112,6 +112,13 @@ class SourceGen {
     // actual count for each body is sampled from a deterministic distribution
     // over `[0, max_body_locals]`.
     int max_body_locals = 4;
+
+    // The maximum number of small control-flow blocks in a generated function
+    // body: alternating `if` and `while` statements adjusting the body's
+    // accumulator, with a fixed shape so that only their (deterministically
+    // distributed) count varies. The actual count for each body is sampled
+    // from a deterministic distribution over `[0, max_body_blocks]`.
+    int max_body_blocks = 2;
   };
 
   // Parameters used to select type _uses_, as opposed to definitions.
@@ -390,16 +397,18 @@ class SourceGen {
                             llvm::StringRef indent, llvm::raw_ostream& os,
                             FunctionSig* captured = nullptr) -> void;
   // Generates an out-of-line definition matching a captured declaration; its
-  // body produces the return value via `ProduceValue`.
+  // body consumes every parameter, runs `block_count` control-flow blocks, and
+  // produces the return value via `ProduceValue`.
   auto GenerateOutOfLineDef(ClassGenState& state, llvm::StringRef class_name,
-                            const FunctionSig& sig, llvm::raw_ostream& os)
-      -> void;
-  // Generates an inline function definition: a body of local variables followed
-  // by a `return` that produces the return value via `ProduceValue`.
+                            const FunctionSig& sig, int block_count,
+                            llvm::raw_ostream& os) -> void;
+  // Generates an inline function definition: a body consuming every parameter,
+  // with local variables and `block_count` control-flow blocks, followed by a
+  // `return` that produces the return value via `ProduceValue`.
   auto GenerateInlineFunctionDef(ClassGenState& state, llvm::StringRef name,
                                  int param_count, int local_count,
-                                 llvm::StringRef indent, llvm::raw_ostream& os)
-      -> void;
+                                 int block_count, llvm::StringRef indent,
+                                 llvm::raw_ostream& os) -> void;
   // Generates a class's nested `Make` factory, constructing a value of the
   // class from a struct literal whose fields are produced via `ProduceValue`.
   auto GenerateMakeFunction(

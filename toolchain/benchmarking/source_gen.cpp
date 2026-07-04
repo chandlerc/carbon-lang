@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iterator>
 #include <numeric>
 #include <string>
 #include <utility>
@@ -41,6 +42,131 @@ static constexpr int MinMemberNameLength = 4;
 // the class names the body produces via `Make`.
 static constexpr int LocalNameLength = 3;
 
+// One line of a control-flow construct: a nesting depth (in 2-space units
+// relative to the body's indent) and the line's spelling in each language.
+// Most lines are spelled identically; local-variable declarations differ.
+struct CfgLine {
+  int depth;
+  llvm::StringLiteral carbon;
+  llvm::StringLiteral cpp;
+};
+
+// A fixed-shape control-flow construct over a body's `acc` accumulator (and,
+// for loops needing an induction variable, a construct-local `idx`, a name
+// reserved from identifier generation). Constructs vary from simple `if`s
+// through `else if` ladders, nested conditions, counted loops, and loops with
+// `break`/`continue`. Every construct is semantically terminating and
+// warning-free, and its shape is fixed: generated bodies vary only in *which*
+// constructs they contain (drawn from a deterministically-distributed pool of
+// these kinds), so line and byte totals stay seed-independent.
+#define CARBON_CFG_LINE(depth, text) {depth, text, text}
+static constexpr CfgLine CfgIf[] = {
+    CARBON_CFG_LINE(0, "if (acc > 0) {"),
+    CARBON_CFG_LINE(1, "acc = acc + 1;"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgIfElse[] = {
+    CARBON_CFG_LINE(0, "if (acc > 5) {"),
+    CARBON_CFG_LINE(1, "acc = acc - 1;"),
+    CARBON_CFG_LINE(0, "} else {"),
+    CARBON_CFG_LINE(1, "acc = acc + 2;"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgWhile[] = {
+    CARBON_CFG_LINE(0, "while (acc > 0) {"),
+    CARBON_CFG_LINE(1, "acc = acc - 1;"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgNestedIf[] = {
+    CARBON_CFG_LINE(0, "if (acc > 1) {"),
+    CARBON_CFG_LINE(1, "acc = acc - 2;"),
+    CARBON_CFG_LINE(1, "if (acc > 2) {"),
+    CARBON_CFG_LINE(2, "acc = acc * 2;"),
+    CARBON_CFG_LINE(1, "}"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgWhileNestedIf[] = {
+    CARBON_CFG_LINE(0, "while (acc > 3) {"),
+    CARBON_CFG_LINE(1, "acc = acc - 1;"),
+    CARBON_CFG_LINE(1, "if (acc > 10) {"),
+    CARBON_CFG_LINE(2, "acc = acc - 4;"),
+    CARBON_CFG_LINE(1, "}"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgElseIfLadder[] = {
+    CARBON_CFG_LINE(0, "if (acc > 10) {"),
+    CARBON_CFG_LINE(1, "acc = acc - 5;"),
+    CARBON_CFG_LINE(0, "} else if (acc > 5) {"),
+    CARBON_CFG_LINE(1, "acc = acc - 3;"),
+    CARBON_CFG_LINE(0, "} else {"),
+    CARBON_CFG_LINE(1, "acc = acc + 1;"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgCountedLoop[] = {
+    // The induction variable is scoped inside the `if` so that two of these
+    // constructs in one body don't redeclare the same name in one scope.
+    CARBON_CFG_LINE(0, "if (acc >= 0) {"),
+    {1, "var idx: i32 = 0;", "int idx = 0;"},
+    CARBON_CFG_LINE(1, "while (idx < 3) {"),
+    CARBON_CFG_LINE(2, "idx = idx + 1;"),
+    CARBON_CFG_LINE(2, "acc = acc + idx;"),
+    CARBON_CFG_LINE(1, "}"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgLoopBreak[] = {
+    CARBON_CFG_LINE(0, "while (acc > 4) {"),
+    CARBON_CFG_LINE(1, "acc = acc - 2;"),
+    CARBON_CFG_LINE(1, "if (acc == 9) {"),
+    CARBON_CFG_LINE(2, "break;"),
+    CARBON_CFG_LINE(1, "}"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgLoopContinue[] = {
+    CARBON_CFG_LINE(0, "while (acc > 6) {"),
+    CARBON_CFG_LINE(1, "acc = acc - 3;"),
+    CARBON_CFG_LINE(1, "if (acc == 2) {"),
+    CARBON_CFG_LINE(2, "continue;"),
+    CARBON_CFG_LINE(1, "}"),
+    CARBON_CFG_LINE(1, "acc = acc - 1;"),
+    CARBON_CFG_LINE(0, "}"),
+};
+static constexpr CfgLine CfgIfNestedWhile[] = {
+    CARBON_CFG_LINE(0, "if (acc > 8) {"),
+    CARBON_CFG_LINE(1, "while (acc > 8) {"),
+    CARBON_CFG_LINE(2, "acc = acc - 2;"),
+    CARBON_CFG_LINE(1, "}"),
+    CARBON_CFG_LINE(0, "} else {"),
+    CARBON_CFG_LINE(1, "acc = acc + 3;"),
+    CARBON_CFG_LINE(0, "}"),
+};
+#undef CARBON_CFG_LINE
+
+// The pool of control-flow construct kinds that generated bodies draw from.
+static constexpr llvm::ArrayRef<CfgLine> CfgConstructs[] = {
+    CfgIf,
+    CfgIfElse,
+    CfgWhile,
+    CfgNestedIf,
+    CfgWhileNestedIf,
+    CfgElseIfLadder,
+    CfgCountedLoop,
+    CfgLoopBreak,
+    CfgLoopContinue,
+    CfgIfNestedWhile,
+};
+static constexpr int NumCfgConstructs = std::size(CfgConstructs);
+
+// The average number of lines across the construct kinds, for line estimates:
+// kinds are drawn from an evenly-distributed pool, so bodies average this many
+// lines per construct.
+static auto AvgCfgConstructLines() -> double {
+  int total = 0;
+  for (llvm::ArrayRef<CfgLine> construct : CfgConstructs) {
+    total += construct.size();
+  }
+  return static_cast<double>(total) / NumCfgConstructs;
+}
+
 // The shuffled state used to generate some number of classes.
 //
 // This state encodes everything used to generate class definitions. The state
@@ -71,6 +197,18 @@ class SourceGen::ClassGenState {
     return inline_function_param_counts_;
   }
   auto local_counts() -> llvm::SmallVectorImpl<int>& { return local_counts_; }
+  auto inline_block_counts() -> llvm::SmallVectorImpl<int>& {
+    return inline_block_counts_;
+  }
+  auto outofline_block_counts() -> llvm::SmallVectorImpl<int>& {
+    return outofline_block_counts_;
+  }
+  auto inline_block_kinds() -> llvm::SmallVectorImpl<int>& {
+    return inline_block_kinds_;
+  }
+  auto outofline_block_kinds() -> llvm::SmallVectorImpl<int>& {
+    return outofline_block_kinds_;
+  }
 
   auto class_names() -> llvm::SmallVectorImpl<llvm::StringRef>& {
     return class_names_;
@@ -222,11 +360,19 @@ class SourceGen::ClassGenState {
   llvm::SmallVector<int> private_function_param_counts_;
   llvm::SmallVector<int> private_method_param_counts_;
 
-  // Parameter and local-variable counts for inline-defined functions. These use
-  // dedicated distributions so the counts -- and thus the totals re-emitted in
-  // each body -- are independent of the random seed.
+  // Parameter, local-variable, and control-flow block counts for generated
+  // bodies. These use dedicated distributions so the counts -- and thus the
+  // totals re-emitted in each body -- are independent of the random seed.
   llvm::SmallVector<int> inline_function_param_counts_;
   llvm::SmallVector<int> local_counts_;
+  llvm::SmallVector<int> inline_block_counts_;
+  llvm::SmallVector<int> outofline_block_counts_;
+  // Control-flow construct kinds for each role's blocks, one entry per block
+  // (`Sum` of the role's block counts), drawn evenly across the construct
+  // kinds and shuffled. Kept per role because the two roles emit blocks at
+  // different indentation, so their per-kind byte costs differ.
+  llvm::SmallVector<int> inline_block_kinds_;
+  llvm::SmallVector<int> outofline_block_kinds_;
 
   llvm::SmallVector<llvm::StringRef> class_names_;
   // Names for declared functions and methods are kept separate from field names
@@ -362,6 +508,19 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
                           class_params.inline_function_decl_params.max_params);
   local_counts_ = gen.GetShuffledInts(num_inline_functions, 0,
                                       class_params.max_body_locals);
+  // Control-flow block counts for every generated body: inline definitions,
+  // and out-of-line definitions when those are generated. Each role also gets
+  // a pool of construct kinds, one per block, evenly distributed across the
+  // kinds and shuffled.
+  inline_block_counts_ = gen.GetShuffledInts(num_inline_functions, 0,
+                                             class_params.max_body_blocks);
+  outofline_block_counts_ =
+      gen.GetShuffledInts(split_type_pools_ ? num_classes * decls_per_class : 0,
+                          0, class_params.max_body_blocks);
+  inline_block_kinds_ =
+      gen.GetShuffledInts(Sum(inline_block_counts_), 0, NumCfgConstructs - 1);
+  outofline_block_kinds_ = gen.GetShuffledInts(Sum(outofline_block_counts_), 0,
+                                               NumCfgConstructs - 1);
   int num_inline_params = Sum(inline_function_param_counts_);
   int num_locals = Sum(local_counts_);
   // Inline-definition parameters are consumed by their bodies, giving them a
@@ -709,8 +868,9 @@ static auto EstimateAvgMethodDeclLines(SourceGen::MethodDeclParams params,
 // (including the guaranteed mirror parameter, modeled by `extra_params` = 1 in
 // the signature estimate too; see `EstimateAvgFunctionDeclLines`), half of
 // `max_body_locals` local-variable lines (one per local), a write-back line
-// whenever there is at least one local, a return line, and a closing brace
-// line.
+// whenever there is at least one local, control-flow blocks averaging half the
+// maximum count at the average construct size, a return line, and a closing
+// brace line.
 static auto EstimateAvgInlineFunctionDefLines(SourceGen::ClassParams params)
     -> double {
   constexpr int MirrorParams = 1;
@@ -719,9 +879,11 @@ static auto EstimateAvgInlineFunctionDefLines(SourceGen::ClassParams params)
   double max_locals = params.max_body_locals;
   double avg_locals = max_locals / 2.0;
   double prob_any_local = max_locals / (max_locals + 1.0);
+  double avg_block_lines =
+      AvgCfgConstructLines() * params.max_body_blocks / 2.0;
   return EstimateAvgFunctionDeclLines(params.inline_function_decl_params,
                                       MirrorParams) +
-         1.0 + avg_params + avg_locals + prob_any_local + 2.0;
+         1.0 + avg_params + avg_locals + prob_any_local + avg_block_lines + 2.0;
 }
 
 // Note that this should match the heuristics used when formatting.
@@ -774,10 +936,14 @@ static auto EstimateAvgClassDefLines(SourceGen::ClassParams params,
   // definition after the class: a blank separator line, a comment line, a
   // single-line signature, an accumulator line, a consumption line per
   // parameter (the average random count plus the guaranteed mirror parameter,
-  // plus one for `self` on methods), a return line, and a closing brace line.
+  // plus one for `self` on methods), control-flow blocks averaging half the
+  // maximum count at the average construct size, a return line, and a closing
+  // brace line.
   if (define_decls_out_of_line) {
-    auto out_of_line_lines = [](int max_params, bool is_method) {
-      return 7.0 + max_params / 2.0 + (is_method ? 1.0 : 0.0);
+    double avg_block_lines =
+        AvgCfgConstructLines() * params.max_body_blocks / 2.0;
+    auto out_of_line_lines = [avg_block_lines](int max_params, bool is_method) {
+      return 7.0 + max_params / 2.0 + (is_method ? 1.0 : 0.0) + avg_block_lines;
     };
     avg += out_of_line_lines(params.public_function_decl_params.max_params,
                              /*is_method=*/false) *
@@ -864,6 +1030,10 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   // Likewise the inline-definition state must be fully consumed.
   CARBON_CHECK(class_gen_state.inline_function_param_counts().empty());
   CARBON_CHECK(class_gen_state.local_counts().empty());
+  CARBON_CHECK(class_gen_state.inline_block_counts().empty());
+  CARBON_CHECK(class_gen_state.outofline_block_counts().empty());
+  CARBON_CHECK(class_gen_state.inline_block_kinds().empty());
+  CARBON_CHECK(class_gen_state.outofline_block_kinds().empty());
   CARBON_CHECK(class_gen_state.inline_function_names().empty());
   CARBON_CHECK(class_gen_state.inline_param_names().empty());
   CARBON_CHECK(class_gen_state.local_names().empty());
@@ -980,8 +1150,8 @@ static constexpr llvm::StringRef NonCarbonCppKeywords[] = {
 // identifier matching one of these could collide with the generated construct
 // (for example, an inline function named `Make` would clash with the class's
 // `Make` factory), so they are excluded from identifier generation.
-static constexpr llvm::StringRef ReservedGeneratedNames[] = {"Make", "Checksum",
-                                                             "acc", "tag"};
+static constexpr llvm::StringRef ReservedGeneratedNames[] = {
+    "Make", "Checksum", "acc", "tag", "idx"};
 
 // Returns a random identifier string of the specified length.
 //
@@ -1435,15 +1605,36 @@ static auto EmitConsumer(llvm::StringRef consumer, llvm::StringRef name,
   os << prefix << name << suffix;
 }
 
+// Emits `block_count` control-flow constructs over the body's accumulator,
+// with the kinds drawn from the provided pool of construct kinds. The pool's
+// multiset of kinds is seed-independent, and each kind's shape is fixed, so a
+// role's total block cost depends only on the (deterministic) counts even
+// though each body's mix of constructs varies.
+static auto EmitBodyBlocks(int block_count,
+                           llvm::SmallVectorImpl<int>& kind_pool, bool is_cpp,
+                           llvm::StringRef body_indent, llvm::raw_ostream& os)
+    -> void {
+  for ([[maybe_unused]] auto _ : llvm::seq(block_count)) {
+    int kind = kind_pool.pop_back_val();
+    for (const CfgLine& line : CfgConstructs[kind]) {
+      os << body_indent;
+      os.indent(2 * line.depth);
+      os << (is_cpp ? line.cpp : line.carbon) << "\n";
+    }
+  }
+}
+
 // Generates an out-of-line definition matching a previously-declared function
 // or method, writing it to the provided stream.
 //
 // The body accumulates a consumption of every parameter (and of `self` for
-// methods, via the class's `Checksum`) into a local accumulator, then returns
-// a produced value of the return type (a `Make` call for a class type, a
-// literal for a builtin). Consuming every binding keeps the generated code
-// free of unused-binding warnings, which would otherwise flood benchmark
-// output and distort the check benchmarks into measuring diagnostic emission.
+// methods, via the class's `Checksum`) into a local accumulator, runs a
+// deterministically distributed number of control-flow constructs over the
+// accumulator, and returns a produced value of the return type (a `Make` call
+// for a class type, a literal for a builtin). Consuming every binding keeps the
+// generated code free of unused-binding warnings, which would otherwise flood
+// benchmark output and distort the check benchmarks into measuring diagnostic
+// emission.
 //
 // The full signature is re-emitted from the captured `sig`, on a single line
 // regardless of parameter count -- a simplification relative to the wrapped
@@ -1455,7 +1646,7 @@ static auto EmitConsumer(llvm::StringRef consumer, llvm::StringRef name,
 // there is always at least the mirror parameter to consume.
 auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
                                      llvm::StringRef class_name,
-                                     const FunctionSig& sig,
+                                     const FunctionSig& sig, int block_count,
                                      llvm::raw_ostream& os) -> void {
   os << "// TODO: make better comment text\n";
   if (!IsCpp()) {
@@ -1498,6 +1689,8 @@ auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
     EmitConsumer(consumer, param, os);
     os << ";\n";
   }
+  EmitBodyBlocks(block_count, state.outofline_block_kinds(), IsCpp(),
+                 /*body_indent=*/"  ", os);
 
   os << "  return ";
   state.ProduceValue(sig.return_type, IsCpp(), os);
@@ -1510,7 +1703,8 @@ auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
 // The body consumes every parameter into an accumulator (see
 // `GenerateOutOfLineDef` for why bodies consume all of their bindings), then
 // emits a sequence of local variables -- each initialized by a small
-// sub-expression over the previous one -- followed by a `return` that produces
+// sub-expression over the previous one -- and a deterministically distributed
+// number of small control-flow blocks, followed by a `return` that produces
 // a value of the return type via `ProduceValue` (a `Make` call for a class
 // type, a literal for a builtin). The accumulator and locals all have type
 // `i32` (`int` in C++), a copyable builtin, so they type-check regardless of
@@ -1523,7 +1717,7 @@ auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
 // is always at least the mirror parameter to consume.
 auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
                                           llvm::StringRef name, int param_count,
-                                          int local_count,
+                                          int local_count, int block_count,
                                           llvm::StringRef indent,
                                           llvm::raw_ostream& os) -> void {
   os << indent << "// TODO: make better comment text\n";
@@ -1614,6 +1808,9 @@ auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
   if (local_count > 0) {
     os << body_indent << locals.front() << " = " << locals.back() << ";\n";
   }
+
+  EmitBodyBlocks(block_count, state.inline_block_kinds(), IsCpp(), body_indent,
+                 os);
 
   os << body_indent << "return ";
   state.ProduceValue(return_type, IsCpp(), os);
@@ -1734,7 +1931,8 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
     GenerateInlineFunctionDef(
         state, unique_inline_names.Pop(),
         state.inline_function_param_counts().pop_back_val(),
-        state.local_counts().pop_back_val(), /*indent=*/"  ", os);
+        state.local_counts().pop_back_val(),
+        state.inline_block_counts().pop_back_val(), /*indent=*/"  ", os);
   }
   for ([[maybe_unused]] auto _ : llvm::seq(params.public_method_decls)) {
     os << line_sep;
@@ -1819,7 +2017,8 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
   // after the class.
   for (const FunctionSig& sig : decl_sigs) {
     os << "\n";
-    GenerateOutOfLineDef(state, name, sig, os);
+    GenerateOutOfLineDef(state, name, sig,
+                         state.outofline_block_counts().pop_back_val(), os);
   }
 }
 
