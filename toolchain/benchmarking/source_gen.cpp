@@ -80,11 +80,11 @@ static auto WeightedFixedTypes(
 // the arrangement doesn't change the body's size.
 //
 // TODO: Plans read each parameter once, read class-typed locals only with
-// `Checksum`, and make no calls. Real bodies read parameters and fields
-// throughout, and make calls in most statements, many of them to methods of
-// their locals. Add those statements and expressions, fixing each one's
-// spelling before the shuffle as the type use pools do, so that sizes stay the
-// same for every seed.
+// `Checksum`, and only call free functions, with fixed arguments. Real bodies
+// read parameters and fields throughout, and call methods of their locals with
+// arguments computed from other locals. Add those statements and expressions,
+// fixing each one's spelling before the shuffle as the type use pools do, so
+// that sizes stay the same for every seed.
 enum class PlanKind : uint8_t {
   // `var <local>: i32 = <expr>;`
   Local,
@@ -96,8 +96,17 @@ enum class PlanKind : uint8_t {
   // `let (<local>: i32, <local>: i64) = (<expr>, <expr> as i64);`, whose locals
   // the next statement reads. `form` selects among `DestructureForms`.
   Destructure,
+  // A declaration that destructures the tuple returned by a call to a free
+  // function into two locals, such as
+  // `let (<local>: bool, <local>: i64) = <call>;`, whose locals the next
+  // statement reads. In a file whose free functions return no tuple with a
+  // `CallDestructureForms` entry, it destructures a literal like `Destructure`.
+  DestructureCall,
   // `<local> = <expr>;`
   Update,
+  // `<local> = <local> + <call>;`, where a consumer template reads the result
+  // of a call to a free function.
+  Call,
   // `if (<cond>) {`, a block, and `}`.
   If,
   // `if (<cond>) {`, a block, `} else {`, a block, and `}`.
@@ -133,7 +142,8 @@ static auto NumPlanBlocks(PlanKind kind) -> int {
 // Whether a statement of `kind` declares locals, which the statement after it
 // reads.
 static auto IsDeclaration(PlanKind kind) -> bool {
-  return kind == PlanKind::Local || kind == PlanKind::Destructure;
+  return kind == PlanKind::Local || kind == PlanKind::Destructure ||
+         kind == PlanKind::DestructureCall;
 }
 
 // A statement in a body plan. `form` selects among the kind's spellings.
@@ -188,15 +198,50 @@ static constexpr DestructureForm DestructureForms[] = {
      .b_is_i32 = true},
 };
 
+// A form of `DestructureCall` statement, for the tuple type that its callee
+// returns. `{a}` and `{b}` are the two locals, and `read` reads them along with
+// an operand, `{0}`, since the call has none. Later statements can also read
+// the locals that are `i32`s. C++ destructures every call with
+// `const auto [{a}, {b}]`.
+struct CallDestructureForm {
+  llvm::StringLiteral carbon_type;
+  llvm::StringLiteral cpp_type;
+  llvm::StringLiteral carbon_pattern;
+  llvm::StringLiteral carbon_read;
+  llvm::StringLiteral cpp_read;
+  bool a_is_i32;
+  bool b_is_i32;
+};
+static constexpr CallDestructureForm CallDestructureForms[] = {
+    {.carbon_type = "(bool, i64)",
+     .cpp_type = "std::pair<bool, std::int64_t>",
+     .carbon_pattern = "let ({a}: bool, {b}: i64)",
+     .carbon_read = "({0} + (if {a} then 1 else 0) + ({b} as i32))",
+     .cpp_read = "({0} + ({a} ? 1 : 0) + static_cast<int>({b}))",
+     .a_is_i32 = false,
+     .b_is_i32 = false},
+    {.carbon_type = "(i32, i64*)",
+     .cpp_type = "std::pair<int, std::int64_t*>",
+     .carbon_pattern = "let ({a}: i32, {b}: i64*)",
+     .carbon_read = "({0} + {a} + (*{b} as i32))",
+     .cpp_read = "({0} + {a} + static_cast<int>(*{b}))",
+     .a_is_i32 = true,
+     .b_is_i32 = false},
+};
+
 // The statements of a body plan at each depth. The statement that a guard
 // returns or exits with is one depth below the guard, and isn't listed.
 struct BodyPlan {
   llvm::SmallVector<llvm::SmallVector<PlanStmt>> levels;
   // The number of lines in the plan's statements, of locals that they declare,
-  // and of class-typed locals among those.
+  // of class-typed locals among those, of calls, and of destructured calls. A
+  // body whose plan has calls also has a line declaring `acc64`, which `lines`
+  // counts.
   int lines = 0;
   int locals = 0;
   int class_locals = 0;
+  int calls = 0;
+  int destructure_calls = 0;
 };
 
 // The calibration of body plans, which approximates the bodies in a sample of
@@ -260,6 +305,11 @@ static constexpr double ElseIfShare = 0.42;
 // How many times more likely a loop body is than another block of the same size
 // to get each further statement when arranging a body.
 static constexpr int LoopBodyWeight = 3;
+// The share of updates that are calls, when bodies can make calls.
+static constexpr double CallShare = 0.75;
+// The share of destructurings that destructure a call, when bodies can make
+// calls. In the sample, 89% of structured bindings bind a call's result.
+static constexpr double CallDestructureShare = 0.89;
 // The shares of the statements at depth 0, and deeper, that are locals.
 static constexpr double TopLocalShare = 0.35;
 static constexpr double NestedLocalShare = 0.25;
@@ -320,10 +370,12 @@ static auto SplitPlanDepths(int statements, int max_depth,
 }
 
 // Composes the plan of a body with `statements` statements, for the
-// `variant`th body of that size. Fractional counts round with a generator
-// seeded with the size and variant, so that bodies of one size vary while their
-// average follows the calibration, and nothing depends on the seed.
-static auto ComposeBodyPlan(int statements, int variant) -> BodyPlan {
+// `variant`th body of that size. With `calls`, some of the updates are calls.
+// Fractional counts round with a generator seeded with the size and variant,
+// so that bodies of one size vary while their average follows the calibration,
+// and nothing depends on the seed.
+static auto ComposeBodyPlan(int statements, int variant, bool calls)
+    -> BodyPlan {
   BodyPlan plan;
   if (statements == 0) {
     return plan;
@@ -428,10 +480,16 @@ static auto ComposeBodyPlan(int statements, int variant) -> BodyPlan {
     int destructures = round_count(DestructureShare * locals);
     int class_locals = std::min(
         round_count(ClassLocalShare * (locals - destructures)), updates);
+    int destructure_calls =
+        calls ? round_count(CallDestructureShare * destructures) : 0;
+    int num_calls =
+        calls ? round_count(CallShare * (updates - class_locals)) : 0;
     add(depth, PlanKind::Local, locals - destructures - class_locals);
     add(depth, PlanKind::ClassLocal, class_locals);
-    add(depth, PlanKind::Destructure, destructures);
-    add(depth, PlanKind::Update, updates - class_locals);
+    add(depth, PlanKind::Destructure, destructures - destructure_calls);
+    add(depth, PlanKind::DestructureCall, destructure_calls);
+    add(depth, PlanKind::Update, updates - class_locals - num_calls);
+    add(depth, PlanKind::Call, num_calls);
     add(depth, PlanKind::If, ifs);
     add(depth, PlanKind::IfElse, pairs - else_ifs);
     add(depth, PlanKind::ElseIf, else_ifs);
@@ -445,9 +503,14 @@ static auto ComposeBodyPlan(int statements, int variant) -> BodyPlan {
     // Each destructuring declares two locals.
     plan.locals += locals + destructures;
     plan.class_locals += class_locals;
+    plan.calls += num_calls;
+    plan.destructure_calls += destructure_calls;
     guard_children = guards + exits;
     blocks = next_blocks;
     loop_blocks = loops;
+  }
+  if (plan.calls > 0) {
+    ++plan.lines;
   }
   return plan;
 }
@@ -485,12 +548,14 @@ static auto ApportionBodySizes(int num_bodies,
   return counts;
 }
 
-// Builds the plans for `num_bodies` bodies, with sizes following `sizes`, and
-// appends them to `plans`. Each size's plans spread evenly through the order,
-// so that any stretch of the order has a mix of sizes.
+// Builds the plans for `num_bodies` bodies, with sizes following `sizes` and
+// with calls when `calls`, and appends them to `plans`. Each size's plans
+// spread evenly through the order, so that any stretch of the order has a mix
+// of sizes.
 static auto BuildBodyPlans(int num_bodies,
                            llvm::ArrayRef<SourceGen::BodySizeWeight> sizes,
-                           llvm::SmallVectorImpl<BodyPlan>& plans) -> void {
+                           bool calls, llvm::SmallVectorImpl<BodyPlan>& plans)
+    -> void {
   struct Entry {
     double position;
     int statements;
@@ -511,14 +576,14 @@ static auto BuildBodyPlans(int num_bodies,
   });
   plans.reserve(plans.size() + num_bodies);
   for (const Entry& entry : entries) {
-    plans.push_back(ComposeBodyPlan(entry.statements, entry.variant));
+    plans.push_back(ComposeBodyPlan(entry.statements, entry.variant, calls));
   }
 }
 
 // Estimates the average number of lines in the plans of bodies with sizes
-// following `sizes`.
+// following `sizes`, and with calls when `calls`.
 static auto EstimateAvgBodyPlanLines(
-    llvm::ArrayRef<SourceGen::BodySizeWeight> sizes) -> double {
+    llvm::ArrayRef<SourceGen::BodySizeWeight> sizes, bool calls) -> double {
   // Average over enough variants that their rounding evens out.
   constexpr int NumVariants = 16;
   double lines = 0.0;
@@ -526,7 +591,7 @@ static auto EstimateAvgBodyPlanLines(
   for (const SourceGen::BodySizeWeight& size : sizes) {
     int size_lines = 0;
     for (int variant : llvm::seq(NumVariants)) {
-      size_lines += ComposeBodyPlan(size.statements, variant).lines;
+      size_lines += ComposeBodyPlan(size.statements, variant, calls).lines;
     }
     lines += static_cast<double>(size_lines) / NumVariants * size.weight;
     total_weight += size.weight;
@@ -543,6 +608,29 @@ static auto EstimateAvgBodyPlanLines(
 // Detailed comments for out-of-line methods are on their definitions.
 class SourceGen::ClassGenState {
  public:
+  // A free function declaration, which bodies call. `args` is the argument list
+  // of every call to it.
+  struct FreeFunction {
+    llvm::StringRef name;
+    llvm::SmallVector<llvm::StringRef> param_types;
+    std::string args;
+    llvm::StringRef return_type;
+  };
+
+  // A call in a body: the index of the callee in `free_functions()`, and the
+  // consumer template that reads its result.
+  struct CallRef {
+    int callee;
+    llvm::StringRef consumer;
+  };
+
+  // A destructured call in a body: the index of the callee in
+  // `free_functions()`, and of its form in `CallDestructureForms`.
+  struct DestructureCallRef {
+    int callee;
+    int form;
+  };
+
   ClassGenState(SourceGen& gen, int num_classes, const DenseDeclParams& params);
 
   auto public_function_param_counts() -> llvm::SmallVectorImpl<int>& {
@@ -573,6 +661,43 @@ class SourceGen::ClassGenState {
   // The classes of the class-typed locals of out-of-line definitions.
   auto class_local_types() -> llvm::SmallVectorImpl<llvm::StringRef>& {
     return class_local_types_;
+  }
+
+  // The calls that body plans make, shuffled.
+  auto call_refs() -> llvm::SmallVectorImpl<CallRef>& { return call_refs_; }
+  auto free_functions() -> llvm::ArrayRef<FreeFunction> {
+    return free_functions_;
+  }
+  // The shuffled order to declare the free functions in.
+  auto free_emission_order() -> llvm::ArrayRef<int> {
+    return free_emission_order_;
+  }
+  auto free_param_names() -> llvm::SmallVectorImpl<llvm::StringRef>& {
+    return free_param_names_;
+  }
+
+  // Emits the next call in `call_refs()`, read with its consumer template.
+  auto destructure_call_refs() -> llvm::SmallVectorImpl<DestructureCallRef>& {
+    return destructure_call_refs_;
+  }
+  // Takes the next destructured call, spells it in `call`, and returns the form
+  // that destructures it. Returns null when no free function returns a tuple
+  // with a form.
+  auto NextDestructureCall(std::string& call) -> const CallDestructureForm* {
+    if (destructure_call_refs_.empty()) {
+      return nullptr;
+    }
+    DestructureCallRef ref = destructure_call_refs_.pop_back_val();
+    const FreeFunction& callee = free_functions_[ref.callee];
+    call = (callee.name + "(" + callee.args + ")").str();
+    return &CallDestructureForms[ref.form];
+  }
+
+  auto EmitCall(llvm::raw_ostream& os) -> void {
+    CallRef ref = call_refs_.pop_back_val();
+    const FreeFunction& callee = free_functions_[ref.callee];
+    auto [prefix, suffix] = ref.consumer.split("{0}");
+    os << prefix << callee.name << "(" << callee.args << ")" << suffix;
   }
 
   auto getter_field_types() -> llvm::SmallVectorImpl<llvm::StringRef>& {
@@ -624,10 +749,11 @@ class SourceGen::ClassGenState {
     valid_type_names_.Insert(type_name);
   }
 
-  // The names of all classes in the file. Parameter, member, and field names
-  // exclude these so that they can't shadow a class that a body names.
-  auto class_name_set() -> const Set<llvm::StringRef>& {
-    return class_name_set_;
+  // The names of all classes and free functions in the file. Parameter,
+  // member, and field names exclude these so that they can't shadow a name that
+  // a body uses.
+  auto file_scope_name_set() -> const Set<llvm::StringRef>& {
+    return file_scope_name_set_;
   }
 
   // Emits an expression producing a value of `type`: a call to the class's
@@ -709,8 +835,15 @@ class SourceGen::ClassGenState {
   auto GetValidTypeUse(TypePool& pool) -> TypeUse;
 
   auto BuildClassAndTypeNames(SourceGen& gen, int num_classes,
-                              const ClassParams& class_params,
-                              const TypeUseParams& type_use_params) -> void;
+                              const DenseDeclParams& params) -> void;
+  auto BuildFreeFunction(
+      SourceGen& gen, int i, llvm::StringRef name,
+      llvm::ArrayRef<const TypeUseParams::FixedTypeWeight*> weighted_types,
+      int max_params) -> FreeFunction;
+  auto BuildCallRefs(SourceGen& gen, int num_calls)
+      -> llvm::SmallVector<CallRef>;
+  auto BuildDestructureCallRefs(SourceGen& gen, int num_calls)
+      -> llvm::SmallVector<DestructureCallRef>;
   auto BuildTypePool(SourceGen& gen, int num_types, int max_refs_per_class,
                      bool producible_only, bool consumed, bool for_fields,
                      const TypeUseParams& type_use_params) -> TypePool;
@@ -725,6 +858,8 @@ class SourceGen::ClassGenState {
   llvm::SmallVector<BodyPlan> body_plans_;
   int inline_body_plans_start_;
   llvm::SmallVector<llvm::StringRef> class_local_types_;
+  llvm::SmallVector<CallRef> call_refs_;
+  llvm::SmallVector<DestructureCallRef> destructure_call_refs_;
 
   // Getters return a copy of their field, and `Make` initializes it, so getter
   // and predicate fields have fixed types with a value expression. These types
@@ -732,6 +867,10 @@ class SourceGen::ClassGenState {
   // their spellings don't depend on the seed.
   llvm::SmallVector<llvm::StringRef> getter_field_types_;
   llvm::SmallVector<PredicateField> predicate_fields_;
+
+  llvm::SmallVector<FreeFunction> free_functions_;
+  llvm::SmallVector<int> free_emission_order_;
+  llvm::SmallVector<llvm::StringRef> free_param_names_;
 
   llvm::SmallVector<llvm::StringRef> class_names_;
   // Out-of-line definitions spell declared function and method names a second
@@ -768,6 +907,7 @@ class SourceGen::ClassGenState {
   Set<llvm::StringRef> valid_type_names_;
 
   Set<llvm::StringRef> class_name_set_;
+  Set<llvm::StringRef> file_scope_name_set_;
   // The value expression and consumer templates of each fixed type, keyed by
   // its spelling. These refer into the `TypeUseParams`, which outlives
   // generation.
@@ -833,10 +973,12 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
   // `BuildClassAndTypeNames`.
   int num_inline_params =
       Sum(inline_function_param_counts_) + num_inline_functions;
-  BuildBodyPlans(num_out_of_line_defs, params.out_of_line_body_sizes,
+  // Bodies only make calls when the file has free functions to call.
+  bool calls = params.free_function_decls_per_class > 0;
+  BuildBodyPlans(num_out_of_line_defs, params.out_of_line_body_sizes, calls,
                  body_plans_);
   inline_body_plans_start_ = body_plans_.size();
-  BuildBodyPlans(num_inline_functions, class_params.inline_body_sizes,
+  BuildBodyPlans(num_inline_functions, class_params.inline_body_sizes, calls,
                  body_plans_);
   int num_locals = 0;
   for (const BodyPlan& plan : body_plans_) {
@@ -863,8 +1005,7 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
   forwarder_param_names_ =
       gen.GetShuffledIdentifiers(Sum(forwarder_param_counts_));
 
-  BuildClassAndTypeNames(gen, num_classes, class_params,
-                         params.type_use_params);
+  BuildClassAndTypeNames(gen, num_classes, params);
 }
 
 auto SourceGen::ClassGenState::GetValidTypeUse(TypePool& pool) -> TypeUse {
@@ -1038,14 +1179,25 @@ auto SourceGen::ClassGenState::BuildTypePool(
 // to each class at the number of uses each class draws from it after its
 // fields; see `BuildTypePool`.
 auto SourceGen::ClassGenState::BuildClassAndTypeNames(
-    SourceGen& gen, int num_classes, const ClassParams& class_params,
-    const TypeUseParams& type_use_params) -> void {
-  // Initially get the sequence of class names without shuffling so we can
-  // compute our type pools from them prior to any shuffling.
-  class_names_ =
-      gen.GetUniqueIdentifiers(num_classes, /*min_length=*/MinClassNameLength);
+    SourceGen& gen, int num_classes, const DenseDeclParams& params) -> void {
+  const ClassParams& class_params = params.class_params;
+  const TypeUseParams& type_use_params = params.type_use_params;
+  // Initially get the sequence of class and free function names without
+  // shuffling so we can compute our type pools from them prior to any
+  // shuffling. Drawing both from one set of unique names keeps them distinct.
+  int num_free_functions = num_classes * params.free_function_decls_per_class;
+  llvm::SmallVector<llvm::StringRef> file_scope_names =
+      gen.GetUniqueIdentifiers(num_classes + num_free_functions,
+                               /*min_length=*/MinClassNameLength);
+  class_names_.assign(file_scope_names.begin(),
+                      file_scope_names.begin() + num_classes);
+  llvm::ArrayRef<llvm::StringRef> free_function_names =
+      llvm::ArrayRef(file_scope_names).slice(num_classes);
   for (llvm::StringRef name : class_names_) {
     class_name_set_.Insert(name);
+  }
+  for (llvm::StringRef name : file_scope_names) {
+    file_scope_name_set_.Insert(name);
   }
 
   // Every fixed type needs a consumer template, since any of them can be the
@@ -1194,9 +1346,139 @@ auto SourceGen::ClassGenState::BuildClassAndTypeNames(
   }
   std::shuffle(class_local_types_.begin(), class_local_types_.end(), gen.rng_);
 
+  free_functions_.reserve(num_free_functions);
+  auto free_function_types = WeightedFixedTypes(
+      type_use_params, [](const auto& /*fw*/) { return true; });
+  int num_free_params = 0;
+  for (auto [i, name] : llvm::enumerate(free_function_names)) {
+    free_functions_.push_back(
+        BuildFreeFunction(gen, static_cast<int>(i), name, free_function_types,
+                          params.free_function_decl_params.max_params));
+    num_free_params += free_functions_.back().param_types.size();
+  }
+  free_param_names_ = gen.GetShuffledIdentifiers(num_free_params);
+  int num_calls = 0;
+  int num_destructure_calls = 0;
+  for (const BodyPlan& plan : body_plans_) {
+    num_calls += plan.calls;
+    num_destructure_calls += plan.destructure_calls;
+  }
+  call_refs_ = BuildCallRefs(gen, num_calls);
+  destructure_call_refs_ = BuildDestructureCallRefs(gen, num_destructure_calls);
+  free_emission_order_.resize(num_free_functions);
+  std::iota(free_emission_order_.begin(), free_emission_order_.end(), 0);
+  std::shuffle(free_emission_order_.begin(), free_emission_order_.end(),
+               gen.rng_);
   // Classes are defined from the back, so the first unshuffled name is always
   // the class defined last, which field pools leave out; see `BuildTypePool`.
   std::shuffle(class_names_.begin() + 1, class_names_.end(), gen.rng_);
+}
+
+// Builds the `i`th free function declaration. Its signature depends only on
+// `i`, not on the seed, so that the bytes of its calls don't either: its
+// parameter count cycles through [0, max_params], its parameter types cycle
+// through `weighted_types`, and its return type is the `i`th of
+// `weighted_types`, so that return types follow the weights.
+auto SourceGen::ClassGenState::BuildFreeFunction(
+    SourceGen& gen, int i, llvm::StringRef name,
+    llvm::ArrayRef<const TypeUseParams::FixedTypeWeight*> weighted_types,
+    int max_params) -> FreeFunction {
+  FreeFunction fn;
+  fn.name = name;
+
+  // Start each function's parameter types at a different point in the cycle.
+  int offset = i * (max_params + 2);
+  auto next_type = [&]() -> const TypeUseParams::FixedTypeWeight* {
+    return weighted_types[offset++ % weighted_types.size()];
+  };
+
+  int param_count = i % (max_params + 1);
+  RawStringOstream args;
+  llvm::ListSeparator sep;
+  for ([[maybe_unused]] auto _ : llvm::seq(param_count)) {
+    const auto& fw = *next_type();
+    fn.param_types.push_back(gen.IsCpp() ? fw.cpp_spelling
+                                         : fw.carbon_spelling);
+    llvm::StringRef arg = gen.IsCpp() ? fw.cpp_arg : fw.carbon_arg;
+    if (arg.empty()) {
+      arg = gen.IsCpp() ? fw.cpp_value : fw.carbon_value;
+    }
+    CARBON_CHECK(!arg.empty(),
+                 "Fixed type `{0}` needs an argument or value expression.",
+                 fn.param_types.back());
+    args << sep << arg;
+  }
+  fn.args = args.TakeStr();
+  const auto& return_type = *weighted_types[i % weighted_types.size()];
+  fn.return_type =
+      gen.IsCpp() ? return_type.cpp_spelling : return_type.carbon_spelling;
+  return fn;
+}
+
+// Builds a shuffled pool of `num_calls` calls, distributed evenly over the free
+// functions. Each call gets one of its result type's consumer templates,
+// round-robin per type before the shuffle.
+auto SourceGen::ClassGenState::BuildCallRefs(SourceGen& gen, int num_calls)
+    -> llvm::SmallVector<CallRef> {
+  llvm::SmallVector<CallRef> refs;
+  if (num_calls == 0) {
+    return refs;
+  }
+  int num_free = free_functions_.size();
+  CARBON_CHECK(num_free > 0);
+  refs.reserve(num_calls);
+  Map<llvm::StringRef, int> consumer_counters;
+  auto append_ref = [&](int callee) {
+    llvm::StringRef ret = free_functions_[callee].return_type;
+    llvm::ArrayRef<llvm::StringRef> consumers =
+        fixed_consumers_.Lookup(ret).value();
+    int& counter = consumer_counters.Insert(ret, 0).value();
+    refs.push_back({.callee = callee,
+                    .consumer = consumers[counter++ % consumers.size()]});
+  };
+  int full_copies = num_calls / num_free;
+  int remainder = num_calls % num_free;
+  for ([[maybe_unused]] auto _ : llvm::seq(full_copies)) {
+    for (int callee : llvm::seq(num_free)) {
+      append_ref(callee);
+    }
+  }
+  // Give the remaining calls to a prefix of the unshuffled free functions, so
+  // that which functions get an extra call doesn't depend on the seed.
+  for (int callee : llvm::seq(remainder)) {
+    append_ref(callee);
+  }
+  std::shuffle(refs.begin(), refs.end(), gen.rng_);
+  return refs;
+}
+
+// Builds a shuffled pool of `num_calls` destructured calls, distributed evenly
+// over the free functions that return a tuple with a `CallDestructureForms`
+// entry, with any remainder going to a fixed prefix of them. Returns an empty
+// pool when there are none.
+auto SourceGen::ClassGenState::BuildDestructureCallRefs(SourceGen& gen,
+                                                        int num_calls)
+    -> llvm::SmallVector<DestructureCallRef> {
+  llvm::SmallVector<DestructureCallRef> eligible;
+  for (auto [callee, fn] : llvm::enumerate(free_functions_)) {
+    for (auto [form, call_form] : llvm::enumerate(CallDestructureForms)) {
+      if (fn.return_type ==
+          (gen.IsCpp() ? call_form.cpp_type : call_form.carbon_type)) {
+        eligible.push_back({.callee = static_cast<int>(callee),
+                            .form = static_cast<int>(form)});
+      }
+    }
+  }
+  llvm::SmallVector<DestructureCallRef> refs;
+  if (eligible.empty()) {
+    return refs;
+  }
+  refs.reserve(num_calls);
+  for (int i : llvm::seq(num_calls)) {
+    refs.push_back(eligible[i % eligible.size()]);
+  }
+  std::shuffle(refs.begin(), refs.end(), gen.rng_);
+  return refs;
 }
 
 // Some heuristic numbers used when formatting generated code. These heuristics
@@ -1245,21 +1527,34 @@ static auto EstimateAvgMethodDeclLines(SourceGen::MethodDeclParams params,
 // excluding its comment. The body has an accumulator line, a line reading the
 // parameters, its plan's lines, a return line, and a closing brace line.
 static auto EstimateAvgInlineFunctionDefLines(
-    const SourceGen::ClassParams& params) -> double {
+    const SourceGen::DenseDeclParams& dense_params) -> double {
+  const SourceGen::ClassParams& params = dense_params.class_params;
   constexpr int ExtraParams = 1;
   return EstimateAvgFunctionDeclLines(params.inline_function_decl_params,
                                       ExtraParams) +
-         4.0 + EstimateAvgBodyPlanLines(params.inline_body_sizes);
+         4.0 +
+         EstimateAvgBodyPlanLines(
+             params.inline_body_sizes,
+             /*calls=*/dense_params.free_function_decls_per_class > 0);
 }
 
 // Note that this should match the heuristics used when formatting.
 // TODO: See top-level TODO about line estimates and formatting.
+//
+// This includes each class's share of the free function declarations, whose
+// number is proportional to the number of classes.
 static auto EstimateAvgClassDefLines(
     const SourceGen::DenseDeclParams& dense_params) -> double {
   const SourceGen::ClassParams& params = dense_params.class_params;
   bool define_decls_out_of_line = dense_params.define_decls_out_of_line;
   // Comment line, and class open line.
   double avg = 2.0;
+
+  // Each class's share of the free function declarations, which each have a
+  // blank line and a comment line.
+  avg += dense_params.free_function_decls_per_class *
+         (2.0 +
+          EstimateAvgFunctionDeclLines(dense_params.free_function_decl_params));
 
   // Declarations with out-of-line definitions have an extra parameter.
   int decl_extra_params = define_decls_out_of_line ? 1 : 0;
@@ -1277,7 +1572,7 @@ static auto EstimateAvgClassDefLines(
   avg += (2.0 + EstimateAvgMethodDeclLines(params.private_method_decl_params,
                                            decl_extra_params)) *
          params.private_method_decls;
-  avg += (2.0 + EstimateAvgInlineFunctionDefLines(params)) *
+  avg += (2.0 + EstimateAvgInlineFunctionDefLines(dense_params)) *
          params.inline_function_defs;
   // Getters and predicates are on one line.
   avg += 3.0 * (params.inline_getters + params.inline_predicates);
@@ -1311,7 +1606,9 @@ static auto EstimateAvgClassDefLines(
   // a return line, and a closing brace line.
   if (define_decls_out_of_line) {
     avg +=
-        (7.0 + EstimateAvgBodyPlanLines(dense_params.out_of_line_body_sizes)) *
+        (7.0 + EstimateAvgBodyPlanLines(
+                   dense_params.out_of_line_body_sizes,
+                   /*calls=*/dense_params.free_function_decls_per_class > 0)) *
         NumDeclsPerClass(params);
   }
 
@@ -1364,6 +1661,7 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   }
 
   auto class_gen_state = ClassGenState(*this, num_classes, params);
+  GenerateFreeFunctionDecls(class_gen_state, source);
   llvm::SmallVector<OutOfLineDef, 0> out_of_line_defs;
   for ([[maybe_unused]] auto _ : llvm::seq(num_classes)) {
     source << "\n";
@@ -1383,6 +1681,8 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   CARBON_CHECK(class_gen_state.private_function_param_counts().empty());
   CARBON_CHECK(class_gen_state.private_method_param_counts().empty());
   CARBON_CHECK(class_gen_state.inline_function_param_counts().empty());
+  CARBON_CHECK(class_gen_state.call_refs().empty());
+  CARBON_CHECK(class_gen_state.destructure_call_refs().empty());
   CARBON_CHECK(class_gen_state.forwarder_param_counts().empty());
   CARBON_CHECK(class_gen_state.getter_field_types().empty());
   CARBON_CHECK(class_gen_state.predicate_fields().empty());
@@ -1393,6 +1693,7 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   CARBON_CHECK(class_gen_state.decl_names().empty());
   CARBON_CHECK(class_gen_state.field_names().empty());
   CARBON_CHECK(class_gen_state.param_names().empty());
+  CARBON_CHECK(class_gen_state.free_param_names().empty());
   CARBON_CHECK(class_gen_state.inline_function_names().empty());
   CARBON_CHECK(class_gen_state.inline_param_names().empty());
   CARBON_CHECK(class_gen_state.local_names().empty());
@@ -1512,8 +1813,8 @@ static constexpr llvm::StringRef NonCarbonCppKeywords[] = {
 // Names that generated code declares itself, which random identifiers must
 // avoid. For example, an inline function named `Make` would collide with its
 // class's `Make` function.
-static constexpr llvm::StringRef ReservedGeneratedNames[] = {"Make", "Checksum",
-                                                             "acc", "tag"};
+static constexpr llvm::StringRef ReservedGeneratedNames[] = {
+    "Make", "Checksum", "acc", "acc64", "tag"};
 
 // Returns a random identifier string of the specified length.
 //
@@ -1903,6 +2204,24 @@ auto SourceGen::EmitFunctionDecl(llvm::StringRef name, bool is_private,
   os << ") -> " << return_type << ";\n";
 }
 
+// Generates the file's free function declarations.
+auto SourceGen::GenerateFreeFunctionDecls(ClassGenState& state,
+                                          llvm::raw_ostream& os) -> void {
+  for (int i : state.free_emission_order()) {
+    const ClassGenState::FreeFunction& fn = state.free_functions()[i];
+    UniqueIdentifierPopper unique_param_names(*this, state.free_param_names());
+    llvm::SmallVector<TypedName> params;
+    params.reserve(fn.param_types.size());
+    for (llvm::StringRef type : fn.param_types) {
+      params.push_back({.name = unique_param_names.Pop(), .type = type});
+    }
+    os << "\n// TODO: make better comment text\n";
+    os << (IsCpp() ? "auto " : "fn ") << fn.name << "(";
+    EmitParams(/*is_method=*/false, params, /*indent=*/"", os);
+    os << ") -> " << fn.return_type << ";\n";
+  }
+}
+
 // Generates a function declaration and writes it to the provided stream.
 //
 // The declaration can be configured with a function name, private modifier,
@@ -1919,10 +2238,10 @@ auto SourceGen::GenerateFunctionDecl(ClassGenState& state, llvm::StringRef name,
   if (out_of_line) {
     param_count += 1;
   }
-  // Exclude class names so that a parameter can't shadow a class that an
-  // out-of-line definition names.
+  // Exclude class and free function names so that a parameter can't shadow one
+  // that an out-of-line definition names.
   UniqueIdentifierPopper unique_param_names(*this, state.param_names(),
-                                            &state.class_name_set());
+                                            &state.file_scope_name_set());
   FunctionSig sig = {.name = name, .is_method = is_method};
   sig.params.reserve(param_count);
   sig.param_consumers.reserve(param_count);
@@ -2088,8 +2407,10 @@ static auto ArrangeBody(const BodyPlan& plan, absl::BitGen& rng)
 // Emits the statements of `body` after its `acc` declaration, indented beyond
 // `indent`. Locals take their names from `locals` in turn, class-typed locals
 // take their classes from `class_local_type`, which returns an empty name for
-// the enclosing class, the `ReadParams` statement adds `reads`, and guards
-// return `return_value`.
+// the enclosing class, the `ReadParams` statement adds `reads`, `Call`
+// statements add what `emit_call` emits, `DestructureCall` statements
+// destructure what `next_destructure_call` provides, and guards return
+// `return_value`.
 //
 // The first operand of each statement after a declaration reads the locals
 // that it declares, so that every local is read. Every other operand is a
@@ -2098,8 +2419,12 @@ static auto ArrangeBody(const BodyPlan& plan, absl::BitGen& rng)
 static auto EmitArrangedBody(
     const ArrangedBody& body, llvm::ArrayRef<llvm::StringRef> locals,
     llvm::function_ref<auto()->llvm::StringRef> class_local_type,
-    llvm::StringRef reads, llvm::StringRef return_value, bool is_cpp,
-    llvm::StringRef indent, absl::BitGen& rng, llvm::raw_ostream& os) -> void {
+    llvm::StringRef reads,
+    llvm::function_ref<auto(llvm::raw_ostream& os)->void> emit_call,
+    llvm::function_ref<auto(std::string& call)->const CallDestructureForm*>
+        next_destructure_call,
+    llvm::StringRef return_value, bool is_cpp, llvm::StringRef indent,
+    absl::BitGen& rng, llvm::raw_ostream& os) -> void {
   // The `i32` locals in scope that later statements can update, and the ones
   // that they can only read.
   llvm::SmallVector<llvm::StringRef> var_scope = {"acc"};
@@ -2116,16 +2441,40 @@ static auto EmitArrangedBody(
   auto pick_var = [&]() {
     return var_scope[absl::Uniform<int>(rng, 0, var_scope.size())];
   };
-  auto emit_expr = [&](llvm::StringRef format) {
+  auto emit_expr_to = [&](llvm::StringRef format, llvm::raw_ostream& out) {
     while (!format.empty()) {
       if (format.starts_with("{0}") || format.starts_with("{1}")) {
-        os << (pending.empty() ? pick_local() : std::exchange(pending, {}));
+        out << (pending.empty() ? pick_local() : std::exchange(pending, {}));
         format = format.drop_front(3);
       } else {
-        os << format.front();
+        out << format.front();
         format = format.drop_front();
       }
     }
+  };
+  auto emit_expr = [&](llvm::StringRef format) { emit_expr_to(format, os); };
+  // Substitutes the locals `a` and `b` into `format`.
+  auto substitute = [](llvm::StringRef format, llvm::StringRef a,
+                       llvm::StringRef b) {
+    std::string text = format.str();
+    for (auto [placeholder, name] : {std::pair{"{a}", a}, {"{b}", b}}) {
+      text.replace(text.find(placeholder), 3, name);
+    }
+    return text;
+  };
+  auto emit_destructure = [&](const DestructureForm& form) {
+    llvm::StringRef a = locals[next_local++];
+    llvm::StringRef b = locals[next_local++];
+    emit_expr(substitute(is_cpp ? form.cpp_decl : form.carbon_decl, a, b));
+    os << "\n";
+    auto& scope = form.is_var ? var_scope : let_scope;
+    if (form.a_is_i32) {
+      scope.push_back(a);
+    }
+    if (form.b_is_i32) {
+      scope.push_back(b);
+    }
+    pending = substitute(is_cpp ? form.cpp_read : form.carbon_read, a, b);
   };
   auto emit_cond = [&](int form) {
     emit_expr(PlanConds[form % std::size(PlanConds)]);
@@ -2215,28 +2564,37 @@ static auto EmitArrangedBody(
         os << " + " << name << ".Checksum();\n";
         break;
       }
-      case PlanKind::Destructure: {
-        const DestructureForm& form =
-            DestructureForms[planned.form % std::size(DestructureForms)];
+      case PlanKind::Destructure:
+        emit_destructure(
+            DestructureForms[planned.form % std::size(DestructureForms)]);
+        break;
+      case PlanKind::DestructureCall: {
+        std::string call;
+        const CallDestructureForm* form = next_destructure_call(call);
+        if (!form) {
+          emit_destructure(
+              DestructureForms[planned.form % std::size(DestructureForms)]);
+          break;
+        }
         llvm::StringRef a = locals[next_local++];
         llvm::StringRef b = locals[next_local++];
-        auto substitute = [&](llvm::StringRef format) {
-          std::string text = format.str();
-          for (auto [placeholder, name] : {std::pair{"{a}", a}, {"{b}", b}}) {
-            text.replace(text.find(placeholder), 3, name);
-          }
-          return text;
-        };
-        emit_expr(substitute(is_cpp ? form.cpp_decl : form.carbon_decl));
-        os << "\n";
-        auto& scope = form.is_var ? var_scope : let_scope;
-        if (form.a_is_i32) {
-          scope.push_back(a);
+        if (is_cpp) {
+          os << "const auto [" << a << ", " << b << "]";
+        } else {
+          os << substitute(form->carbon_pattern, a, b);
         }
-        if (form.b_is_i32) {
-          scope.push_back(b);
+        os << " = " << call << ";\n";
+        RawStringOstream read;
+        emit_expr_to(
+            substitute(is_cpp ? form->cpp_read : form->carbon_read, a, b),
+            read);
+        if (form->a_is_i32) {
+          let_scope.push_back(a);
         }
-        pending = substitute(is_cpp ? form.cpp_read : form.carbon_read);
+        if (form->b_is_i32) {
+          let_scope.push_back(b);
+        }
+        pending = read.TakeStr();
         break;
       }
       case PlanKind::Update:
@@ -2248,6 +2606,13 @@ static auto EmitArrangedBody(
         os << pick_var() << " = ";
         emit_expr("{0}");
         os << " + " << reads << ";\n";
+        break;
+      case PlanKind::Call:
+        os << pick_var() << " = ";
+        emit_expr("{0}");
+        os << " + ";
+        emit_call(os);
+        os << ";\n";
         break;
       case PlanKind::If:
       case PlanKind::IfElse:
@@ -2287,10 +2652,22 @@ static auto EmitArrangedBody(
 // An out-of-line definition follows every class, so its class-typed locals can
 // have any class. One defined inline in a class can only use the classes
 // before it, so its class-typed locals have its own class.
+//
+// A body with calls first declares `acc64`, which pointer arguments can point
+// at along with `acc`, and initializes `acc` from it so that it is read.
 auto SourceGen::GenerateBody(ClassGenState& state, const FunctionSig& sig,
                              bool is_inline, llvm::StringRef indent,
                              llvm::raw_ostream& os) -> void {
-  os << indent << (IsCpp() ? "  int acc = 0;\n" : "  var acc: i32 = 0;\n");
+  const BodyPlan& plan = state.body_plans()[sig.body_plan];
+  if (plan.calls + plan.destructure_calls == 0) {
+    os << indent << (IsCpp() ? "  int acc = 0;\n" : "  var acc: i32 = 0;\n");
+  } else if (!IsCpp()) {
+    os << indent << "  var acc64: i64 = 0;\n";
+    os << indent << "  var acc: i32 = acc64 as i32;\n";
+  } else {
+    os << indent << "  std::int64_t acc64 = 0;\n";
+    os << indent << "  int acc = static_cast<int>(acc64);\n";
+  }
 
   RawStringOstream reads;
   llvm::ListSeparator read_sep(" + ");
@@ -2305,7 +2682,6 @@ auto SourceGen::GenerateBody(ClassGenState& state, const FunctionSig& sig,
   // Locals and parameters draw from the same identifiers of each length, so
   // exclude this function's parameter names: C++ rejects a local that
   // redeclares a parameter.
-  const BodyPlan& plan = state.body_plans()[sig.body_plan];
   Set<llvm::StringRef> param_names;
   for (const TypedName& param : sig.params) {
     param_names.Insert(param.name);
@@ -2326,7 +2702,10 @@ auto SourceGen::GenerateBody(ClassGenState& state, const FunctionSig& sig,
       [&]() -> llvm::StringRef {
         return is_inline ? "" : state.class_local_types().pop_back_val();
       },
-      reads.TakeStr(), return_value_str, IsCpp(), indent, rng_, os);
+      reads.TakeStr(),
+      [&](llvm::raw_ostream& call_os) { state.EmitCall(call_os); },
+      [&](std::string& call) { return state.NextDestructureCall(call); },
+      return_value_str, IsCpp(), indent, rng_, os);
   os << indent << "  return " << return_value_str << ";\n";
 }
 
@@ -2377,10 +2756,10 @@ auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
   // Add the extra parameter; see `BuildClassAndTypeNames`.
   param_count += 1;
 
-  // Exclude class names so that a parameter can't shadow a class that the body
-  // names.
+  // Exclude class and free function names so that a parameter can't shadow one
+  // that the body names.
   UniqueIdentifierPopper unique_param_names(*this, state.inline_param_names(),
-                                            &state.class_name_set());
+                                            &state.file_scope_name_set());
   FunctionSig sig = {.name = name, .is_method = false};
   sig.params.reserve(param_count);
   sig.param_consumers.reserve(param_count);
@@ -2520,7 +2899,7 @@ auto SourceGen::GenerateClassDef(
   // Name the getter and predicate fields first, so that member names can avoid
   // them.
   UniqueIdentifierPopper unique_accessed_names(
-      *this, state.accessed_field_names(), &state.class_name_set());
+      *this, state.accessed_field_names(), &state.file_scope_name_set());
   llvm::SmallVector<TypedName> getter_fields;
   getter_fields.reserve(params.inline_getters);
   for ([[maybe_unused]] auto _ : llvm::seq(params.inline_getters)) {
@@ -2538,10 +2917,10 @@ auto SourceGen::GenerateClassDef(
          field.predicate});
   }
 
-  // Bodies in this class can name any class, so exclude class names from member
-  // names. Inline function names are too short to be class names.
+  // Bodies in this class can name any class or free function, so exclude their
+  // names from member names. Inline function names are too short to be one.
   UniqueIdentifierPopper unique_member_names(*this, state.decl_names(),
-                                             &state.class_name_set());
+                                             &state.file_scope_name_set());
   unique_member_names.Reserve(unique_accessed_names.used());
   UniqueIdentifierPopper unique_inline_names(*this,
                                              state.inline_function_names());
@@ -2600,10 +2979,10 @@ auto SourceGen::GenerateClassDef(
   for ([[maybe_unused]] auto _ : llvm::seq(params.inline_forwarders)) {
     Forwarder& forwarder = forwarders.emplace_back();
     forwarder.name = unique_forwarder_names.Pop();
-    // Exclude class names so that a parameter can't shadow a class in the
-    // signature.
+    // Exclude class and free function names so that a parameter can't shadow a
+    // class in the signature.
     UniqueIdentifierPopper unique_param_names(
-        *this, state.forwarder_param_names(), &state.class_name_set());
+        *this, state.forwarder_param_names(), &state.file_scope_name_set());
     for ([[maybe_unused]] auto _ :
          llvm::seq(state.forwarder_param_counts().pop_back_val())) {
       forwarder.params.push_back({.name = unique_param_names.Pop(),
@@ -2643,9 +3022,9 @@ auto SourceGen::GenerateClassDef(
   }
 
   // Field names can't repeat this class's function, method, or field names, or
-  // be a class name.
+  // be a class or free function name.
   UniqueIdentifierPopper unique_field_names(*this, state.field_names(),
-                                            &state.class_name_set());
+                                            &state.file_scope_name_set());
   unique_field_names.Reserve(unique_member_names.used());
   llvm::SmallVector<TypedName> fields;
   fields.reserve(field_type_names.size() + getter_fields.size() +

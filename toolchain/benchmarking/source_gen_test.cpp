@@ -722,6 +722,29 @@ TEST(SourceGenTest, GenApiFileDenseDeclsPlanDeclarations) {
   EXPECT_THAT(source, HasSubstr("auto ["));
 }
 
+// Bodies call free functions.
+TEST_P(GenApiFileDenseDeclsParamsTest, CallsInInlineBodies) {
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.inline_function_defs = 3,
+                       .inline_body_sizes = {{.statements = 8, .weight = 1}}},
+      .free_function_decls_per_class = 2};
+  EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 16));
+  std::string source = SourceGen(GetParam()).GenApiFileDenseDecls(3000, params);
+  EXPECT_TRUE(TestCompile(GetParam(), source));
+  EXPECT_THAT(source, HasSubstr("acc64"));
+}
+
+TEST_P(GenApiFileDenseDeclsParamsTest, CallsInOutOfLineBodies) {
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.inline_function_defs = 2},
+      .define_decls_out_of_line = true,
+      .free_function_decls_per_class = 2};
+  EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 16));
+  std::string source = SourceGen(GetParam()).GenApiFileDenseDecls(3000, params);
+  EXPECT_TRUE(TestCompile(GetParam(), source));
+  EXPECT_THAT(source, HasSubstr("acc64"));
+}
+
 // The line estimates have to track the emitted lines closely, or files miss
 // their target size. The target is large so that rounding to a whole number of
 // classes is small next to the tolerance. C++ gets a larger tolerance for its
@@ -731,12 +754,14 @@ TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
   param_set.push_back({.class_params = {.inline_function_defs = 1,
                                         .inline_getters = 1,
                                         .inline_predicates = 1,
-                                        .inline_forwarders = 1}});
+                                        .inline_forwarders = 1},
+                       .free_function_decls_per_class = 2});
   param_set.push_back({.class_params = {.inline_function_defs = 1,
                                         .inline_getters = 1,
                                         .inline_predicates = 1,
                                         .inline_forwarders = 1},
-                       .define_decls_out_of_line = true});
+                       .define_decls_out_of_line = true,
+                       .free_function_decls_per_class = 2});
   // The implementation file shape.
   param_set.push_back(
       {.class_params = {.public_function_decls = 2,
@@ -748,7 +773,8 @@ TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
                         .private_method_decls = 2,
                         .private_method_decl_params = {.max_params = 2},
                         .private_field_decls = 4},
-       .define_decls_out_of_line = true});
+       .define_decls_out_of_line = true,
+       .free_function_decls_per_class = 2});
 
   constexpr int TargetLines = 20000;
   for (const SourceGen::DenseDeclParams& params : param_set) {

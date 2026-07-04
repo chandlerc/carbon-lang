@@ -173,6 +173,11 @@ class SourceGen {
     // `{0}` placeholder for a value of the type. Only types with a predicate
     // template and a value expression are used for the fields that predicates
     // test.
+    //
+    // Each type can also have an argument expression, which bodies pass for
+    // parameters of the type when calling free functions. It defaults to the
+    // value expression, so types without one need it. It can use the body's
+    // `acc` (an `i32`) and `acc64` (an `i64`).
     struct FixedTypeWeight {
       llvm::StringRef carbon_spelling;
       llvm::StringRef cpp_spelling;
@@ -183,9 +188,11 @@ class SourceGen {
       llvm::SmallVector<llvm::StringRef> cpp_consumers;
       llvm::StringRef carbon_predicate;
       llvm::StringRef cpp_predicate;
+      llvm::StringRef carbon_arg;
+      llvm::StringRef cpp_arg;
     };
 
-    llvm::SmallVector<FixedTypeWeight> fixed_type_weights = {
+    llvm::SmallVector<FixedTypeWeight, 0> fixed_type_weights = {
         // Combined weight of 65 for a core set of builtin types.
         {.carbon_spelling = "bool",
          .cpp_spelling = "bool",
@@ -220,13 +227,17 @@ class SourceGen {
          .cpp_spelling = "int*",
          .weight = 5,
          .carbon_consumers = {"*{0} + 1", "*{0} * 2"},
-         .cpp_consumers = {"*{0} + 1", "*{0} * 2"}},
+         .cpp_consumers = {"*{0} + 1", "*{0} * 2"},
+         .carbon_arg = "&acc",
+         .cpp_arg = "&acc"},
         {.carbon_spelling = "i64*",
          .cpp_spelling = "std::int64_t*",
          .weight = 5,
          .carbon_consumers = {"(*{0} as i32) - 2", "((*{0} * 2) as i32)"},
          .cpp_consumers = {"static_cast<int>(*{0}) - 2",
-                           "static_cast<int>(*{0} * 2)"}},
+                           "static_cast<int>(*{0} * 2)"},
+         .carbon_arg = "&acc64",
+         .cpp_arg = "&acc64"},
 
         // A weight of 5 distributed across tuple structures
         {.carbon_spelling = "(bool, i64)",
@@ -244,7 +255,9 @@ class SourceGen {
          .weight = 3,
          .carbon_consumers = {"{0}.0 + 1", "{0}.0 * 2", "(*{0}.1 as i32) - 1"},
          .cpp_consumers = {"{0}.first + 1", "{0}.first * 2",
-                           "static_cast<int>(*{0}.second) - 1"}},
+                           "static_cast<int>(*{0}.second) - 1"},
+         .carbon_arg = "(0, &acc64)",
+         .cpp_arg = "{0, &acc64}"},
     };
 
     // Consumer templates for class types, in both languages. These call the
@@ -288,6 +301,12 @@ class SourceGen {
         {.statements = 29, .weight = 33}, {.statements = 43, .weight = 19},
         {.statements = 67, .weight = 12}, {.statements = 125, .weight = 4},
     };
+
+    // The number of free function declarations at the start of the file, per
+    // class. Bodies call these. They precede the classes, so their signatures
+    // only use fixed types.
+    int free_function_decls_per_class = 0;
+    FunctionDeclParams free_function_decl_params = {.max_params = 4};
   };
 
   // Access a global instance of this type to generate Carbon code for
@@ -433,6 +452,8 @@ class SourceGen {
                             bool is_private, bool is_method, int param_count,
                             llvm::StringRef indent, llvm::raw_ostream& os,
                             FunctionSig* captured = nullptr) -> void;
+  auto GenerateFreeFunctionDecls(ClassGenState& state, llvm::raw_ostream& os)
+      -> void;
   auto GenerateBody(ClassGenState& state, const FunctionSig& sig,
                     bool is_inline, llvm::StringRef indent,
                     llvm::raw_ostream& os) -> void;
