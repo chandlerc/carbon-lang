@@ -491,30 +491,81 @@ TEST(SourceGenTest, GenApiFileDenseDeclsInlineBodiesCppCompiles) {
   }
 }
 
+// Every declared function and method also has an out-of-line definition.
+TEST(SourceGenTest, GenApiFileDenseDeclsOutOfLineDefs) {
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.inline_function_defs = 2, .max_body_locals = 3},
+      .define_decls_out_of_line = true};
+  for (SourceGen::Language language :
+       {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+    ExpectSeedIndependentSize(language, /*target_lines=*/3000, params,
+                              /*num_seeds=*/16);
+  }
+}
+
+TEST(SourceGenTest, GenApiFileDenseDeclsOutOfLineDefsWithVariedParams) {
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  // Many fields, and no inline definitions.
+  param_set.push_back({.class_params = {.public_function_decls = 2,
+                                        .public_method_decls = 2,
+                                        .private_function_decls = 0,
+                                        .private_method_decls = 0,
+                                        .private_field_decls = 24,
+                                        .inline_function_defs = 0},
+                       .define_decls_out_of_line = true});
+  // Larger bodies.
+  param_set.push_back({.class_params = {.public_function_decls = 4,
+                                        .public_method_decls = 6,
+                                        .private_function_decls = 2,
+                                        .private_method_decls = 4,
+                                        .private_field_decls = 6,
+                                        .inline_function_defs = 4,
+                                        .max_body_locals = 8},
+                       .define_decls_out_of_line = true});
+
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    for (SourceGen::Language language :
+         {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+      ExpectSeedIndependentSize(language, /*target_lines=*/3000, params,
+                                /*num_seeds=*/24);
+    }
+  }
+}
+
 // The line estimates have to track the emitted lines closely, or files miss
 // their target size. The target is large so that rounding to a whole number of
 // classes is small next to the tolerance. C++ gets a larger tolerance for its
 // access specifier lines, which the estimates don't count.
 TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
-  SourceGen::DenseDeclParams params = {
-      .class_params = {.inline_function_defs = 1,
-                       .max_body_locals = 3,
-                       .inline_getters = 1,
-                       .inline_predicates = 1,
-                       .inline_forwarders = 1}};
+  llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
+  param_set.push_back({.class_params = {.inline_function_defs = 1,
+                                        .max_body_locals = 3,
+                                        .inline_getters = 1,
+                                        .inline_predicates = 1,
+                                        .inline_forwarders = 1}});
+  param_set.push_back({.class_params = {.inline_function_defs = 1,
+                                        .max_body_locals = 3,
+                                        .inline_getters = 1,
+                                        .inline_predicates = 1,
+                                        .inline_forwarders = 1},
+                       .define_decls_out_of_line = true});
 
   constexpr int TargetLines = 20000;
-  for (SourceGen::Language language :
-       {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
-    SourceGen gen(language);
-    std::string source = gen.GenApiFileDenseDecls(TargetLines, params);
-    ssize_t lines = CountLines(source);
-    if (language == SourceGen::Language::Carbon) {
-      // Within 2% of the requested line count.
-      EXPECT_THAT(lines, AllOf(Ge(19600), Le(20400)));
-    } else {
-      // Within 10% of the requested line count.
-      EXPECT_THAT(lines, AllOf(Ge(18000), Le(22000)));
+  for (const SourceGen::DenseDeclParams& params : param_set) {
+    for (SourceGen::Language language :
+         {SourceGen::Language::Carbon, SourceGen::Language::Cpp}) {
+      SourceGen gen(language);
+      std::string source = gen.GenApiFileDenseDecls(TargetLines, params);
+      ssize_t lines = CountLines(source);
+      if (language == SourceGen::Language::Carbon) {
+        // Within 2% of the requested line count.
+        EXPECT_THAT(lines, AllOf(Ge(19600), Le(20400)))
+            << "define_decls_out_of_line=" << params.define_decls_out_of_line;
+      } else {
+        // Within 10% of the requested line count.
+        EXPECT_THAT(lines, AllOf(Ge(18000), Le(22000)))
+            << "define_decls_out_of_line=" << params.define_decls_out_of_line;
+      }
     }
   }
 }

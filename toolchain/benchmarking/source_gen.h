@@ -249,6 +249,10 @@ class SourceGen {
 
     // Parameters used to guide the selection of types for use in declarations.
     TypeUseParams type_use_params = {};
+
+    // Whether to define each declared function and method out-of-line, after
+    // its class.
+    bool define_decls_out_of_line = false;
   };
 
   // Access a global instance of this type to generate Carbon code for
@@ -367,6 +371,15 @@ class SourceGen {
     llvm::StringRef type;
   };
 
+  // A declaration's signature, for emitting its out-of-line definition.
+  struct FunctionSig {
+    llvm::StringRef name;
+    bool is_method;
+    llvm::SmallVector<TypedName> params;
+    llvm::SmallVector<llvm::StringRef> param_consumers;
+    llvm::StringRef return_type;
+  };
+
   auto EmitParams(bool is_method, llvm::ArrayRef<TypedName> params,
                   llvm::StringRef indent, llvm::raw_ostream& os) -> void;
   auto EmitFunctionDecl(llvm::StringRef name, bool is_private, bool is_method,
@@ -375,7 +388,10 @@ class SourceGen {
                         llvm::raw_ostream& os) -> void;
   auto GenerateFunctionDecl(ClassGenState& state, llvm::StringRef name,
                             bool is_private, bool is_method, int param_count,
-                            llvm::StringRef indent, llvm::raw_ostream& os)
+                            llvm::StringRef indent, llvm::raw_ostream& os,
+                            FunctionSig* captured = nullptr) -> void;
+  auto GenerateOutOfLineDef(ClassGenState& state, llvm::StringRef class_name,
+                            const FunctionSig& sig, llvm::raw_ostream& os)
       -> void;
   auto GenerateInlineFunctionDef(ClassGenState& state, llvm::StringRef name,
                                  int param_count, int local_count,

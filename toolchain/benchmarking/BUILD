@@ -93,10 +93,10 @@ sh_test(
     srcs = [":compile_benchmark"],
     args = [
         "--benchmark_dry_run",
-        # Dry-run the smallest (256-line) case of every benchmark. Also run just
-        # the lex benchmark that executes a subprocess to reduce the overhead
-        # and reduce timeouts. The `$$` is repeated for Bazel escaping of `$`.
-        "--benchmark_filter=^(BM_CompileApi.*/256|BM_CompileExec.*Phase::Lex.*/256/real_time)$$",
+        # Dry-run the smallest case of every benchmark. Also run just the lex
+        # benchmark that executes a subprocess to reduce the overhead and reduce
+        # timeouts. The `$$` is repeated for Bazel escaping of `$`.
+        "--benchmark_filter=^(BM_CompileApiFileDenseDecls.*/256|BM_CompileApiFileDefinedDecls.*/1024|BM_CompileExec.*Phase::Lex.*/256/real_time)$$",
     ],
     env = cc_env(),
 )

@@ -83,7 +83,8 @@ class SourceGen::ClassGenState {
  public:
   ClassGenState(SourceGen& gen, int num_classes,
                 const ClassParams& class_params,
-                const TypeUseParams& type_use_params);
+                const TypeUseParams& type_use_params,
+                bool define_decls_out_of_line);
 
   auto public_function_param_counts() -> llvm::SmallVectorImpl<int>& {
     return public_function_param_counts_;
@@ -184,8 +185,8 @@ class SourceGen::ClassGenState {
   // constructs a value of its type, and "consumed" when a body reads it with a
   // consumer template.
 
-  // Return and parameter types of declarations, and field types when the file
-  // has no bodies.
+  // Return and parameter types of declarations without out-of-line
+  // definitions, and field types when the file has no bodies.
   auto GetDeclType() -> TypeUse { return GetValidTypeUse(decl_type_pool_); }
   // Parameter types of inline definitions, which are consumed.
   auto GetInlineParamType() -> TypeUse {
@@ -195,6 +196,16 @@ class SourceGen::ClassGenState {
   // bodies, which are produced.
   auto GetProducedType() -> TypeUse {
     return GetValidTypeUse(produced_type_pool_);
+  }
+  // Return types of declarations with out-of-line definitions, which are
+  // spelled twice and produced.
+  auto GetOutOfLineReturnType() -> TypeUse {
+    return GetValidTypeUse(out_of_line_return_pool_);
+  }
+  // Parameter types of declarations with out-of-line definitions, which are
+  // spelled twice and consumed.
+  auto GetOutOfLineParamType() -> TypeUse {
+    return GetValidTypeUse(out_of_line_param_pool_);
   }
   // `Make` produces every field when the file has bodies. Without bodies,
   // fields share the declaration pool, which can include types that have no
@@ -209,9 +220,13 @@ class SourceGen::ClassGenState {
   }
 
   auto has_bodies() -> bool { return has_bodies_; }
+  auto define_decls_out_of_line() -> bool { return define_decls_out_of_line_; }
   auto type_pools_empty() -> bool {
     return decl_type_pool_.uses.empty() && inline_param_pool_.uses.empty() &&
-           produced_type_pool_.uses.empty() && forward_type_pool_.uses.empty();
+           produced_type_pool_.uses.empty() &&
+           forward_type_pool_.uses.empty() &&
+           out_of_line_return_pool_.uses.empty() &&
+           out_of_line_param_pool_.uses.empty();
   }
 
  private:
@@ -248,8 +263,9 @@ class SourceGen::ClassGenState {
   llvm::SmallVector<PredicateField> predicate_fields_;
 
   llvm::SmallVector<llvm::StringRef> class_names_;
-  // Field names have their own pool because Carbon's `Make` spells each field
-  // name a second time.
+  // Out-of-line definitions spell declared function and method names a second
+  // time, and Carbon's `Make` does the same for field names, so these have
+  // separate pools.
   llvm::SmallVector<llvm::StringRef> decl_names_;
   llvm::SmallVector<llvm::StringRef> field_names_;
   llvm::SmallVector<llvm::StringRef> param_names_;
@@ -270,10 +286,13 @@ class SourceGen::ClassGenState {
   // Whether the file has any bodies. Then each class also gets a `Make`
   // function, a `Checksum` method, and a `tag` field.
   bool has_bodies_;
+  bool define_decls_out_of_line_;
   TypePool decl_type_pool_;
   TypePool inline_param_pool_;
   TypePool produced_type_pool_;
   TypePool forward_type_pool_;
+  TypePool out_of_line_return_pool_;
+  TypePool out_of_line_param_pool_;
   Set<llvm::StringRef> valid_type_names_;
 
   Set<llvm::StringRef> class_name_set_;
@@ -299,9 +318,12 @@ static auto Sum(const T& range) -> int {
 // definitions.
 SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
                                         const ClassParams& class_params,
-                                        const TypeUseParams& type_use_params)
+                                        const TypeUseParams& type_use_params,
+                                        bool define_decls_out_of_line)
     : is_cpp_(gen.IsCpp()),
-      has_bodies_(NumInlineDefsPerClass(class_params) > 0) {
+      has_bodies_(NumInlineDefsPerClass(class_params) > 0 ||
+                  define_decls_out_of_line),
+      define_decls_out_of_line_(define_decls_out_of_line) {
   public_function_param_counts_ =
       gen.GetShuffledInts(num_classes * class_params.public_function_decls, 0,
                           class_params.public_function_decl_params.max_params);
@@ -322,9 +344,15 @@ SourceGen::ClassGenState::ClassGenState(SourceGen& gen, int num_classes,
   field_names_ =
       gen.GetShuffledIdentifiers(num_classes * class_params.private_field_decls,
                                  /*min_length=*/MinMemberNameLength);
-  int num_params =
-      Sum(public_function_param_counts_) + Sum(public_method_param_counts_) +
-      Sum(private_function_param_counts_) + Sum(private_method_param_counts_);
+  int num_out_of_line_defs = define_decls_out_of_line_
+                                 ? num_classes * NumDeclsPerClass(class_params)
+                                 : 0;
+  // Each out-of-line definition has one parameter beyond its random count; see
+  // `BuildClassAndTypeNames`.
+  int num_params = Sum(public_function_param_counts_) +
+                   Sum(public_method_param_counts_) +
+                   Sum(private_function_param_counts_) +
+                   Sum(private_method_param_counts_) + num_out_of_line_defs;
   param_names_ = gen.GetShuffledIdentifiers(num_params);
 
   inline_function_param_counts_ =
@@ -571,13 +599,28 @@ auto SourceGen::ClassGenState::BuildClassAndTypeNames(
       class_params.inline_function_defs,
       /*producible_only=*/false, /*consumed=*/true, type_use_params);
 
-  // Each class draws `decls_per_class` return types from this pool after its
-  // fields.
-  decl_type_pool_ = BuildTypePool(
-      gen,
-      num_decl_returns + num_decl_params + (num_fields - num_produced_fields),
-      decls_per_class,
-      /*producible_only=*/false, /*consumed=*/false, type_use_params);
+  if (!define_decls_out_of_line_) {
+    // Each class draws `decls_per_class` return types from this pool after its
+    // fields.
+    decl_type_pool_ = BuildTypePool(
+        gen,
+        num_decl_returns + num_decl_params + (num_fields - num_produced_fields),
+        decls_per_class,
+        /*producible_only=*/false, /*consumed=*/false, type_use_params);
+  } else {
+    // Each class draws `decls_per_class` return types from this pool after its
+    // fields.
+    out_of_line_return_pool_ = BuildTypePool(
+        gen, num_decl_returns, decls_per_class,
+        /*producible_only=*/true, /*consumed=*/false, type_use_params);
+    // As for inline definitions, each declaration has one parameter beyond its
+    // random count, so that each class draws at least `decls_per_class`
+    // parameter types from this pool.
+    int num_decl_extra_params = num_decl_returns;
+    out_of_line_param_pool_ = BuildTypePool(
+        gen, num_decl_params + num_decl_extra_params, decls_per_class,
+        /*producible_only=*/false, /*consumed=*/true, type_use_params);
+  }
 
   // Each class draws `inline_forwarders` return types from this pool after its
   // fields.
@@ -687,20 +730,26 @@ static auto EstimateAvgInlineFunctionDefLines(SourceGen::ClassParams params)
 
 // Note that this should match the heuristics used when formatting.
 // TODO: See top-level TODO about line estimates and formatting.
-static auto EstimateAvgClassDefLines(SourceGen::ClassParams params) -> double {
+static auto EstimateAvgClassDefLines(SourceGen::ClassParams params,
+                                     bool define_decls_out_of_line) -> double {
   // Comment line, and class open line.
   double avg = 2.0;
 
+  // Declarations with out-of-line definitions have an extra parameter.
+  int decl_extra_params = define_decls_out_of_line ? 1 : 0;
+
   // One comment line and blank line per function, plus the function lines.
-  avg +=
-      (2.0 + EstimateAvgFunctionDeclLines(params.public_function_decl_params)) *
-      params.public_function_decls;
-  avg += (2.0 + EstimateAvgMethodDeclLines(params.public_method_decl_params)) *
+  avg += (2.0 + EstimateAvgFunctionDeclLines(params.public_function_decl_params,
+                                             decl_extra_params)) *
+         params.public_function_decls;
+  avg += (2.0 + EstimateAvgMethodDeclLines(params.public_method_decl_params,
+                                           decl_extra_params)) *
          params.public_method_decls;
-  avg += (2.0 +
-          EstimateAvgFunctionDeclLines(params.private_function_decl_params)) *
+  avg += (2.0 + EstimateAvgFunctionDeclLines(
+                    params.private_function_decl_params, decl_extra_params)) *
          params.private_function_decls;
-  avg += (2.0 + EstimateAvgMethodDeclLines(params.private_method_decl_params)) *
+  avg += (2.0 + EstimateAvgMethodDeclLines(params.private_method_decl_params,
+                                           decl_extra_params)) *
          params.private_method_decls;
   avg += (2.0 + EstimateAvgInlineFunctionDefLines(params)) *
          params.inline_function_defs;
@@ -714,7 +763,8 @@ static auto EstimateAvgClassDefLines(SourceGen::ClassParams params) -> double {
           forwarder_signature_lines) *
          params.inline_forwarders;
 
-  bool has_bodies = NumInlineDefsPerClass(params) > 0;
+  bool has_bodies =
+      NumInlineDefsPerClass(params) > 0 || define_decls_out_of_line;
 
   // A blank line and all the fields (if any), including `tag` when the file has
   // bodies.
@@ -728,6 +778,27 @@ static auto EstimateAvgClassDefLines(SourceGen::ClassParams params) -> double {
   // line, a return line, and a closing brace line.
   if (has_bodies) {
     avg += 10.0;
+  }
+
+  // Each out-of-line definition has a blank line, a comment line, a signature
+  // line, an accumulator line, a line per parameter including the extra one, a
+  // line for `self` in methods, a return line, and a closing brace line.
+  if (define_decls_out_of_line) {
+    auto out_of_line_lines = [](int max_params, bool is_method) {
+      return 7.0 + max_params / 2.0 + (is_method ? 1.0 : 0.0);
+    };
+    avg += out_of_line_lines(params.public_function_decl_params.max_params,
+                             /*is_method=*/false) *
+           params.public_function_decls;
+    avg += out_of_line_lines(params.public_method_decl_params.max_params,
+                             /*is_method=*/true) *
+           params.public_method_decls;
+    avg += out_of_line_lines(params.private_function_decl_params.max_params,
+                             /*is_method=*/false) *
+           params.private_function_decls;
+    avg += out_of_line_lines(params.private_method_decl_params.max_params,
+                             /*is_method=*/true) *
+           params.private_method_decls;
   }
 
   // No need to account for the class close line, we have an extra blank line
@@ -745,7 +816,8 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   // Note that we want a blank line after our file comment block, so every class
   // needs a blank line.
   constexpr int NumFileCommentLines = 4;
-  double avg_class_lines = EstimateAvgClassDefLines(params.class_params);
+  double avg_class_lines = EstimateAvgClassDefLines(
+      params.class_params, params.define_decls_out_of_line);
   CARBON_CHECK(target_lines > NumFileCommentLines + avg_class_lines,
                "Not enough target lines to generate a single class!");
   // Round to the nearest whole class. Truncating can leave the file nearly a
@@ -774,8 +846,9 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
     source << "#include <utility>\n";
   }
 
-  auto class_gen_state = ClassGenState(*this, num_classes, params.class_params,
-                                       params.type_use_params);
+  auto class_gen_state =
+      ClassGenState(*this, num_classes, params.class_params,
+                    params.type_use_params, params.define_decls_out_of_line);
   for ([[maybe_unused]] auto _ : llvm::seq(num_classes)) {
     source << "\n";
     GenerateClassDef(params.class_params, class_gen_state, source);
@@ -1311,20 +1384,39 @@ auto SourceGen::EmitFunctionDecl(llvm::StringRef name, bool is_private,
 //
 // The declaration can be configured with a function name, private modifier,
 // whether it is a method, the parameter count, and how indented it is. Its
-// parameter names and types come from `state`.
+// parameter names and types come from `state`. With `captured`, the declaration
+// has an out-of-line definition, and records its signature in `captured`.
 auto SourceGen::GenerateFunctionDecl(ClassGenState& state, llvm::StringRef name,
                                      bool is_private, bool is_method,
                                      int param_count, llvm::StringRef indent,
-                                     llvm::raw_ostream& os) -> void {
-  UniqueIdentifierPopper unique_param_names(*this, state.param_names());
-  llvm::SmallVector<TypedName> params;
-  params.reserve(param_count);
-  for ([[maybe_unused]] auto _ : llvm::seq(param_count)) {
-    params.push_back(
-        {.name = unique_param_names.Pop(), .type = state.GetDeclType().name});
+                                     llvm::raw_ostream& os,
+                                     FunctionSig* captured) -> void {
+  bool out_of_line = captured != nullptr;
+  // Add the extra parameter; see `BuildClassAndTypeNames`.
+  if (out_of_line) {
+    param_count += 1;
   }
-  EmitFunctionDecl(name, is_private, is_method, params,
-                   state.GetDeclType().name, indent, os);
+  // Exclude class names so that a parameter can't shadow a class that an
+  // out-of-line definition names.
+  UniqueIdentifierPopper unique_param_names(*this, state.param_names(),
+                                            &state.class_name_set());
+  FunctionSig sig = {.name = name, .is_method = is_method};
+  sig.params.reserve(param_count);
+  sig.param_consumers.reserve(param_count);
+  for ([[maybe_unused]] auto _ : llvm::seq(param_count)) {
+    llvm::StringRef param = unique_param_names.Pop();
+    ClassGenState::TypeUse type =
+        out_of_line ? state.GetOutOfLineParamType() : state.GetDeclType();
+    sig.params.push_back({.name = param, .type = type.name});
+    sig.param_consumers.push_back(type.consumer);
+  }
+  sig.return_type =
+      (out_of_line ? state.GetOutOfLineReturnType() : state.GetDeclType()).name;
+  EmitFunctionDecl(name, is_private, is_method, sig.params, sig.return_type,
+                   indent, os);
+  if (captured) {
+    *captured = std::move(sig);
+  }
 }
 
 // Emits `format` with `name` substituted for its `{0}`.
@@ -1333,6 +1425,59 @@ static auto EmitTemplate(llvm::StringRef format, llvm::StringRef name,
   CARBON_CHECK(!format.empty());
   auto [prefix, suffix] = format.split("{0}");
   os << prefix << name << suffix;
+}
+
+// Generates an out-of-line definition for the declaration `sig`, and writes it
+// to the provided stream.
+//
+// The body has the same form as an inline computation's, without locals, and a
+// method's body also reads `self` with `Checksum`. The signature is on one line
+// however long it is, which the line estimates assume.
+auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
+                                     llvm::StringRef class_name,
+                                     const FunctionSig& sig,
+                                     llvm::raw_ostream& os) -> void {
+  os << "// TODO: make better comment text\n";
+  if (!IsCpp()) {
+    os << "fn " << class_name << "." << sig.name;
+  } else {
+    os << "auto " << class_name << "::" << sig.name;
+  }
+
+  os << "(";
+  // For Carbon methods, `self` is the first parameter, as in the declaration.
+  bool is_carbon_method = sig.is_method && !IsCpp();
+  if (is_carbon_method) {
+    os << "self";
+  }
+  bool first_param = !is_carbon_method;
+  for (const TypedName& param : sig.params) {
+    if (!first_param) {
+      os << ", ";
+    }
+    first_param = false;
+    if (!IsCpp()) {
+      os << param.name << ": " << param.type;
+    } else {
+      os << param.type << " " << param.name;
+    }
+  }
+  os << ") -> " << sig.return_type << " {\n";
+
+  os << (IsCpp() ? "  int acc = 0;\n" : "  var acc: i32 = 0;\n");
+  if (sig.is_method) {
+    os << "  acc = acc + " << (IsCpp() ? "Checksum()" : "self.Checksum()")
+       << ";\n";
+  }
+  for (auto [param, consumer] : llvm::zip(sig.params, sig.param_consumers)) {
+    os << "  acc = acc + ";
+    EmitTemplate(consumer, param.name, os);
+    os << ";\n";
+  }
+
+  os << "  return ";
+  state.ProduceValue(sig.return_type, os);
+  os << ";\n}\n";
 }
 
 // Generates an inline function definition and writes it to the provided
@@ -1557,13 +1702,23 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
   UniqueIdentifierPopper unique_inline_names(*this,
                                              state.inline_function_names());
 
+  // Capture each declaration's signature for its out-of-line definition.
+  bool define_out_of_line = state.define_decls_out_of_line();
+  llvm::SmallVector<FunctionSig> decl_sigs;
+  if (define_out_of_line) {
+    decl_sigs.reserve(NumDeclsPerClass(params));
+  }
+  auto capture_sig = [&]() -> FunctionSig* {
+    return define_out_of_line ? &decl_sigs.emplace_back() : nullptr;
+  };
+
   llvm::ListSeparator line_sep("\n");
   for ([[maybe_unused]] auto _ : llvm::seq(params.public_function_decls)) {
     os << line_sep;
     GenerateFunctionDecl(state, unique_member_names.Pop(), /*is_private=*/false,
                          /*is_method=*/false,
                          state.public_function_param_counts().pop_back_val(),
-                         /*indent=*/"  ", os);
+                         /*indent=*/"  ", os, capture_sig());
   }
   for ([[maybe_unused]] auto _ : llvm::seq(params.inline_function_defs)) {
     os << line_sep;
@@ -1577,7 +1732,7 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
     GenerateFunctionDecl(state, unique_member_names.Pop(), /*is_private=*/false,
                          /*is_method=*/true,
                          state.public_method_param_counts().pop_back_val(),
-                         /*indent=*/"  ", os);
+                         /*indent=*/"  ", os, capture_sig());
   }
   for (TypedName field : getter_fields) {
     os << line_sep;
@@ -1628,14 +1783,14 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
     GenerateFunctionDecl(state, unique_member_names.Pop(), /*is_private=*/true,
                          /*is_method=*/false,
                          state.private_function_param_counts().pop_back_val(),
-                         /*indent=*/"  ", os);
+                         /*indent=*/"  ", os, capture_sig());
   }
   for ([[maybe_unused]] auto _ : llvm::seq(params.private_method_decls)) {
     os << line_sep;
     GenerateFunctionDecl(state, unique_member_names.Pop(), /*is_private=*/true,
                          /*is_method=*/true,
                          state.private_method_param_counts().pop_back_val(),
-                         /*indent=*/"  ", os);
+                         /*indent=*/"  ", os, capture_sig());
   }
   for (const Forwarder& forwarder : forwarders) {
     os << line_sep;
@@ -1690,6 +1845,11 @@ auto SourceGen::GenerateClassDef(const ClassParams& params,
     }
   }
   os << "}" << (IsCpp() ? ";" : "") << "\n";
+
+  for (const FunctionSig& sig : decl_sigs) {
+    os << "\n";
+    GenerateOutOfLineDef(state, name, sig, os);
+  }
 }
 
 }  // namespace Carbon::Testing
