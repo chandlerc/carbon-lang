@@ -93,7 +93,7 @@ import Cpp library "implicit_conversions.h";
 fn NonConstConversionTest(s: Cpp.NonConstConversion) {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_expr_category.carbon:[[@LINE+3]]:21: error: cannot implicitly convert expression of type `Cpp.NonConstConversion` to `Cpp.Dest` [ConversionFailure]
-  // CHECK:STDERR: fail_expr_category.carbon:[[@LINE+2]]:21: note: type `Cpp.NonConstConversion` does not implement interface `Core.ImplicitAs(Cpp.Dest)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_expr_category.carbon:[[@LINE+2]]:21: note: type `Cpp.NonConstConversion` does not implement interface `Core.ImplicitAs(Cpp.Dest)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Dest = s;
   //@dump-sem-ir-end
@@ -134,7 +134,7 @@ import Cpp library "implicit_conversions.h";
 fn DeletedConstructorTest(s: Cpp.Source) {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_deleted.carbon:[[@LINE+3]]:35: error: cannot implicitly convert expression of type `Cpp.Source` to `Cpp.DeletedConstructor` [ConversionFailure]
-  // CHECK:STDERR: fail_deleted.carbon:[[@LINE+2]]:35: note: type `Cpp.Source` does not implement interface `Core.ImplicitAs(Cpp.DeletedConstructor)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_deleted.carbon:[[@LINE+2]]:35: note: type `Cpp.Source` does not implement interface `Core.ImplicitAs(Cpp.DeletedConstructor)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.DeletedConstructor = s;
   //@dump-sem-ir-end
@@ -143,7 +143,7 @@ fn DeletedConstructorTest(s: Cpp.Source) {
 fn DeletedConversionTest(s: Cpp.DeletedConversion) {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_deleted.carbon:[[@LINE+3]]:21: error: cannot implicitly convert expression of type `Cpp.DeletedConversion` to `Cpp.Dest` [ConversionFailure]
-  // CHECK:STDERR: fail_deleted.carbon:[[@LINE+2]]:21: note: type `Cpp.DeletedConversion` does not implement interface `Core.ImplicitAs(Cpp.Dest)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_deleted.carbon:[[@LINE+2]]:21: note: type `Cpp.DeletedConversion` does not implement interface `Core.ImplicitAs(Cpp.Dest)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Dest = s;
   //@dump-sem-ir-end
@@ -158,7 +158,7 @@ import Cpp library "implicit_conversions.h";
 fn ExplicitConstructorTest(s: Cpp.Source) {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_explicit.carbon:[[@LINE+3]]:36: error: cannot implicitly convert expression of type `Cpp.Source` to `Cpp.ExplicitConstructor` [ConversionFailure]
-  // CHECK:STDERR: fail_explicit.carbon:[[@LINE+2]]:36: note: type `Cpp.Source` does not implement interface `Core.ImplicitAs(Cpp.ExplicitConstructor)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_explicit.carbon:[[@LINE+2]]:36: note: type `Cpp.Source` does not implement interface `Core.ImplicitAs(Cpp.ExplicitConstructor)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.ExplicitConstructor = s;
   //@dump-sem-ir-end
@@ -167,7 +167,7 @@ fn ExplicitConstructorTest(s: Cpp.Source) {
 fn ExplicitConversionTest(s: Cpp.ExplicitConversion) {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_explicit.carbon:[[@LINE+3]]:21: error: cannot implicitly convert expression of type `Cpp.ExplicitConversion` to `Cpp.Dest` [ConversionFailure]
-  // CHECK:STDERR: fail_explicit.carbon:[[@LINE+2]]:21: note: type `Cpp.ExplicitConversion` does not implement interface `Core.ImplicitAs(Cpp.Dest)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_explicit.carbon:[[@LINE+2]]:21: note: type `Cpp.ExplicitConversion` does not implement interface `Core.ImplicitAs(Cpp.Dest)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Dest = s;
   //@dump-sem-ir-end
@@ -194,7 +194,7 @@ import Cpp library "implicit_conversions.h";
 fn IntConstructorTest(u: u32) {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_no_u32_to_int_conversion_in_carbon.carbon:[[@LINE+5]]:31: error: cannot implicitly convert expression of type `u32` to `i32` [ConversionFailure]
-  // CHECK:STDERR: fail_no_u32_to_int_conversion_in_carbon.carbon:[[@LINE+4]]:31: note: type `u32` does not implement interface `Core.ImplicitAs(i32)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_no_u32_to_int_conversion_in_carbon.carbon:[[@LINE+4]]:31: note: type `u32` does not implement interface `Core.ImplicitAs(i32)` [MissingImplForType]
   // CHECK:STDERR: included from: fail_no_u32_to_int_conversion_in_carbon.carbon:[[@LINE-6]]:10 [InCppInclude]
   // CHECK:STDERR: ./implicit_conversions.h:38:21: note: initializing function parameter [InCallToFunctionParam]
   // CHECK:STDERR:
@@ -267,15 +267,15 @@ import Cpp library "aggregate.h";
 fn InitFromTuple() {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+3]]:26-27: error: cannot implicitly convert expression of type `()` to `Cpp.Aggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+2]]:26-27: note: type `()` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+2]]:26-27: note: type `()` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Aggregate = ();
   // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+3]]:26-29: error: cannot implicitly convert expression of type `(Core.IntLiteral,)` to `Cpp.Aggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+2]]:26-29: note: type `(Core.IntLiteral,)` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+2]]:26-29: note: type `(Core.IntLiteral,)` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Aggregate = (1,);
   // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+3]]:26-31: error: cannot implicitly convert expression of type `(Core.IntLiteral, Core.IntLiteral)` to `Cpp.Aggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+2]]:26-31: note: type `(Core.IntLiteral, Core.IntLiteral)` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_aggregate_from_tuple.carbon:[[@LINE+2]]:26-31: note: type `(Core.IntLiteral, Core.IntLiteral)` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Aggregate = (1, 2);
   //@dump-sem-ir-end
@@ -290,15 +290,15 @@ import Cpp library "aggregate.h";
 fn InitFromStruct() {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+3]]:26-27: error: cannot implicitly convert expression of type `{}` to `Cpp.Aggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+2]]:26-27: note: type `{}` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+2]]:26-27: note: type `{}` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Aggregate = {};
   // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+3]]:26-33: error: cannot implicitly convert expression of type `{.x: Core.IntLiteral}` to `Cpp.Aggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+2]]:26-33: note: type `{.x: Core.IntLiteral}` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+2]]:26-33: note: type `{.x: Core.IntLiteral}` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Aggregate = {.x = 1};
   // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+3]]:26-41: error: cannot implicitly convert expression of type `{.x: Core.IntLiteral, .y: Core.IntLiteral}` to `Cpp.Aggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+2]]:26-41: note: type `{.x: Core.IntLiteral, .y: Core.IntLiteral}` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_aggregate_from_struct.carbon:[[@LINE+2]]:26-41: note: type `{.x: Core.IntLiteral, .y: Core.IntLiteral}` does not implement interface `Core.ImplicitAs(Cpp.Aggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.Aggregate = {.x = 1, .y = 2};
   //@dump-sem-ir-end
@@ -327,15 +327,15 @@ import Cpp library "aggregate.h";
 fn InitFromStruct() {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+3]]:29-30: error: cannot implicitly convert expression of type `{}` to `Cpp.NonAggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+2]]:29-30: note: type `{}` does not implement interface `Core.ImplicitAs(Cpp.NonAggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+2]]:29-30: note: type `{}` does not implement interface `Core.ImplicitAs(Cpp.NonAggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.NonAggregate = {};
   // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+3]]:29-36: error: cannot implicitly convert expression of type `{.x: Core.IntLiteral}` to `Cpp.NonAggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+2]]:29-36: note: type `{.x: Core.IntLiteral}` does not implement interface `Core.ImplicitAs(Cpp.NonAggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+2]]:29-36: note: type `{.x: Core.IntLiteral}` does not implement interface `Core.ImplicitAs(Cpp.NonAggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.NonAggregate = {.x = 1};
   // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+3]]:29-44: error: cannot implicitly convert expression of type `{.x: Core.IntLiteral, .y: Core.IntLiteral}` to `Cpp.NonAggregate` [ConversionFailure]
-  // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+2]]:29-44: note: type `{.x: Core.IntLiteral, .y: Core.IntLiteral}` does not implement interface `Core.ImplicitAs(Cpp.NonAggregate)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_non_aggregate_from_struct.carbon:[[@LINE+2]]:29-44: note: type `{.x: Core.IntLiteral, .y: Core.IntLiteral}` does not implement interface `Core.ImplicitAs(Cpp.NonAggregate)` [MissingImplForType]
   // CHECK:STDERR:
   let _: Cpp.NonAggregate = {.x = 1, .y = 2};
   //@dump-sem-ir-end

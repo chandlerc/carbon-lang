@@ -16,7 +16,8 @@
 // CHECK:STDERR: fail_deref_type.carbon:[[@LINE+2]]:8: note: to form a pointer type, write the `*` after the pointee type [DerefOfType]
 // CHECK:STDERR:
 var p: *i32;
-// CHECK:STDERR: fail_deref_type.carbon:[[@LINE+2]]:12-13: error: cannot apply `->` operator to non-pointer type `type` [ArrowOperatorOfNonPointer]
+// CHECK:STDERR: fail_deref_type.carbon:[[@LINE+3]]:12-13: error: cannot apply `->` operator to non-pointer type `type` [ArrowOperatorOfNonPointer]
+// CHECK:STDERR: fail_deref_type.carbon:[[@LINE+2]]:9-11: note: operand has non-pointer type `type` [ArrowOperandHere]
 // CHECK:STDERR:
 var p2: i32->foo;
 
@@ -57,8 +58,8 @@ var p2: i32->foo;
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   %p2.var: ref <error> = var_storage %p2.var_patt [concrete = <error>]
 // CHECK:STDOUT:   %.2: <error> = splice_block <error> [concrete = <error>] {
-// CHECK:STDOUT:     %i32.loc21: type = type_literal constants.%i32 [concrete = constants.%i32]
-// CHECK:STDOUT:     %.loc21: ref <error> = deref %i32.loc21 [concrete = <error>]
+// CHECK:STDOUT:     %i32.loc22: type = type_literal constants.%i32 [concrete = constants.%i32]
+// CHECK:STDOUT:     %.loc22: ref <error> = deref %i32.loc22 [concrete = <error>]
 // CHECK:STDOUT:     %foo.ref: <error> = name_ref foo, <error> [concrete = <error>]
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   %p2: <error> = wrapper_binding p2, <error> [concrete = <error>]

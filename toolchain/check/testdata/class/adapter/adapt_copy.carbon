@@ -25,22 +25,22 @@ class AdaptCopyable {
 
 fn F(c: AdaptCopyable) -> AdaptCopyable {
   // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+3]]:26: error: cannot copy value of type `AdaptCopyable` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+2]]:26: note: type `AdaptCopyable` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+2]]:26: note: type `AdaptCopyable` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR:
   var d: AdaptCopyable = c;
   // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+3]]:10: error: cannot copy value of type `AdaptCopyable` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+2]]:10: note: type `AdaptCopyable` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+2]]:10: note: type `AdaptCopyable` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR:
   return d;
 }
 
 fn InTuple(c: (AdaptCopyable, u32)) -> (AdaptCopyable, u32) {
   // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+3]]:33: error: cannot copy value of type `AdaptCopyable` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+2]]:33: note: type `AdaptCopyable` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+2]]:33: note: type `AdaptCopyable` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR:
   var d: (AdaptCopyable, u32) = c;
   // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+3]]:10: error: cannot copy value of type `AdaptCopyable` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+2]]:10: note: type `AdaptCopyable` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_adapt_copyable.carbon:[[@LINE+2]]:10: note: type `AdaptCopyable` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR:
   return d;
 }
@@ -77,11 +77,11 @@ class AdaptNoncopyable {
 
 fn G(a: AdaptNoncopyable) -> AdaptNoncopyable {
   // CHECK:STDERR: fail_adapt_not_copyable.carbon:[[@LINE+3]]:29: error: cannot copy value of type `AdaptNoncopyable` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_adapt_not_copyable.carbon:[[@LINE+2]]:29: note: type `AdaptNoncopyable` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_adapt_not_copyable.carbon:[[@LINE+2]]:29: note: type `AdaptNoncopyable` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR:
   var b: AdaptNoncopyable = a;
   // CHECK:STDERR: fail_adapt_not_copyable.carbon:[[@LINE+3]]:10: error: cannot copy value of type `AdaptNoncopyable` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_adapt_not_copyable.carbon:[[@LINE+2]]:10: note: type `AdaptNoncopyable` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_adapt_not_copyable.carbon:[[@LINE+2]]:10: note: type `AdaptNoncopyable` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR:
   return b;
 }
@@ -100,12 +100,12 @@ class AdaptNoncopyableIndirect {
 
 fn H(a: AdaptNoncopyableIndirect) -> AdaptNoncopyableIndirect {
   // CHECK:STDERR: fail_adapt_not_copyable_indirect.carbon:[[@LINE+4]]:3-33: error: cannot copy value of type `Noncopyable` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_adapt_not_copyable_indirect.carbon:[[@LINE+3]]:3-33: note: type `Noncopyable` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_adapt_not_copyable_indirect.carbon:[[@LINE+3]]:3-33: note: type `Noncopyable` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR: fail_adapt_not_copyable_indirect.carbon:[[@LINE+2]]:37: note: in copy of `AdaptNoncopyableIndirect` [InCopy]
   // CHECK:STDERR:
   var b: AdaptNoncopyableIndirect = a;
   // CHECK:STDERR: fail_adapt_not_copyable_indirect.carbon:[[@LINE+4]]:3-11: error: cannot copy value of type `Noncopyable` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_adapt_not_copyable_indirect.carbon:[[@LINE+3]]:3-11: note: type `Noncopyable` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_adapt_not_copyable_indirect.carbon:[[@LINE+3]]:3-11: note: type `Noncopyable` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR: fail_adapt_not_copyable_indirect.carbon:[[@LINE+2]]:10: note: in copy of `AdaptNoncopyableIndirect` [InCopy]
   // CHECK:STDERR:
   return b;

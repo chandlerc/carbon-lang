@@ -13,7 +13,7 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/check/testdata/var/fail_init_type_mismatch.carbon
 
 // CHECK:STDERR: fail_init_type_mismatch.carbon:[[@LINE+3]]:1-9: error: cannot implicitly convert expression of type `()` to `{}` [ConversionFailure]
-// CHECK:STDERR: fail_init_type_mismatch.carbon:[[@LINE+2]]:1-9: note: type `()` does not implement interface `Core.ImplicitAs({})` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_init_type_mismatch.carbon:[[@LINE+2]]:1-9: note: type `()` does not implement interface `Core.ImplicitAs({})` [MissingImplForType]
 // CHECK:STDERR:
 var x: {} = ();
 

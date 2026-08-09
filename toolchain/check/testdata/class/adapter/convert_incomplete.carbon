@@ -53,7 +53,7 @@ class X {}
 
 fn F(p: Adapter(X)*) {
   // CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:22-29: error: cannot convert expression of type `Adapter(X)` to `X*` with `as` [ConversionFailure]
-  // CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:22-29: note: type `Adapter(X)` does not implement interface `Core.As(X*)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:22-29: note: type `Adapter(X)` does not implement interface `Core.As(X*)` [MissingImplForType]
   // CHECK:STDERR:
   let unused x: X* = *p as X*;
 }

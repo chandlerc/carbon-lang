@@ -103,7 +103,8 @@ library "[[@TEST_NAME]]";
 fn F() {}
 
 fn Run() {
-  // CHECK:STDERR: fail_empty_access.carbon:[[@LINE+2]]:3-7: error: tuple element index `0` is past the end of type `()` [TupleIndexOutOfBounds]
+  // CHECK:STDERR: fail_empty_access.carbon:[[@LINE+3]]:3-7: error: tuple element index `0` is past the end of type `()` [TupleIndexOutOfBounds]
+  // CHECK:STDERR: fail_empty_access.carbon:[[@LINE+2]]:3-5: note: indexing this tuple of type `()` [TupleIndexOperandHere]
   // CHECK:STDERR:
   F().0;
 }
@@ -113,10 +114,12 @@ library "[[@TEST_NAME]]";
 
 var a: (i32,) = (12,);
 var b: (i32,) = a;
-// CHECK:STDERR: fail_large_index.carbon:[[@LINE+2]]:14-16: error: tuple element index `1` is past the end of type `(i32,)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_large_index.carbon:[[@LINE+3]]:14-16: error: tuple element index `1` is past the end of type `(i32,)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_large_index.carbon:[[@LINE+2]]:14: note: indexing this tuple of type `(i32,)` [TupleIndexOperandHere]
 // CHECK:STDERR:
 var c: i32 = b.1;
-// CHECK:STDERR: fail_large_index.carbon:[[@LINE+2]]:14-28: error: tuple element index `2147483647` is past the end of type `(i32,)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_large_index.carbon:[[@LINE+3]]:14-28: error: tuple element index `2147483647` is past the end of type `(i32,)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_large_index.carbon:[[@LINE+2]]:14: note: indexing this tuple of type `(i32,)` [TupleIndexOperandHere]
 // CHECK:STDERR:
 var d: i32 = b.(0x7FFF_FFFF);
 
@@ -124,7 +127,8 @@ var d: i32 = b.(0x7FFF_FFFF);
 library "[[@TEST_NAME]]";
 
 var a: (i32, i32) = (12, 6);
-// CHECK:STDERR: fail_negative_indexing.carbon:[[@LINE+2]]:14-20: error: tuple element index `-10` is past the end of type `(i32, i32)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_negative_indexing.carbon:[[@LINE+3]]:14-20: error: tuple element index `-10` is past the end of type `(i32, i32)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_negative_indexing.carbon:[[@LINE+2]]:14: note: indexing this tuple of type `(i32, i32)` [TupleIndexOperandHere]
 // CHECK:STDERR:
 var b: i32 = a.(-10);
 
@@ -145,7 +149,7 @@ library "[[@TEST_NAME]]";
 
 var a: (i32, i32) = (12, 6);
 // CHECK:STDERR: fail_non_int_indexing.carbon:[[@LINE+3]]:17-19: error: cannot implicitly convert expression of type `Core.FloatLiteral` to `Core.IntLiteral` [ConversionFailure]
-// CHECK:STDERR: fail_non_int_indexing.carbon:[[@LINE+2]]:17-19: note: type `Core.FloatLiteral` does not implement interface `Core.ImplicitAs(Core.IntLiteral)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_non_int_indexing.carbon:[[@LINE+2]]:17-19: note: type `Core.FloatLiteral` does not implement interface `Core.ImplicitAs(Core.IntLiteral)` [MissingImplForType]
 // CHECK:STDERR:
 var b: i32 = a.(2.6);
 
@@ -154,7 +158,8 @@ library "[[@TEST_NAME]]";
 
 fn Main() {
   var non_tuple: array(i32, 2) = (5, 5);
-  // CHECK:STDERR: fail_non_tuple_access.carbon:[[@LINE+2]]:27-37: error: type `array(i32, 2)` does not support tuple indexing; only tuples can be indexed that way [TupleIndexOnANonTupleType]
+  // CHECK:STDERR: fail_non_tuple_access.carbon:[[@LINE+3]]:27-37: error: type `array(i32, 2)` does not support tuple indexing; only tuples can be indexed that way [TupleIndexOnANonTupleType]
+  // CHECK:STDERR: fail_non_tuple_access.carbon:[[@LINE+2]]:27-35: note: expression has type `array(i32, 2)` [TupleIndexBaseHere]
   // CHECK:STDERR:
   var unused first: i32 = non_tuple.0;
 }
@@ -163,7 +168,8 @@ fn Main() {
 library "[[@TEST_NAME]]";
 
 var a: (i32, i32) = (12, 6);
-// CHECK:STDERR: fail_out_of_bound_access.carbon:[[@LINE+2]]:14-16: error: tuple element index `2` is past the end of type `(i32, i32)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_out_of_bound_access.carbon:[[@LINE+3]]:14-16: error: tuple element index `2` is past the end of type `(i32, i32)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_out_of_bound_access.carbon:[[@LINE+2]]:14: note: indexing this tuple of type `(i32, i32)` [TupleIndexOperandHere]
 // CHECK:STDERR:
 var b: i32 = a.2;
 
@@ -171,7 +177,8 @@ var b: i32 = a.2;
 library "[[@TEST_NAME]]";
 
 var a: (i32, i32) = (12, 34);
-// CHECK:STDERR: fail_out_of_bound_not_literal.carbon:[[@LINE+2]]:14-35: error: tuple element index `2` is past the end of type `(i32, i32)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_out_of_bound_not_literal.carbon:[[@LINE+3]]:14-35: error: tuple element index `2` is past the end of type `(i32, i32)` [TupleIndexOutOfBounds]
+// CHECK:STDERR: fail_out_of_bound_not_literal.carbon:[[@LINE+2]]:14: note: indexing this tuple of type `(i32, i32)` [TupleIndexOperandHere]
 // CHECK:STDERR:
 var b: i32 = a.({.index = 2}.index);
 

@@ -155,7 +155,7 @@ interface X {
 impl A as X {
   //@dump-sem-ir-begin
   // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE+4]]:3-14: error: cannot copy value of type `A` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE+3]]:3-14: note: type `A` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE+3]]:3-14: note: type `A` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE-7]]:3-17: note: while building thunk to match the signature of this function [ThunkSignature]
   // CHECK:STDERR:
   fn F() -> B;
@@ -164,7 +164,7 @@ impl A as X {
 
 // --- fail_param_type_mismatch.carbon
 // CHECK:STDERR: fail_param_type_mismatch.carbon: error: cannot implicitly convert expression of type `A` to `B` [ConversionFailure]
-// CHECK:STDERR: fail_param_type_mismatch.carbon: note: type `A` does not implement interface `Core.ImplicitAs(B)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_param_type_mismatch.carbon: note: type `A` does not implement interface `Core.ImplicitAs(B)` [MissingImplForType]
 
 library "[[@TEST_NAME]]";
 
@@ -195,7 +195,7 @@ class B {}
 
 impl A as I {
   // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE+4]]:3-14: error: cannot implicitly convert expression of type `B` to `A` [ConversionFailure]
-  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE+3]]:3-14: note: type `B` does not implement interface `Core.ImplicitAs(A)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE+3]]:3-14: note: type `B` does not implement interface `Core.ImplicitAs(A)` [MissingImplForType]
   // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE-9]]:3-17: note: while building thunk to match the signature of this function [ThunkSignature]
   // CHECK:STDERR:
   fn F() -> B;
@@ -264,7 +264,7 @@ class C {
     // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE+7]]:5-15: note: while building thunk calling this function [ThunkCallee]
     // CHECK:STDERR:
     // CHECK:STDERR: fail_param_type_incomplete.carbon: error: cannot implicitly convert expression of type `B` to `C` [ConversionFailure]
-    // CHECK:STDERR: fail_param_type_incomplete.carbon: note: type `B` does not implement interface `Core.ImplicitAs(C)` [MissingImplInMemberAccessInContext]
+    // CHECK:STDERR: fail_param_type_incomplete.carbon: note: type `B` does not implement interface `Core.ImplicitAs(C)` [MissingImplForType]
     // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE+3]]:10-13: note: initializing function parameter [InCallToFunctionParam]
     // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE-13]]:3-13: note: while building thunk to match the signature of this function [ThunkSignature]
     // CHECK:STDERR:

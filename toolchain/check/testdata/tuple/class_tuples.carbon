@@ -22,7 +22,7 @@ class D {}
 var c: C;
 var d: D;
 // CHECK:STDERR: fail_element_type_mismatch.carbon:[[@LINE+3]]:19-24: error: cannot implicitly convert expression of type `C` to `C*` [ConversionFailure]
-// CHECK:STDERR: fail_element_type_mismatch.carbon:[[@LINE+2]]:19-24: note: type `C` does not implement interface `Core.ImplicitAs(C*)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_element_type_mismatch.carbon:[[@LINE+2]]:19-24: note: type `C` does not implement interface `Core.ImplicitAs(C*)` [MissingImplForType]
 // CHECK:STDERR:
 var x: (C*, C*) = (c, d);
 
@@ -45,7 +45,7 @@ library "[[@TEST_NAME]]";
 class C {}
 
 // CHECK:STDERR: fail_type_assign.carbon:[[@LINE+3]]:16-20: error: cannot implicitly convert expression of type `type` to `C` [ConversionFailure]
-// CHECK:STDERR: fail_type_assign.carbon:[[@LINE+2]]:16-20: note: type `type` does not implement interface `Core.ImplicitAs(C)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_type_assign.carbon:[[@LINE+2]]:16-20: note: type `type` does not implement interface `Core.ImplicitAs(C)` [MissingImplForType]
 // CHECK:STDERR:
 var x: (C, ) = (C, );
 
@@ -56,6 +56,6 @@ class C {}
 
 var c: C;
 // CHECK:STDERR: fail_value_as_type.carbon:[[@LINE+3]]:8: error: cannot implicitly convert non-type value of type `C` to `type` [ConversionFailureNonTypeToFacet]
-// CHECK:STDERR: fail_value_as_type.carbon:[[@LINE+2]]:8: note: type `C` does not implement interface `Core.ImplicitAs(type)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_value_as_type.carbon:[[@LINE+2]]:8: note: type `C` does not implement interface `Core.ImplicitAs(type)` [MissingImplForType]
 // CHECK:STDERR:
 var x: c;

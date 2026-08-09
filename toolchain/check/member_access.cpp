@@ -258,7 +258,8 @@ static auto PerformImplLookup(
     Context& context, SemIR::LocId loc_id, SemIR::ConstantId type_const_id,
     SemIR::AssociatedEntityType assoc_type, SemIR::InstId member_id,
     bool diagnose = true,
-    DiagnosticContextFn missing_impl_diagnostic_context = nullptr)
+    DiagnosticContextFn missing_impl_diagnostic_context = nullptr,
+    std::optional<LocIdForDiagnostics> desugared_loc_id = std::nullopt)
     -> SemIR::InstId {
   auto self_type_id = context.types().GetTypeIdForTypeConstantId(type_const_id);
   // TODO: Avoid forming and then immediately decomposing a `FacetType` here.
@@ -269,14 +270,23 @@ static auto PerformImplLookup(
                                          interface_type_id.AsConstantId());
   if (!lookup_result.has_value()) {
     if (diagnose) {
+      auto diag_loc_id = desugared_loc_id.value_or(loc_id);
+      std::optional<
+          Diagnostics::ContextScope<LocIdForDiagnostics, DiagnosticContextFn>>
+          scope;
       if (missing_impl_diagnostic_context) {
-        Diagnostics::ContextScope scope(&context.emitter(),
-                                        missing_impl_diagnostic_context);
+        scope.emplace(&context.emitter(), missing_impl_diagnostic_context);
+      }
+      // Naming the member access is only useful when that is what was written.
+      // A context or the syntax a desugaring came from already says which
+      // operation needed the interface, so the message is left to report the
+      // one thing they can't: which type failed to implement it.
+      if (missing_impl_diagnostic_context || desugared_loc_id) {
         // TODO: Pass in the expression whose type we are printing.
-        CARBON_DIAGNOSTIC(MissingImplInMemberAccessInContext, Error,
+        CARBON_DIAGNOSTIC(MissingImplForType, Error,
                           "type {1} does not implement interface {0}",
                           SemIR::TypeId, SemIR::TypeId);
-        context.emitter().Emit(loc_id, MissingImplInMemberAccessInContext,
+        context.emitter().Emit(diag_loc_id, MissingImplForType,
                                interface_type_id, self_type_id);
       } else {
         // TODO: Pass in the expression whose type we are printing.
@@ -284,7 +294,7 @@ static auto PerformImplLookup(
                           "cannot access member of interface {0} in type {1} "
                           "that does not implement that interface",
                           SemIR::TypeId, SemIR::TypeId);
-        context.emitter().Emit(loc_id, MissingImplInMemberAccess,
+        context.emitter().Emit(diag_loc_id, MissingImplInMemberAccess,
                                interface_type_id, self_type_id);
       }
     }
@@ -468,9 +478,15 @@ static auto ValidateTupleIndex(Context& context, SemIR::LocId loc_id,
     CARBON_DIAGNOSTIC(TupleIndexOutOfBounds, Error,
                       "tuple element index `{0}` is past the end of type {1}",
                       TypedInt, TypeOfInstId);
-    context.emitter().Emit(loc_id, TupleIndexOutOfBounds,
-                           {.type = index_inst.type_id, .value = index_val},
-                           operand_inst_id);
+    CARBON_DIAGNOSTIC_LABEL(TupleIndexOperandHere, Info,
+                            "indexing this tuple of type {0}", TypeOfInstId);
+    context.emitter()
+        .Build(loc_id, TupleIndexOutOfBounds,
+               {.type = index_inst.type_id, .value = index_val},
+               operand_inst_id)
+        .Attach(loc_id)
+        .Attach(operand_inst_id, TupleIndexOperandHere, operand_inst_id)
+        .Emit();
     return std::nullopt;
   }
   return index_val;
@@ -656,8 +672,15 @@ static auto PerformActionHelper(Context& context, SemIR::LocId loc_id,
       CARBON_DIAGNOSTIC(QualifiedExprNameNotFound, Error,
                         "type {0} does not have a member `{1}`", TypeOfInstId,
                         SemIR::NameId);
-      context.emitter().Emit(loc_id, QualifiedExprNameNotFound, base_id,
-                             name_id);
+      // The marked range is the whole access, so nothing in it says which part
+      // is the one whose type the message names.
+      CARBON_DIAGNOSTIC_LABEL(QualifiedExprBaseHere, Info,
+                              "expression has type {0}", TypeOfInstId);
+      context.emitter()
+          .Build(loc_id, QualifiedExprNameNotFound, base_id, name_id)
+          .Attach(loc_id)
+          .Attach(base_id, QualifiedExprBaseHere, base_id)
+          .Emit();
       return SemIR::ErrorInst::InstId;
     } else {
       return SemIR::InstId::None;
@@ -768,7 +791,8 @@ auto GetAssociatedValue(Context& context, SemIR::LocId loc_id,
 static auto PerformCompoundMemberAccessAction(
     Context& context, SemIR::LocId loc_id, SemIR::InstId base_id,
     SemIR::InstId member_expr_id, bool diagnose = true,
-    DiagnosticContextFn missing_impl_diagnostic_context = nullptr)
+    DiagnosticContextFn missing_impl_diagnostic_context = nullptr,
+    std::optional<LocIdForDiagnostics> desugared_loc_id = std::nullopt)
     -> SemIR::InstId {
   auto base_type_id = context.insts().Get(base_id).type_id();
   auto base_type_const_id = context.types().GetConstantId(base_type_id);
@@ -802,9 +826,9 @@ static auto PerformCompoundMemberAccessAction(
     if (IsInstanceType(context, decl_type_id)) {
       // Step 2a: For instance methods, lookup the impl of the interface for
       // this type and get the method.
-      member_id = PerformImplLookup(context, loc_id, base_type_const_id,
-                                    *assoc_type, member_id, diagnose,
-                                    missing_impl_diagnostic_context);
+      member_id = PerformImplLookup(
+          context, loc_id, base_type_const_id, *assoc_type, member_id, diagnose,
+          missing_impl_diagnostic_context, desugared_loc_id);
       // Next we will perform instance binding.
     } else {
       // Step 2b: For non-instance methods and associated constants, we access
@@ -843,7 +867,8 @@ static auto PerformCompoundMemberAccessAction(
 auto PerformCompoundMemberAccess(
     Context& context, SemIR::LocId loc_id, SemIR::InstId base_id,
     SemIR::InstId member_expr_id, bool diagnose,
-    DiagnosticContextFn missing_impl_diagnostic_context) -> SemIR::InstId {
+    DiagnosticContextFn missing_impl_diagnostic_context,
+    std::optional<LocIdForDiagnostics> desugared_loc_id) -> SemIR::InstId {
   if (auto splice_inst_id = AddActionSpliceIfDependent(
           context, loc_id, SemIR::TypeInstId::None,
           SemIR::CompoundMemberAccessAction{.type_id = SemIR::InstType::TypeId,
@@ -854,9 +879,9 @@ auto PerformCompoundMemberAccess(
     // to check whether a template-dependent compound member access is valid.
     return splice_inst_id;
   }
-  return PerformCompoundMemberAccessAction(context, loc_id, base_id,
-                                           member_expr_id, diagnose,
-                                           missing_impl_diagnostic_context);
+  return PerformCompoundMemberAccessAction(
+      context, loc_id, base_id, member_expr_id, diagnose,
+      missing_impl_diagnostic_context, desugared_loc_id);
 }
 
 auto PerformAction(Context& context, SemIR::LocId loc_id,
@@ -877,7 +902,13 @@ auto PerformTupleAccess(Context& context, SemIR::LocId loc_id,
                       "type {0} does not support tuple indexing; only "
                       "tuples can be indexed that way",
                       TypeOfInstId);
-    context.emitter().Emit(loc_id, TupleIndexOnANonTupleType, tuple_inst_id);
+    CARBON_DIAGNOSTIC_LABEL(TupleIndexBaseHere, Info, "expression has type {0}",
+                            TypeOfInstId);
+    context.emitter()
+        .Build(loc_id, TupleIndexOnANonTupleType, tuple_inst_id)
+        .Attach(loc_id)
+        .Attach(tuple_inst_id, TupleIndexBaseHere, tuple_inst_id)
+        .Emit();
     return SemIR::ErrorInst::InstId;
   }
 

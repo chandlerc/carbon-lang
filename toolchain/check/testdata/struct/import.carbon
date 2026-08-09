@@ -44,7 +44,7 @@ var c_bad: C({.c = 1, .d = 2}) = F();
 
 impl package Implicit;
 // CHECK:STDERR: fail_bad_value.impl.carbon:[[@LINE+3]]:1-30: error: cannot implicitly convert expression of type `C({.a = 1, .b = 2})` to `C({.a = 3, .b = 4})` [ConversionFailure]
-// CHECK:STDERR: fail_bad_value.impl.carbon:[[@LINE+2]]:1-30: note: type `C({.a = 1, .b = 2})` does not implement interface `Core.ImplicitAs(C({.a = 3, .b = 4}))` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_bad_value.impl.carbon:[[@LINE+2]]:1-30: note: type `C({.a = 1, .b = 2})` does not implement interface `Core.ImplicitAs(C({.a = 3, .b = 4}))` [MissingImplForType]
 // CHECK:STDERR:
 var c_bad: C({.a = 3, .b = 4}) = F();
 

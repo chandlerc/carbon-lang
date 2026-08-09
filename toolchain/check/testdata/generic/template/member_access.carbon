@@ -70,7 +70,7 @@ class E {
 fn Test(e: E) {
   // CHECK:STDERR: fail_member_wrong_type.carbon:[[@LINE+4]]:3: error: unable to monomorphize specific `F(E)` [ResolvingSpecificHere]
   // CHECK:STDERR: fail_member_wrong_type.carbon:[[@LINE-11]]:16-18: note: cannot implicitly convert expression of type `F` to `i32` [ConversionFailure]
-  // CHECK:STDERR: fail_member_wrong_type.carbon:[[@LINE-12]]:16-18: note: type `F` does not implement interface `Core.ImplicitAs(i32)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_member_wrong_type.carbon:[[@LINE-12]]:16-18: note: type `F` does not implement interface `Core.ImplicitAs(i32)` [MissingImplForType]
   // CHECK:STDERR:
   F(e);
 }

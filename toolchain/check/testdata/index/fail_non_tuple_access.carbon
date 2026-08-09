@@ -13,7 +13,10 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/check/testdata/index/fail_non_tuple_access.carbon
 
 fn Main() {
-  // CHECK:STDERR: fail_non_tuple_access.carbon:[[@LINE+2]]:3-6: error: cannot access member of interface `Core.IndexWith(Core.IntLiteral)` in type `Core.IntLiteral` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_non_tuple_access.carbon:[[@LINE+5]]:5: error: type `Core.IntLiteral` does not implement interface `Core.IndexWith(Core.IntLiteral)` [MissingImplForType]
+  // CHECK:STDERR: fail_non_tuple_access.carbon:[[@LINE+4]]:6: note: `[]` requires an impl of `Core.IndexWith` [OperatorInterface]
+  // CHECK:STDERR: fail_non_tuple_access.carbon:[[@LINE+3]]:3: note: indexing an object with type `Core.IntLiteral` [IndexedObjectType]
+  // CHECK:STDERR: fail_non_tuple_access.carbon:[[@LINE+2]]:5: note: indexing with type `Core.IntLiteral` [IndexWithType]
   // CHECK:STDERR:
   0[1];
 }

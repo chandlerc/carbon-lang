@@ -837,7 +837,7 @@ fn F() {
   // CHECK:STDERR: fail_todo_assign_array.carbon:[[@LINE+5]]:3-7: note: in `Cpp` name lookup for `m` [InCppNameLookup]
   // CHECK:STDERR:
   // CHECK:STDERR: fail_todo_assign_array.carbon:[[@LINE+3]]:3-11: error: cannot implicitly convert expression of type `Core.IntLiteral` to `array(i32, 3)` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_assign_array.carbon:[[@LINE+2]]:3-11: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(array(i32, 3))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_assign_array.carbon:[[@LINE+2]]:3-11: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(array(i32, 3))` [MissingImplForType]
   // CHECK:STDERR:
   Cpp.m = 2;
 }

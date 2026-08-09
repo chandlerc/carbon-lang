@@ -80,7 +80,7 @@ import Cpp;
 fn F() {
   let cpp_long: Cpp.long = 1;
   // CHECK:STDERR: fail_implicit_conversion_long_to_i32.carbon:[[@LINE+3]]:32-39: error: cannot implicitly convert expression of type `Cpp.long` to `i32` [ConversionFailure]
-  // CHECK:STDERR: fail_implicit_conversion_long_to_i32.carbon:[[@LINE+2]]:32-39: note: type `Cpp.long` does not implement interface `Core.ImplicitAs(i32)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_implicit_conversion_long_to_i32.carbon:[[@LINE+2]]:32-39: note: type `Cpp.long` does not implement interface `Core.ImplicitAs(i32)` [MissingImplForType]
   // CHECK:STDERR:
   let unused carbon_i32: i32 = cpp_long;
 }
@@ -191,10 +191,16 @@ import Cpp;
 fn ComparisonsHeterogeneousLongAndI16() {
   let a: Cpp.long = 1;
   let b: i16 = 1;
-  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:3-8: error: cannot access member of interface `Core.EqWith(i16)` in type `Cpp.long` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+5]]:5-6: error: type `Cpp.long` does not implement interface `Core.EqWith(i16)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+4]]:5-6: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+3]]:3: note: left operand has type `Cpp.long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:8: note: right operand has type `i16` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a == b;
-  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:3-8: error: cannot access member of interface `Core.EqWith(Cpp.long)` in type `i16` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+5]]:5-6: error: type `i16` does not implement interface `Core.EqWith(Cpp.long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+4]]:5-6: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+3]]:3: note: left operand has type `i16` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:8: note: right operand has type `Cpp.long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   b == a;
 }
@@ -208,10 +214,16 @@ import Cpp;
 fn ComparisonsHeterogeneousLongAndI128() {
   let a: Cpp.long = 1;
   let b: i128 = 1;
-  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:3-8: error: cannot access member of interface `Core.EqWith(i128)` in type `Cpp.long` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+5]]:5-6: error: type `Cpp.long` does not implement interface `Core.EqWith(i128)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+4]]:5-6: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+3]]:3: note: left operand has type `Cpp.long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:8: note: right operand has type `i128` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a == b;
-  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:3-8: error: cannot access member of interface `Core.EqWith(Cpp.long)` in type `i128` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+5]]:5-6: error: type `i128` does not implement interface `Core.EqWith(Cpp.long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+4]]:5-6: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+3]]:3: note: left operand has type `i128` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:8: note: right operand has type `Cpp.long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   b == a;
 }
@@ -313,11 +325,17 @@ fn AssertSameType[T: type](unused a: T, unused b: T) {}
 fn ArithmeticHeterogeneousLongAndI16() {
   let x: Cpp.long = 1;
   let y: i16 = 1;
-  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:18-22: error: cannot access member of interface `Core.AddWith(i16)` in type `Cpp.long` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+5]]:20: error: type `Cpp.long` does not implement interface `Core.AddWith(i16)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+4]]:20: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:22: note: right operand has type `i16` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(x + y, x);
 
-  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:18-22: error: cannot access member of interface `Core.AddWith(Cpp.long)` in type `i16` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+5]]:20: error: type `i16` does not implement interface `Core.AddWith(Cpp.long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+4]]:20: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+3]]:18: note: left operand has type `i16` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(y + x, x);
 }
@@ -333,11 +351,17 @@ fn AssertSameType[T: type](unused a: T, unused b: T) {}
 fn ArithmeticHeterogeneousLongAndI128() {
   let x: Cpp.long = 1;
   let y: i128 = 1;
-  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:18-22: error: cannot access member of interface `Core.AddWith(i128)` in type `Cpp.long` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+5]]:20: error: type `Cpp.long` does not implement interface `Core.AddWith(i128)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+4]]:20: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:22: note: right operand has type `i128` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(x + y, y);
 
-  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:18-22: error: cannot access member of interface `Core.AddWith(Cpp.long)` in type `i128` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+5]]:20: error: type `i128` does not implement interface `Core.AddWith(Cpp.long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+4]]:20: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+3]]:18: note: left operand has type `i128` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(y + x, y);
 }
@@ -441,10 +465,16 @@ fn BitWiseHeterogeneousLongAndI16() {
   let a: Cpp.long = 1;
   let b: i16 = 1;
 
-  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:18-22: error: cannot access member of interface `Core.BitAndWith(i16)` in type `Cpp.long` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+5]]:20: error: type `Cpp.long` does not implement interface `Core.BitAndWith(i16)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+4]]:20: note: `&` requires an impl of `Core.BitAndWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:22: note: right operand has type `i16` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(a & b, a);
-  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:18-22: error: cannot access member of interface `Core.BitAndWith(Cpp.long)` in type `i16` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+5]]:20: error: type `i16` does not implement interface `Core.BitAndWith(Cpp.long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+4]]:20: note: `&` requires an impl of `Core.BitAndWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+3]]:18: note: left operand has type `i16` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(b & a, a);
 }
@@ -461,10 +491,16 @@ fn BitWiseHeterogeneousLongAndI128() {
   let a: Cpp.long = 1;
   let b: i128 = 1;
 
-  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:18-22: error: cannot access member of interface `Core.BitAndWith(i128)` in type `Cpp.long` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+5]]:20: error: type `Cpp.long` does not implement interface `Core.BitAndWith(i128)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+4]]:20: note: `&` requires an impl of `Core.BitAndWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:22: note: right operand has type `i128` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(a & b, b);
-  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:18-22: error: cannot access member of interface `Core.BitAndWith(Cpp.long)` in type `i128` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+5]]:20: error: type `i128` does not implement interface `Core.BitAndWith(Cpp.long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+4]]:20: note: `&` requires an impl of `Core.BitAndWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+3]]:18: note: left operand has type `i128` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_and_i128.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(b & a, b);
 }
@@ -553,7 +589,10 @@ import Cpp;
 
 fn CompoundAssignmentHeterogeneousI16Long() {
   var a: Cpp.long = 1;
-  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:3-17: error: cannot access member of interface `Core.AddAssignWith(i16)` in type `Cpp.long` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_and_i16.carbon:[[@LINE+5]]:5-6: error: type `Cpp.long` does not implement interface `Core.AddAssignWith(i16)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_and_i16.carbon:[[@LINE+4]]:5-6: note: `+=` requires an impl of `Core.AddAssignWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_and_i16.carbon:[[@LINE+3]]:3: note: left operand has type `Cpp.long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_and_i16.carbon:[[@LINE+2]]:9-16: note: right operand has type `i16` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a += (1 as i16);
 }
@@ -566,7 +605,10 @@ import Cpp;
 
 fn CompoundAssignmentHeterogeneousI64Long() {
   var a: Cpp.long = 1;
-  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_and_i64.carbon:[[@LINE+2]]:3-17: error: cannot access member of interface `Core.AddAssignWith(i64)` in type `Cpp.long` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_and_i64.carbon:[[@LINE+5]]:5-6: error: type `Cpp.long` does not implement interface `Core.AddAssignWith(i64)` [MissingImplForType]
+  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_and_i64.carbon:[[@LINE+4]]:5-6: note: `+=` requires an impl of `Core.AddAssignWith` [OperatorInterface]
+  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_and_i64.carbon:[[@LINE+3]]:3: note: left operand has type `Cpp.long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_and_i64.carbon:[[@LINE+2]]:9-16: note: right operand has type `i64` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a += (1 as i64);
 }
@@ -625,7 +667,7 @@ fn F() {
   // For portability reasons, this is not allowed even though `unsigned long`
   // happens to fit in `u32` on this target.
   // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+5]]:25-41: error: cannot implicitly convert expression of type `Cpp.unsigned_long` to `u32` [ConversionFailure]
-  // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+4]]:25-41: note: type `Cpp.unsigned_long` does not implement interface `Core.ImplicitAs(u32)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+4]]:25-41: note: type `Cpp.unsigned_long` does not implement interface `Core.ImplicitAs(u32)` [MissingImplForType]
   // CHECK:STDERR:
   // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+2]]:7-21: warning: binding `carbon_u32` unused [UnusedBinding]
   // CHECK:STDERR:

@@ -48,7 +48,7 @@ class C;
 // CHECK:STDERR:
 fn G(p: const (const C)**) -> C** {
   // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE+3]]:3-11: error: cannot implicitly convert expression of type `const C**` to `C**` [ConversionFailure]
-  // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE+2]]:3-11: note: type `const C**` does not implement interface `Core.ImplicitAs(C**)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE+2]]:3-11: note: type `const C**` does not implement interface `Core.ImplicitAs(C**)` [MissingImplForType]
   // CHECK:STDERR:
   return p;
 }
@@ -107,7 +107,7 @@ class X {
 
 fn PassConstReferenceToReference(p: const X*) {
   // CHECK:STDERR: fail_remove_while_forming_reference.carbon:[[@LINE+4]]:3-17: error: cannot implicitly convert expression of type `const X` to `X` [ConversionFailure]
-  // CHECK:STDERR: fail_remove_while_forming_reference.carbon:[[@LINE+3]]:3-17: note: type `const X` does not implement interface `Core.ImplicitAs(X)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_remove_while_forming_reference.carbon:[[@LINE+3]]:3-17: note: type `const X` does not implement interface `Core.ImplicitAs(X)` [MissingImplForType]
   // CHECK:STDERR: fail_remove_while_forming_reference.carbon:[[@LINE-6]]:15-22: note: initializing function parameter [InCallToFunctionParam]
   // CHECK:STDERR:
   p->(X.TakeSelf)();

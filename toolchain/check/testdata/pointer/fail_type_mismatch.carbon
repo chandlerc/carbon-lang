@@ -14,7 +14,7 @@
 
 fn ConstMismatch(p: const {}*) -> const ({}*) {
   // CHECK:STDERR: fail_type_mismatch.carbon:[[@LINE+3]]:3-11: error: cannot implicitly convert expression of type `const {}*` to `const ({}*)` [ConversionFailure]
-  // CHECK:STDERR: fail_type_mismatch.carbon:[[@LINE+2]]:3-11: note: type `const {}*` does not implement interface `Core.ImplicitAs(const ({}*))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_type_mismatch.carbon:[[@LINE+2]]:3-11: note: type `const {}*` does not implement interface `Core.ImplicitAs(const ({}*))` [MissingImplForType]
   // CHECK:STDERR:
   return p;
 }

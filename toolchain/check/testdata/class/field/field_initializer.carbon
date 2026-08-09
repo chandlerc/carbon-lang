@@ -59,7 +59,7 @@ library "[[@TEST_NAME]]";
 
 class Class {
   // CHECK:STDERR: fail_field_initializer_wrong_type.carbon:[[@LINE+3]]:20-21: error: cannot implicitly convert expression of type `()` to `i32` [ConversionFailure]
-  // CHECK:STDERR: fail_field_initializer_wrong_type.carbon:[[@LINE+2]]:20-21: note: type `()` does not implement interface `Core.ImplicitAs(i32)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_field_initializer_wrong_type.carbon:[[@LINE+2]]:20-21: note: type `()` does not implement interface `Core.ImplicitAs(i32)` [MissingImplForType]
   // CHECK:STDERR:
   var field: i32 = ();
 }

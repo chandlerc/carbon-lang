@@ -430,7 +430,7 @@ fn F(generic T: Z where .Y = {} and .X = NZ(.Y), generic U: T.X) -> U.(Z.X) {
   // the value of `U.(Z.Y)` is not known. Only `T.(Z.Y)` is rewritten to `{}`.
   //
   // CHECK:STDERR: fail_nested_facet_type_in_rewrite_does_not_use_rewrite_from_outside.carbon:[[@LINE+3]]:3-12: error: cannot implicitly convert expression of type `{}` to `U.(Z.X)` [ConversionFailure]
-  // CHECK:STDERR: fail_nested_facet_type_in_rewrite_does_not_use_rewrite_from_outside.carbon:[[@LINE+2]]:3-12: note: type `{}` does not implement interface `Core.ImplicitAs(U.(Z.X))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_nested_facet_type_in_rewrite_does_not_use_rewrite_from_outside.carbon:[[@LINE+2]]:3-12: note: type `{}` does not implement interface `Core.ImplicitAs(U.(Z.X))` [MissingImplForType]
   // CHECK:STDERR:
   return {};
 }

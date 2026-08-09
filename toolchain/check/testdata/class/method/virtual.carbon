@@ -397,7 +397,7 @@ class D1 {
 
 // --- fail_impl_generic_specifically_mismatch.carbon
 // CHECK:STDERR: fail_impl_generic_specifically_mismatch.carbon: error: cannot implicitly convert expression of type `T1*` to `T2*` [ConversionFailure]
-// CHECK:STDERR: fail_impl_generic_specifically_mismatch.carbon: note: type `T1*` does not implement interface `Core.ImplicitAs(T2*)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_impl_generic_specifically_mismatch.carbon: note: type `T1*` does not implement interface `Core.ImplicitAs(T2*)` [MissingImplForType]
 
 library "[[@TEST_NAME]]";
 
@@ -418,7 +418,7 @@ class D1 {
 
 // --- fail_impl_generic_generic_mismatch.carbon
 // CHECK:STDERR: fail_impl_generic_generic_mismatch.carbon: error: cannot implicitly convert expression of type `T*` to `T` [ConversionFailure]
-// CHECK:STDERR: fail_impl_generic_generic_mismatch.carbon: note: type `T*` does not implement interface `Core.ImplicitAs(T)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_impl_generic_generic_mismatch.carbon: note: type `T*` does not implement interface `Core.ImplicitAs(T)` [MissingImplForType]
 
 library "[[@TEST_NAME]]";
 

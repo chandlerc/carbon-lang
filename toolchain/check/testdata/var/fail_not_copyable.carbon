@@ -16,7 +16,7 @@ class X {
 fn F(x: X) {
   // TODO: Decide on rules for when classes are copyable.
   // CHECK:STDERR: fail_not_copyable.carbon:[[@LINE+3]]:21: error: cannot copy value of type `X` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_not_copyable.carbon:[[@LINE+2]]:21: note: type `X` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_not_copyable.carbon:[[@LINE+2]]:21: note: type `X` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR:
   var unused y: X = x;
 }

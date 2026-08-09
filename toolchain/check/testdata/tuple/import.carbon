@@ -46,7 +46,7 @@ var c_bad: C((1, 2, 3)) = F();
 impl package Implicit;
 
 // CHECK:STDERR: fail_bad_value.impl.carbon:[[@LINE+3]]:1-20: error: cannot implicitly convert expression of type `C((1, 2))` to `C((3, 4))` [ConversionFailure]
-// CHECK:STDERR: fail_bad_value.impl.carbon:[[@LINE+2]]:1-20: note: type `C((1, 2))` does not implement interface `Core.ImplicitAs(C((3, 4)))` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_bad_value.impl.carbon:[[@LINE+2]]:1-20: note: type `C((1, 2))` does not implement interface `Core.ImplicitAs(C((3, 4)))` [MissingImplForType]
 // CHECK:STDERR:
 var c_bad: C((3, 4)) = F();
 

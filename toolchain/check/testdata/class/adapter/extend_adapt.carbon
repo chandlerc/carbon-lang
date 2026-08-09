@@ -53,7 +53,7 @@ class SomeClassAdapter {
 
 fn F(a: SomeClassAdapter) {
   // CHECK:STDERR: fail_todo_method_access.carbon:[[@LINE+4]]:3: error: cannot implicitly convert expression of type `SomeClassAdapter` to `SomeClass` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_method_access.carbon:[[@LINE+3]]:3: note: type `SomeClassAdapter` does not implement interface `Core.ImplicitAs(SomeClass)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_method_access.carbon:[[@LINE+3]]:3: note: type `SomeClassAdapter` does not implement interface `Core.ImplicitAs(SomeClass)` [MissingImplForType]
   // CHECK:STDERR: fail_todo_method_access.carbon:[[@LINE-10]]:8-11: note: initializing function parameter [InCallToFunctionParam]
   // CHECK:STDERR:
   a.F();
@@ -74,7 +74,7 @@ class SomeClassAdapter {
 
 fn F(a: SomeClassAdapter) -> i32 {
   // CHECK:STDERR: fail_todo_field_access.carbon:[[@LINE+3]]:10-12: error: cannot implicitly convert expression of type `SomeClassAdapter` to `SomeClass` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_field_access.carbon:[[@LINE+2]]:10-12: note: type `SomeClassAdapter` does not implement interface `Core.ImplicitAs(SomeClass)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_field_access.carbon:[[@LINE+2]]:10-12: note: type `SomeClassAdapter` does not implement interface `Core.ImplicitAs(SomeClass)` [MissingImplForType]
   // CHECK:STDERR:
   return a.b;
 }
@@ -104,7 +104,8 @@ class TupleAdapter {
 
 fn F(a: TupleAdapter) -> i32 {
   // TODO: This should be allowed.
-  // CHECK:STDERR: fail_todo_adapt_tuple.carbon:[[@LINE+2]]:10-12: error: type `TupleAdapter` does not support tuple indexing; only tuples can be indexed that way [TupleIndexOnANonTupleType]
+  // CHECK:STDERR: fail_todo_adapt_tuple.carbon:[[@LINE+3]]:10-12: error: type `TupleAdapter` does not support tuple indexing; only tuples can be indexed that way [TupleIndexOnANonTupleType]
+  // CHECK:STDERR: fail_todo_adapt_tuple.carbon:[[@LINE+2]]:10: note: expression has type `TupleAdapter` [TupleIndexBaseHere]
   // CHECK:STDERR:
   return a.1;
 }

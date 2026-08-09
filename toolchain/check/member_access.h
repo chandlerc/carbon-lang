@@ -5,6 +5,8 @@
 #ifndef CARBON_TOOLCHAIN_CHECK_MEMBER_ACCESS_H_
 #define CARBON_TOOLCHAIN_CHECK_MEMBER_ACCESS_H_
 
+#include <optional>
+
 #include "toolchain/check/context.h"
 #include "toolchain/sem_ir/ids.h"
 
@@ -31,13 +33,23 @@ auto PerformMemberAccess(Context& context, SemIR::LocId loc_id,
 // provide context for the error diagnostic when impl binding fails due to a
 // missing `impl`.
 //
+// `desugared_loc_id` is set when this access is the desugaring of syntax the
+// developer wrote, such as an operator, and names where in that syntax a
+// missing-`impl` diagnostic points instead of at the whole expression: an
+// operator points at the operator itself, since what marks its operands are the
+// labels naming their types. Because that syntax is also what says which
+// operation needed the interface, the message then reports only which type
+// failed to implement it, rather than describing a member access that was never
+// written.
+//
 // On failure, an ErrorInst is returned and a diagnostic is produced unless
 // `diagnose` is false. It is incorrect to specify `diagnose` as false if the
 // resulting ErrorInst may appear in the produced SemIR.
 auto PerformCompoundMemberAccess(
     Context& context, SemIR::LocId loc_id, SemIR::InstId base_id,
     SemIR::InstId member_expr_id, bool diagnose = true,
-    DiagnosticContextFn missing_impl_diagnostic_context = nullptr)
+    DiagnosticContextFn missing_impl_diagnostic_context = nullptr,
+    std::optional<LocIdForDiagnostics> desugared_loc_id = std::nullopt)
     -> SemIR::InstId;
 
 // Finds the value of an associated entity (given by assoc_entity_inst_id, a

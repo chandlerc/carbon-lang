@@ -63,7 +63,7 @@ fn G() -> C {
   // TODO: We succeed at deducing T here but fail to convert. Is this the right behavior?
   var a: array(C, 3) = ({}, {}, {});
   // CHECK:STDERR: fail_bound_mismatch.carbon:[[@LINE+4]]:12: error: cannot implicitly convert expression of type `array(C, 3)` to `array(C, 2)` [ConversionFailure]
-  // CHECK:STDERR: fail_bound_mismatch.carbon:[[@LINE+3]]:12: note: type `array(C, 3)` does not implement interface `Core.ImplicitAs(array(C, 2))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_bound_mismatch.carbon:[[@LINE+3]]:12: note: type `array(C, 3)` does not implement interface `Core.ImplicitAs(array(C, 2))` [MissingImplForType]
   // CHECK:STDERR: fail_bound_mismatch.carbon:[[@LINE-7]]:15-28: note: initializing function parameter [InCallToFunctionParam]
   // CHECK:STDERR:
   return F(a);
@@ -82,7 +82,7 @@ fn G() -> i32 {
   // TODO: We succeed at deducing N here but fail to convert. Is this the right behavior?
   var a: array(D, 3) = ({}, {}, {});
   // CHECK:STDERR: fail_type_mismatch.carbon:[[@LINE+4]]:12: error: cannot implicitly convert expression of type `array(D, 3)` to `array(C, 3)` [ConversionFailure]
-  // CHECK:STDERR: fail_type_mismatch.carbon:[[@LINE+3]]:12: note: type `array(D, 3)` does not implement interface `Core.ImplicitAs(array(C, 3))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_type_mismatch.carbon:[[@LINE+3]]:12: note: type `array(D, 3)` does not implement interface `Core.ImplicitAs(array(C, 3))` [MissingImplForType]
   // CHECK:STDERR: fail_type_mismatch.carbon:[[@LINE-7]]:33-46: note: initializing function parameter [InCallToFunctionParam]
   // CHECK:STDERR:
   return F(a);

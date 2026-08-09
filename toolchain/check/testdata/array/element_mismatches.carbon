@@ -17,7 +17,7 @@ library "[[@TEST_NAME]]";
 class C {}
 
 // CHECK:STDERR: fail_arg_wrong_type.carbon:[[@LINE+3]]:22-35: error: cannot implicitly convert expression of type `()` to `C` [ConversionFailure]
-// CHECK:STDERR: fail_arg_wrong_type.carbon:[[@LINE+2]]:22-35: note: type `()` does not implement interface `Core.ImplicitAs(C)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_arg_wrong_type.carbon:[[@LINE+2]]:22-35: note: type `()` does not implement interface `Core.ImplicitAs(C)` [MissingImplForType]
 // CHECK:STDERR:
 var a: array(C, 3) = ({}, (), true);
 
@@ -30,13 +30,13 @@ class D {}
 
 var a: (D, C, D);
 // CHECK:STDERR: fail_var_wrong_type.carbon:[[@LINE+3]]:22: error: cannot implicitly convert expression of type `D` to `C` [ConversionFailure]
-// CHECK:STDERR: fail_var_wrong_type.carbon:[[@LINE+2]]:22: note: type `D` does not implement interface `Core.ImplicitAs(C)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_var_wrong_type.carbon:[[@LINE+2]]:22: note: type `D` does not implement interface `Core.ImplicitAs(C)` [MissingImplForType]
 // CHECK:STDERR:
 var b: array(C, 3) = a;
 
 var c: (C, D, D);
 // CHECK:STDERR: fail_var_wrong_type.carbon:[[@LINE+3]]:22: error: cannot copy value of type `C` [CopyOfUncopyableType]
-// CHECK:STDERR: fail_var_wrong_type.carbon:[[@LINE+2]]:22: note: type `C` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_var_wrong_type.carbon:[[@LINE+2]]:22: note: type `C` does not implement interface `Core.Copy` [MissingImplForType]
 // CHECK:STDERR:
 var d: array(C, 3) = c;
 

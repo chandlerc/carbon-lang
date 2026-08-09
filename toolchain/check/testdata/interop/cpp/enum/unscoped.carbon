@@ -37,12 +37,12 @@ import Cpp library "enum.h";
 
 fn F() {
   // CHECK:STDERR: fail_wrong_enum.carbon:[[@LINE+3]]:29-38: error: cannot implicitly convert expression of type `Cpp.Enum` to `Cpp.Other` [ConversionFailure]
-  // CHECK:STDERR: fail_wrong_enum.carbon:[[@LINE+2]]:29-38: note: type `Cpp.Enum` does not implement interface `Core.ImplicitAs(Cpp.Other)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_wrong_enum.carbon:[[@LINE+2]]:29-38: note: type `Cpp.Enum` does not implement interface `Core.ImplicitAs(Cpp.Other)` [MissingImplForType]
   // CHECK:STDERR:
   let unused c: Cpp.Other = Cpp.Enum.c;
 
   // CHECK:STDERR: fail_wrong_enum.carbon:[[@LINE+3]]:30-34: error: cannot implicitly convert expression of type `Cpp.Enum` to `Cpp.Other` [ConversionFailure]
-  // CHECK:STDERR: fail_wrong_enum.carbon:[[@LINE+2]]:30-34: note: type `Cpp.Enum` does not implement interface `Core.ImplicitAs(Cpp.Other)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_wrong_enum.carbon:[[@LINE+2]]:30-34: note: type `Cpp.Enum` does not implement interface `Core.ImplicitAs(Cpp.Other)` [MissingImplForType]
   // CHECK:STDERR:
   let unused c2: Cpp.Other = Cpp.c;
 }

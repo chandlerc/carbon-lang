@@ -95,10 +95,14 @@ import Cpp library "postfix_inc_and_dec.h";
 
 fn F() {
   var postfix: Cpp.Postfix = Cpp.Postfix.Postfix();
-  // CHECK:STDERR: fail_postfix_calling_prefix.carbon:[[@LINE+2]]:3-11: error: cannot access member of interface `Core.Inc` in type `Cpp.Postfix` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_postfix_calling_prefix.carbon:[[@LINE+4]]:3-4: error: type `Cpp.Postfix` does not implement interface `Core.Inc` [MissingImplForType]
+  // CHECK:STDERR: fail_postfix_calling_prefix.carbon:[[@LINE+3]]:3-4: note: `++` requires an impl of `Core.Inc` [OperatorInterface]
+  // CHECK:STDERR: fail_postfix_calling_prefix.carbon:[[@LINE+2]]:5-11: note: operand has type `Cpp.Postfix` [UnaryOperatorOperandType]
   // CHECK:STDERR:
   ++postfix;
-  // CHECK:STDERR: fail_postfix_calling_prefix.carbon:[[@LINE+2]]:3-11: error: cannot access member of interface `Core.Dec` in type `Cpp.Postfix` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_postfix_calling_prefix.carbon:[[@LINE+4]]:3-4: error: type `Cpp.Postfix` does not implement interface `Core.Dec` [MissingImplForType]
+  // CHECK:STDERR: fail_postfix_calling_prefix.carbon:[[@LINE+3]]:3-4: note: `--` requires an impl of `Core.Dec` [OperatorInterface]
+  // CHECK:STDERR: fail_postfix_calling_prefix.carbon:[[@LINE+2]]:5-11: note: operand has type `Cpp.Postfix` [UnaryOperatorOperandType]
   // CHECK:STDERR:
   --postfix;
 }
@@ -214,7 +218,7 @@ fn F() {
 
   // Simple assignment.
   // CHECK:STDERR: fail_todo_import_assignment.carbon:[[@LINE+3]]:3-8: error: cannot implicitly convert expression of type `Core.IntLiteral` to `Cpp.BinaryC` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_import_assignment.carbon:[[@LINE+2]]:3-8: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(Cpp.BinaryC)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_import_assignment.carbon:[[@LINE+2]]:3-8: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(Cpp.BinaryC)` [MissingImplForType]
   // CHECK:STDERR:
   c = 42;
 }
@@ -244,10 +248,16 @@ import Cpp library "binary_operators.h";
 fn F() {
   let c1: Cpp.BinaryC = Cpp.BinaryC.BinaryC();
   // TODO: Include a list of non-viable candidate operators with this diagnostic.
-  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+2]]:32-37: error: cannot access member of interface `Core.AddWith(Core.IntLiteral)` in type `Cpp.BinaryC` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+5]]:35: error: type `Cpp.BinaryC` does not implement interface `Core.AddWith(Core.IntLiteral)` [MissingImplForType]
+  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+4]]:35: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+3]]:32-33: note: left operand has type `Cpp.BinaryC` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+2]]:37: note: right operand has type `Core.IntLiteral` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let unused c2: Cpp.BinaryC = c1 + 5;
-  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+2]]:32-37: error: cannot access member of interface `Core.AddWith(Cpp.BinaryC)` in type `Core.IntLiteral` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+5]]:34: error: type `Core.IntLiteral` does not implement interface `Core.AddWith(Cpp.BinaryC)` [MissingImplForType]
+  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+4]]:34: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+3]]:32: note: left operand has type `Core.IntLiteral` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_call_with_wrong_type.carbon:[[@LINE+2]]:36-37: note: right operand has type `Cpp.BinaryC` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let unused c3: Cpp.BinaryC = 6 + c1;
 }
@@ -450,7 +460,10 @@ import Cpp library "plus_with_string_view_conversion.h";
 fn F() {
   let s1: str = "hello";
   let s2: str = "world";
-  // CHECK:STDERR: fail_todo_import_plus_with_string_view_conversion.carbon:[[@LINE+2]]:46-52: error: cannot access member of interface `Core.AddWith(str)` in type `str` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_import_plus_with_string_view_conversion.carbon:[[@LINE+5]]:49: error: type `str` does not implement interface `Core.AddWith(str)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_import_plus_with_string_view_conversion.carbon:[[@LINE+4]]:49: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_import_plus_with_string_view_conversion.carbon:[[@LINE+3]]:46-47: note: left operand has type `str` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_import_plus_with_string_view_conversion.carbon:[[@LINE+2]]:51-52: note: right operand has type `str` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let unused c: Cpp.StringViewConvertibleC = s1 + s2;
 }
@@ -660,7 +673,10 @@ fn F() {
   //@dump-sem-ir-begin
   let c1: Cpp.GlobalOpN.C = Cpp.GlobalOpN.C.C();
   let c2: Cpp.GlobalOpN.C = Cpp.GlobalOpN.C.C();
-  // CHECK:STDERR: fail_todo_import_operands_in_namespace_operator_in_global.carbon:[[@LINE+2]]:36-42: error: cannot access member of interface `Core.AddWith(Cpp.GlobalOpN.C)` in type `Cpp.GlobalOpN.C` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_todo_import_operands_in_namespace_operator_in_global.carbon:[[@LINE+5]]:39: error: type `Cpp.GlobalOpN.C` does not implement interface `Core.AddWith(Cpp.GlobalOpN.C)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_import_operands_in_namespace_operator_in_global.carbon:[[@LINE+4]]:39: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_import_operands_in_namespace_operator_in_global.carbon:[[@LINE+3]]:36-37: note: left operand has type `Cpp.GlobalOpN.C` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_import_operands_in_namespace_operator_in_global.carbon:[[@LINE+2]]:41-42: note: right operand has type `Cpp.GlobalOpN.C` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let unused c3: Cpp.GlobalOpN.C = c1 + c2;
   //@dump-sem-ir-end
@@ -767,7 +783,10 @@ import Cpp library "not_found.h";
 fn F() {
   let c1: Cpp.NoOperators = Cpp.NoOperators.NoOperators();
   let c2: Cpp.NoOperators = Cpp.NoOperators.NoOperators();
-  // CHECK:STDERR: fail_import_not_found.carbon:[[@LINE+2]]:36-42: error: cannot access member of interface `Core.AddWith(Cpp.NoOperators)` in type `Cpp.NoOperators` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_import_not_found.carbon:[[@LINE+5]]:39: error: type `Cpp.NoOperators` does not implement interface `Core.AddWith(Cpp.NoOperators)` [MissingImplForType]
+  // CHECK:STDERR: fail_import_not_found.carbon:[[@LINE+4]]:39: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_import_not_found.carbon:[[@LINE+3]]:36-37: note: left operand has type `Cpp.NoOperators` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_import_not_found.carbon:[[@LINE+2]]:41-42: note: right operand has type `Cpp.NoOperators` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let unused c3: Cpp.NoOperators = c1 + c2;
 }
@@ -874,9 +893,12 @@ using FailTemplateX = FailTemplateB<FailTemplateA<int>>;
 ''';
 
 fn F(x: Cpp.FailTemplateX) -> i32 {
-  // CHECK:STDERR: fail_indirect_template_instantiation_error.carbon:[[@LINE+4]]:12: note: in instantiation of template class 'FailTemplateA<int>' requested here [CppInteropParseNote]
+  // CHECK:STDERR: fail_indirect_template_instantiation_error.carbon:[[@LINE+7]]:12: note: in instantiation of template class 'FailTemplateA<int>' requested here [CppInteropParseNote]
   // CHECK:STDERR:
-  // CHECK:STDERR: fail_indirect_template_instantiation_error.carbon:[[@LINE+2]]:10-14: error: cannot access member of interface `Core.AddWith(Cpp.FailTemplateB)` in type `Cpp.FailTemplateB` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_indirect_template_instantiation_error.carbon:[[@LINE+5]]:12: error: type `Cpp.FailTemplateB` does not implement interface `Core.AddWith(Cpp.FailTemplateB)` [MissingImplForType]
+  // CHECK:STDERR: fail_indirect_template_instantiation_error.carbon:[[@LINE+4]]:12: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_indirect_template_instantiation_error.carbon:[[@LINE+3]]:10: note: left operand has type `Cpp.FailTemplateB` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_indirect_template_instantiation_error.carbon:[[@LINE+2]]:14: note: right operand has type `Cpp.FailTemplateB` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   return x + x;
 }
@@ -2751,10 +2773,10 @@ fn F() {
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   %c1.ref: %C = name_ref c1, %c1
 // CHECK:STDOUT:   %c2.ref: %C = name_ref c2, %c2
-// CHECK:STDOUT:   %.loc12: type = splice_block %C.ref.loc12 [concrete = constants.%C] {
-// CHECK:STDOUT:     %Cpp.ref.loc12: <namespace> = name_ref Cpp, imports.%Cpp [concrete = imports.%Cpp]
-// CHECK:STDOUT:     %GlobalOpN.ref.loc12: <namespace> = name_ref GlobalOpN, imports.%GlobalOpN [concrete = imports.%GlobalOpN]
-// CHECK:STDOUT:     %C.ref.loc12: type = name_ref C, imports.%C.decl [concrete = constants.%C]
+// CHECK:STDOUT:   %.loc15: type = splice_block %C.ref.loc15 [concrete = constants.%C] {
+// CHECK:STDOUT:     %Cpp.ref.loc15: <namespace> = name_ref Cpp, imports.%Cpp [concrete = imports.%Cpp]
+// CHECK:STDOUT:     %GlobalOpN.ref.loc15: <namespace> = name_ref GlobalOpN, imports.%GlobalOpN [concrete = imports.%GlobalOpN]
+// CHECK:STDOUT:     %C.ref.loc15: type = name_ref C, imports.%C.decl [concrete = constants.%C]
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   %c3: %C = wrapper_binding c3, <error> [concrete = <error>]
 // CHECK:STDOUT:   name_binding_decl {

@@ -96,11 +96,11 @@ class FMissingImplicitParam {
 class FMissingReturnType {
   impl as J {
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+6]]:5-30: error: cannot implicitly convert expression of type `()` to `bool` [ConversionFailure]
-    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+5]]:5-30: note: type `()` does not implement interface `Core.ImplicitAs(bool)` [MissingImplInMemberAccessInContext]
+    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+5]]:5-30: note: type `()` does not implement interface `Core.ImplicitAs(bool)` [MissingImplForType]
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE-25]]:15-48: note: while building thunk to match the signature of this function [ThunkSignature]
     // CHECK:STDERR:
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: error: cannot implicitly convert expression of type `bool` to `FDifferentParamType` [ConversionFailure]
-    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: note: type `bool` does not implement interface `Core.ImplicitAs(FDifferentParamType)` [MissingImplInMemberAccessInContext]
+    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: note: type `bool` does not implement interface `Core.ImplicitAs(FDifferentParamType)` [MissingImplForType]
     fn F(self: bool, b: bool);
   }
 }
@@ -111,7 +111,7 @@ class FDifferentParamType {
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE-36]]:15-48: note: while building thunk to match the signature of this function [ThunkSignature]
     // CHECK:STDERR:
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: error: cannot implicitly convert expression of type `bool` to `FDifferentImplicitParamType` [ConversionFailure]
-    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: note: type `bool` does not implement interface `Core.ImplicitAs(FDifferentImplicitParamType)` [MissingImplInMemberAccessInContext]
+    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: note: type `bool` does not implement interface `Core.ImplicitAs(FDifferentImplicitParamType)` [MissingImplForType]
     fn F(self: bool, b: Self) -> bool;
   }
 }
@@ -128,11 +128,11 @@ class FDifferentImplicitParamType {
 class FDifferentReturnType {
   impl as J {
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+6]]:5-38: error: cannot implicitly convert expression of type `FDifferentReturnType` to `bool` [ConversionFailure]
-    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+5]]:5-38: note: type `FDifferentReturnType` does not implement interface `Core.ImplicitAs(bool)` [MissingImplInMemberAccessInContext]
+    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+5]]:5-38: note: type `FDifferentReturnType` does not implement interface `Core.ImplicitAs(bool)` [MissingImplForType]
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE-57]]:15-48: note: while building thunk to match the signature of this function [ThunkSignature]
     // CHECK:STDERR:
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: error: cannot implicitly convert expression of type `SelfNestedBadParam` to `i32` [ConversionFailure]
-    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: note: type `SelfNestedBadParam` does not implement interface `Core.ImplicitAs(i32)` [MissingImplInMemberAccessInContext]
+    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon: note: type `SelfNestedBadParam` does not implement interface `Core.ImplicitAs(i32)` [MissingImplForType]
     fn F(self: bool, b: bool) -> Self;
   }
 }
@@ -153,7 +153,7 @@ class SelfNestedBadParam {
 class SelfNestedBadReturnType {
   impl as SelfNested {
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+4]]:5-112: error: cannot implicitly convert expression of type `array(SelfNestedBadParam, 4)` to `array(SelfNestedBadReturnType, 4)` [ConversionFailure]
-    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+3]]:5-112: note: type `array(SelfNestedBadParam, 4)` does not implement interface `Core.ImplicitAs(array(SelfNestedBadReturnType, 4))` [MissingImplInMemberAccessInContext]
+    // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE+3]]:5-112: note: type `array(SelfNestedBadParam, 4)` does not implement interface `Core.ImplicitAs(array(SelfNestedBadReturnType, 4))` [MissingImplForType]
     // CHECK:STDERR: fail_impl_bad_assoc_fn.carbon:[[@LINE-16]]:3-58: note: while building thunk to match the signature of this function [ThunkSignature]
     // CHECK:STDERR:
     fn F(x: (SelfNestedBadReturnType*, {.x: SelfNestedBadReturnType, .y: i32})) -> array(SelfNestedBadParam, 4);

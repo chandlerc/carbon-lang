@@ -10,6 +10,7 @@
 #include "toolchain/check/context.h"
 #include "toolchain/check/cpp/call.h"
 #include "toolchain/check/cpp/operators.h"
+#include "toolchain/check/diagnostic_helpers.h"
 #include "toolchain/check/generic.h"
 #include "toolchain/check/member_access.h"
 #include "toolchain/check/name_lookup.h"
@@ -63,8 +64,8 @@ static auto HasCppClassType(Context& context, SemIR::InstId inst_id) -> bool {
 
 auto BuildUnaryOperator(Context& context, SemIR::LocId loc_id, Operator op,
                         SemIR::InstId operand_id, bool diagnose,
-                        DiagnosticContextFn missing_impl_diagnostic_context)
-    -> SemIR::InstId {
+                        DiagnosticContextFn missing_impl_diagnostic_context,
+                        MissingImplDiagnostic missing_impl) -> SemIR::InstId {
   if (operand_id == SemIR::ErrorInst::InstId) {
     // Exit early for errors, which prevent forming an `Op` function.
     return SemIR::ErrorInst::InstId;
@@ -90,9 +91,20 @@ auto BuildUnaryOperator(Context& context, SemIR::LocId loc_id, Operator op,
   auto op_fn_id = GetOperatorOpFunction(context, loc_id, op);
 
   // Form `operand.(Op)`.
-  auto bound_op_id =
-      PerformCompoundMemberAccess(context, loc_id, operand_id, op_fn_id,
-                                  diagnose, missing_impl_diagnostic_context);
+  //
+  // As with a binary operator, the caller marks the syntax and the operand,
+  // since the message names an interface the operand's type is missing while
+  // pointing at neither.
+  SemIR::InstId bound_op_id = SemIR::InstId::None;
+  {
+    std::optional<DiagnosticAnnotationScope> mark_operand;
+    if (missing_impl.annotate) {
+      mark_operand.emplace(&context.emitter(), missing_impl.annotate);
+    }
+    bound_op_id = PerformCompoundMemberAccess(
+        context, loc_id, operand_id, op_fn_id, diagnose,
+        missing_impl_diagnostic_context, missing_impl.loc_id);
+  }
   if (bound_op_id == SemIR::ErrorInst::InstId) {
     return SemIR::ErrorInst::InstId;
   }
@@ -105,8 +117,8 @@ auto BuildUnaryOperator(Context& context, SemIR::LocId loc_id, Operator op,
 auto BuildBinaryOperator(Context& context, SemIR::LocId loc_id, Operator op,
                          SemIR::InstId lhs_id, SemIR::InstId rhs_id,
                          bool diagnose,
-                         DiagnosticContextFn missing_impl_diagnostic_context)
-    -> SemIR::InstId {
+                         DiagnosticContextFn missing_impl_diagnostic_context,
+                         MissingImplDiagnostic missing_impl) -> SemIR::InstId {
   if (lhs_id == SemIR::ErrorInst::InstId) {
     // Exit early for errors, which prevent forming an `Op` function.
     return SemIR::ErrorInst::InstId;
@@ -136,9 +148,22 @@ auto BuildBinaryOperator(Context& context, SemIR::LocId loc_id, Operator op,
   auto op_fn_id = GetOperatorOpFunction(context, loc_id, op);
 
   // Form `lhs.(Op)`.
-  auto bound_op_id =
-      PerformCompoundMemberAccess(context, loc_id, lhs_id, op_fn_id, diagnose,
-                                  missing_impl_diagnostic_context);
+  //
+  // A mismatch between the operands surfaces as the interface this looks up not
+  // being implemented, and that message names both types while pointing at
+  // neither. What each operand contributed is the whole of what the reader is
+  // missing, so the caller marks them here, where both are still in hand and
+  // where the syntax they were written in is known.
+  SemIR::InstId bound_op_id = SemIR::InstId::None;
+  {
+    std::optional<DiagnosticAnnotationScope> mark_operands;
+    if (missing_impl.annotate) {
+      mark_operands.emplace(&context.emitter(), missing_impl.annotate);
+    }
+    bound_op_id = PerformCompoundMemberAccess(
+        context, loc_id, lhs_id, op_fn_id, diagnose,
+        missing_impl_diagnostic_context, missing_impl.loc_id);
+  }
   if (bound_op_id == SemIR::ErrorInst::InstId) {
     return SemIR::ErrorInst::InstId;
   }

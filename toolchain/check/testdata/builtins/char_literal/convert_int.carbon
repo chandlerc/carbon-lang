@@ -48,7 +48,7 @@ fn ConvertToU8(c: CharLiteral) -> UInt(8) = "char_literal.convert_int";
 // CHECK:STDERR: fail_overflow.carbon:[[@LINE+5]]:13-34: error: character value U+0100 too large for type `<builtin u8>` [CharTooLargeForType]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_overflow.carbon:[[@LINE+3]]:13-34: error: cannot implicitly convert expression of type `<builtin u8>` to `u8` [ConversionFailure]
-// CHECK:STDERR: fail_overflow.carbon:[[@LINE+2]]:13-34: note: type `<builtin u8>` does not implement interface `Core.ImplicitAs(u8)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_overflow.carbon:[[@LINE+2]]:13-34: note: type `<builtin u8>` does not implement interface `Core.ImplicitAs(u8)` [MissingImplForType]
 // CHECK:STDERR:
 let g: u8 = ConvertToU8('\u{100}');
 

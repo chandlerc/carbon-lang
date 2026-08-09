@@ -94,7 +94,7 @@ import Cpp inline '''c++
 struct NeqBoolish {
   auto operator==(NeqBoolish) const -> bool;
   // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE+3]]:8: error: cannot implicitly convert expression of type `i32` to `bool` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE+2]]:8: note: type `i32` does not implement interface `Core.ImplicitAs(bool)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE+2]]:8: note: type `i32` does not implement interface `Core.ImplicitAs(bool)` [MissingImplForType]
   // CHECK:STDERR: {{.*}}/prelude/operators/comparison.carbon:20:3-42: note: while building thunk to match the signature of this function [ThunkSignature]
   auto operator!=(NeqBoolish) const -> int;
 };
@@ -117,17 +117,17 @@ struct BothBoolish {
 // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE+17]]:1-51: note: while deducing parameters of generic declared here [DeductionGenericHere]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-16]]:8: error: cannot implicitly convert expression of type `Core.Optional(i32* as Core.OptionalStorage)` to `bool` [ConversionFailure]
-// CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-17]]:8: note: type `Core.Optional(i32* as Core.OptionalStorage)` does not implement interface `Core.ImplicitAs(bool)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-17]]:8: note: type `Core.Optional(i32* as Core.OptionalStorage)` does not implement interface `Core.ImplicitAs(bool)` [MissingImplForType]
 // CHECK:STDERR: {{.*}}/prelude/operators/comparison.carbon:19:3-39: note: while building thunk to match the signature of this function [ThunkSignature]
 // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE+12]]:1-51: note: while deducing parameters of generic declared here [DeductionGenericHere]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-12]]:8: error: cannot implicitly convert expression of type `Cpp.Result` to `bool` [ConversionFailure]
-// CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-13]]:8: note: type `Cpp.Result` does not implement interface `Core.ImplicitAs(bool)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-13]]:8: note: type `Cpp.Result` does not implement interface `Core.ImplicitAs(bool)` [MissingImplForType]
 // CHECK:STDERR: {{.*}}/prelude/operators/comparison.carbon:19:3-39: note: while building thunk to match the signature of this function [ThunkSignature]
 // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE+7]]:1-51: note: while deducing parameters of generic declared here [DeductionGenericHere]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-16]]:8: error: cannot implicitly convert expression of type `Cpp.Result` to `bool` [ConversionFailure]
-// CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-17]]:8: note: type `Cpp.Result` does not implement interface `Core.ImplicitAs(bool)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE-17]]:8: note: type `Cpp.Result` does not implement interface `Core.ImplicitAs(bool)` [MissingImplForType]
 // CHECK:STDERR: {{.*}}/prelude/operators/comparison.carbon:20:3-42: note: while building thunk to match the signature of this function [ThunkSignature]
 // CHECK:STDERR: fail_todo_returns_boolish.carbon:[[@LINE+2]]:1-51: note: while deducing parameters of generic declared here [DeductionGenericHere]
 // CHECK:STDERR:

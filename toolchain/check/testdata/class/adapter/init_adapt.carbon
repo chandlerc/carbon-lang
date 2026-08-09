@@ -57,12 +57,12 @@ let a: C = {.a = 1, .b = 2};
 // Cannot implicitly convert between a type and an adapter for the type.
 
 // CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+3]]:17: error: cannot implicitly convert expression of type `C` to `AdaptC` [ConversionFailure]
-// CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+2]]:17: note: type `C` does not implement interface `Core.ImplicitAs(AdaptC)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+2]]:17: note: type `C` does not implement interface `Core.ImplicitAs(AdaptC)` [MissingImplForType]
 // CHECK:STDERR:
 let b: AdaptC = a;
 
 // CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+3]]:12: error: cannot implicitly convert expression of type `AdaptC` to `C` [ConversionFailure]
-// CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+2]]:12: note: type `AdaptC` does not implement interface `Core.ImplicitAs(C)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+2]]:12: note: type `AdaptC` does not implement interface `Core.ImplicitAs(C)` [MissingImplForType]
 // CHECK:STDERR:
 let c: C = b;
 
@@ -71,12 +71,12 @@ fn MakeC() -> C;
 fn MakeAdaptC() -> AdaptC;
 
 // CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+3]]:1-13: error: cannot implicitly convert expression of type `C` to `AdaptC` [ConversionFailure]
-// CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+2]]:1-13: note: type `C` does not implement interface `Core.ImplicitAs(AdaptC)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+2]]:1-13: note: type `C` does not implement interface `Core.ImplicitAs(AdaptC)` [MissingImplForType]
 // CHECK:STDERR:
 var d: AdaptC = MakeC();
 
 // CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+3]]:1-8: error: cannot implicitly convert expression of type `AdaptC` to `C` [ConversionFailure]
-// CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+2]]:1-8: note: type `AdaptC` does not implement interface `Core.ImplicitAs(C)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_not_implicit.carbon:[[@LINE+2]]:1-8: note: type `AdaptC` does not implement interface `Core.ImplicitAs(C)` [MissingImplForType]
 // CHECK:STDERR:
 var e: C = MakeAdaptC();
 

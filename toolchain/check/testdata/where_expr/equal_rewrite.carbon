@@ -138,7 +138,7 @@ interface I {
 
 // `2` can't be converted to the type of `I.Member`
 // CHECK:STDERR: fail_check_rewrite_constraints.carbon:[[@LINE+3]]:53: error: cannot implicitly convert non-type value of type `Core.IntLiteral` to `type` [ConversionFailureNonTypeToFacet]
-// CHECK:STDERR: fail_check_rewrite_constraints.carbon:[[@LINE+2]]:53: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(type)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_check_rewrite_constraints.carbon:[[@LINE+2]]:53: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(type)` [MissingImplForType]
 // CHECK:STDERR:
 fn RewriteTypeMismatch(generic X: I where .Member = 2);
 

@@ -34,7 +34,10 @@ library "[[@TEST_NAME]]";
 fn TestWrongType() {
   class C{}
   //@dump-sem-ir-begin
-  // CHECK:STDERR: fail_wrong_type.carbon:[[@LINE+2]]:3-11: error: cannot access member of interface `Core.IndexWith(type)` in type `str` that does not implement that interface [MissingImplInMemberAccess]
+  // CHECK:STDERR: fail_wrong_type.carbon:[[@LINE+5]]:10: error: type `str` does not implement interface `Core.IndexWith(type)` [MissingImplForType]
+  // CHECK:STDERR: fail_wrong_type.carbon:[[@LINE+4]]:11: note: `[]` requires an impl of `Core.IndexWith` [OperatorInterface]
+  // CHECK:STDERR: fail_wrong_type.carbon:[[@LINE+3]]:3-8: note: indexing an object with type `str` [IndexedObjectType]
+  // CHECK:STDERR: fail_wrong_type.carbon:[[@LINE+2]]:10: note: indexing with type `type` [IndexWithType]
   // CHECK:STDERR:
   "Test"[C];
   //@dump-sem-ir-end

@@ -46,17 +46,26 @@ auto HandleParseNode(Context& context, Parse::MemberAccessExprId node_id)
 
 auto HandleParseNode(Context& context, Parse::PointerMemberAccessExprId node_id)
     -> bool {
-  auto diagnose_not_pointer = [&context,
-                               &node_id](SemIR::TypeId not_pointer_type_id) {
-    // TODO: Pass in the expression we're trying to dereference to produce a
-    // better diagnostic.
+  // The message names the type the operand turned out to have while pointing at
+  // the `->`, so the operand is marked with the type it contributed. Each arm
+  // below binds `operand_id` before dereferencing, and the lambda reads it
+  // then.
+  SemIR::InstId operand_id = SemIR::InstId::None;
+  auto diagnose_not_pointer = [&context, &node_id,
+                               &operand_id](SemIR::TypeId not_pointer_type_id) {
     CARBON_DIAGNOSTIC(ArrowOperatorOfNonPointer, Error,
                       "cannot apply `->` operator to non-pointer type {0}",
                       SemIR::TypeId);
+    CARBON_DIAGNOSTIC_LABEL(ArrowOperandHere, Primary,
+                            "operand has non-pointer type {0}", TypeOfInstId);
 
     auto builder =
         context.emitter().Build(LocIdForDiagnostics::TokenOnly(node_id),
                                 ArrowOperatorOfNonPointer, not_pointer_type_id);
+    builder.Attach(LocIdForDiagnostics::TokenOnly(node_id));
+    if (operand_id.has_value()) {
+      builder.Attach(operand_id, ArrowOperandHere, operand_id);
+    }
     builder.Emit();
   };
 
@@ -65,6 +74,7 @@ auto HandleParseNode(Context& context, Parse::PointerMemberAccessExprId node_id)
   if (node_kind == Parse::NodeKind::ParenExpr) {
     auto member_expr_id = context.node_stack().PopExpr();
     auto base_id = context.node_stack().PopExpr();
+    operand_id = base_id;
     auto deref_base_id = PerformPointerDereference(context, node_id, base_id,
                                                    diagnose_not_pointer);
     auto member_id = PerformCompoundMemberAccess(context, node_id,
@@ -73,6 +83,7 @@ auto HandleParseNode(Context& context, Parse::PointerMemberAccessExprId node_id)
   } else if (node_kind == Parse::NodeKind::IntLiteral) {
     auto index_inst_id = context.node_stack().PopExpr();
     auto tuple_pointer_inst_id = context.node_stack().PopExpr();
+    operand_id = tuple_pointer_inst_id;
     auto tuple_inst_id = PerformPointerDereference(
         context, node_id, tuple_pointer_inst_id, diagnose_not_pointer);
     auto tuple_value_inst_id =
@@ -82,6 +93,7 @@ auto HandleParseNode(Context& context, Parse::PointerMemberAccessExprId node_id)
   } else {
     SemIR::NameId name_id = context.node_stack().PopName();
     auto base_id = context.node_stack().PopExpr();
+    operand_id = base_id;
     auto deref_base_id = PerformPointerDereference(context, node_id, base_id,
                                                    diagnose_not_pointer);
     auto member_id =
@@ -212,7 +224,7 @@ auto HandleParseNode(Context& context, Parse::DesignatorExprId node_id)
             CARBON_DIAGNOSTIC_LABEL(
                 NoPeriodSelfForDesignator, Info,
                 "designator may only be used when `.Self` is in scope");
-            builder.Attach(SemIR::LocId::None, NoPeriodSelfForDesignator);
+            builder.Attach(node_id, NoPeriodSelfForDesignator);
           });
       period_self_id =
           HandleNameAsExpr(context, node_id, SemIR::NameId::PeriodSelf);

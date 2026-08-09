@@ -149,7 +149,7 @@ fn F(generic U: Core.Destroy & I where .X = .Self) {
   // `compound_access_through_call_with_self_param.carbon` test for the former.
   //
   // CHECK:STDERR: fail_compound_access_through_call.carbon:[[@LINE+3]]:3-9: error: cannot implicitly convert non-type value of type `U` into type implementing `I` [ConversionFailureNonTypeToFacet]
-  // CHECK:STDERR: fail_compound_access_through_call.carbon:[[@LINE+2]]:3-9: note: type `U` does not implement interface `Core.ImplicitAs(I)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_compound_access_through_call.carbon:[[@LINE+2]]:3-9: note: type `U` does not implement interface `Core.ImplicitAs(I)` [MissingImplForType]
   // CHECK:STDERR:
   u.(I.G)();
 
@@ -157,7 +157,7 @@ fn F(generic U: Core.Destroy & I where .X = .Self) {
   // `U`.
   //
   // CHECK:STDERR: fail_compound_access_through_call.carbon:[[@LINE+3]]:3-17: error: cannot implicitly convert non-type value of type `U` into type implementing `I` [ConversionFailureNonTypeToFacet]
-  // CHECK:STDERR: fail_compound_access_through_call.carbon:[[@LINE+2]]:3-17: note: type `U` does not implement interface `Core.ImplicitAs(I)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_compound_access_through_call.carbon:[[@LINE+2]]:3-17: note: type `U` does not implement interface `Core.ImplicitAs(I)` [MissingImplForType]
   // CHECK:STDERR:
   U.(I.G)().(I.G)();
 }
@@ -292,7 +292,7 @@ fn F(generic AA: N) {
   // TODO: The identified facet type `N` includes `A` and should provide a
   // same-type constraint `A.X == ()` which would allow this conversion.
   // CHECK:STDERR: fail_todo_access_constant_through_named_constraint.carbon:[[@LINE+3]]:3-12: error: cannot convert expression of type `()` to `AA.(A.X)` with `as` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_access_constant_through_named_constraint.carbon:[[@LINE+2]]:3-12: note: type `()` does not implement interface `Core.As(AA.(A.X))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_access_constant_through_named_constraint.carbon:[[@LINE+2]]:3-12: note: type `()` does not implement interface `Core.As(AA.(A.X))` [MissingImplForType]
   // CHECK:STDERR:
   () as AA.X;
 }
@@ -378,7 +378,7 @@ fn F(generic V: Z(.Self)) {
   // TODO: The identified facet type `NX` includes `X` and should provide a
   // same-type constraint `X.X1 == {}` which would allow this conversion.
   // CHECK:STDERR: fail_todo_find_access_value_in_second_nested_access.carbon:[[@LINE+3]]:3-36: error: cannot convert expression of type `{}` to `V.(Z(V).Z1).(Y(V).Y1).(X.X1)` with `as` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_find_access_value_in_second_nested_access.carbon:[[@LINE+2]]:3-36: note: type `{}` does not implement interface `Core.As(V.(Z(V).Z1).(Y(V).Y1).(X.X1))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_find_access_value_in_second_nested_access.carbon:[[@LINE+2]]:3-36: note: type `{}` does not implement interface `Core.As(V.(Z(V).Z1).(Y(V).Y1).(X.X1))` [MissingImplForType]
   // CHECK:STDERR:
   {} as V.(Z(V).Z1).(Y(V).Y1).(X.X1);
 }
@@ -439,7 +439,7 @@ constraint NY(PeriodSelf: type) {
 // `TryFindValueInRewriteConstraints()`.
 fn F(generic T: Z where C impls NY(.Self)) -> C.(Y(T).Y1) {
   // CHECK:STDERR: fail_todo_find_access_value_in_facet_from_specific_interface.carbon:[[@LINE+3]]:3-12: error: cannot implicitly convert expression of type `{}` to `C.(Y(T).Y1)` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_find_access_value_in_facet_from_specific_interface.carbon:[[@LINE+2]]:3-12: note: type `{}` does not implement interface `Core.ImplicitAs(C.(Y(T).Y1))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_find_access_value_in_facet_from_specific_interface.carbon:[[@LINE+2]]:3-12: note: type `{}` does not implement interface `Core.ImplicitAs(C.(Y(T).Y1))` [MissingImplForType]
   // CHECK:STDERR:
   return {};
 }

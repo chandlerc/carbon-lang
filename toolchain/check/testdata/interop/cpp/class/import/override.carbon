@@ -64,7 +64,7 @@ class Overload3Params {
 
 // --- fail_overload_type.carbon
 // CHECK:STDERR: fail_overload_type.carbon: error: cannot implicitly convert expression of type `Cpp.Y` to `Cpp.X` [ConversionFailure]
-// CHECK:STDERR: fail_overload_type.carbon: note: type `Cpp.Y` does not implement interface `Core.ImplicitAs(Cpp.X)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_overload_type.carbon: note: type `Cpp.Y` does not implement interface `Core.ImplicitAs(Cpp.X)` [MissingImplForType]
 // TODO: The conversion diagnostics here should have a location.
 
 library "[[@TEST_NAME]]";
@@ -79,7 +79,7 @@ class OverloadX {
   // CHECK:STDERR: ./overload.h:7:16: note: while building thunk to match the signature of this function [ThunkSignature]
   // CHECK:STDERR:
   // CHECK:STDERR: fail_overload_type.carbon: error: cannot implicitly convert expression of type `Cpp.X` to `Cpp.Y` [ConversionFailure]
-  // CHECK:STDERR: fail_overload_type.carbon: note: type `Cpp.X` does not implement interface `Core.ImplicitAs(Cpp.Y)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_overload_type.carbon: note: type `Cpp.X` does not implement interface `Core.ImplicitAs(Cpp.Y)` [MissingImplForType]
   override fn f(self, x: Cpp.X);
 }
 

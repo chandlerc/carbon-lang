@@ -39,7 +39,7 @@ fn F[T: Transitive](t: T) {
   var a: T.A = t.GetA();
 
   // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+3]]:3-12: error: cannot implicitly convert expression of type `T.(Transitive.A)` to `T.(Transitive.B)` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+2]]:3-12: note: type `T.(Transitive.A)` does not implement interface `Core.ImplicitAs(T.(Transitive.B))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+2]]:3-12: note: type `T.(Transitive.A)` does not implement interface `Core.ImplicitAs(T.(Transitive.B))` [MissingImplForType]
   // CHECK:STDERR:
   var b: T.B = a;
   b.InQ();
@@ -50,7 +50,7 @@ fn F[T: Transitive](t: T) {
   // CHECK:STDERR:
   a.(T.C.InR)();
   // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+3]]:4-11: error: cannot convert expression of type `T.(Transitive.A)` to `T.(Transitive.C)` with `as` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+2]]:4-11: note: type `T.(Transitive.A)` does not implement interface `Core.As(T.(Transitive.C))` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+2]]:4-11: note: type `T.(Transitive.A)` does not implement interface `Core.As(T.(Transitive.C))` [MissingImplForType]
   // CHECK:STDERR:
   (a as T.C).InR();
 }

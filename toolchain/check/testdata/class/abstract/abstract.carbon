@@ -198,7 +198,7 @@ abstract class Abstract {
 
 fn Assign(ref a: Abstract) {
   // CHECK:STDERR: fail_assign_to_abstract_ref.carbon:[[@LINE+3]]:7: error: cannot copy value of type `Abstract` [CopyOfUncopyableType]
-  // CHECK:STDERR: fail_assign_to_abstract_ref.carbon:[[@LINE+2]]:7: note: type `Abstract` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_assign_to_abstract_ref.carbon:[[@LINE+2]]:7: note: type `Abstract` does not implement interface `Core.Copy` [MissingImplForType]
   // CHECK:STDERR:
   a = a;
 }

@@ -287,7 +287,7 @@ interface Y {}
 
 interface Z(T: type) {
   // CHECK:STDERR: fail_non_type_impls.carbon:[[@LINE+3]]:11: error: cannot implicitly convert non-type value of type `Core.IntLiteral` to `type` [ConversionFailureNonTypeToFacet]
-  // CHECK:STDERR: fail_non_type_impls.carbon:[[@LINE+2]]:11: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(type)` [MissingImplInMemberAccessInContext]
+  // CHECK:STDERR: fail_non_type_impls.carbon:[[@LINE+2]]:11: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(type)` [MissingImplForType]
   // CHECK:STDERR:
   require 1 impls Y;
 }

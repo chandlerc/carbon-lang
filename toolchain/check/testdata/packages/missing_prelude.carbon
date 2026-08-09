@@ -54,10 +54,10 @@ import Core library "prelude_fake_int";
 
 // We don't really care whether this works, but it shouldn't crash or otherwise misbehave.
 // CHECK:STDERR: fail_use_fake_int.carbon:[[@LINE+6]]:17-19: error: cannot implicitly convert non-type value of type `Core.X` to `type` [ConversionFailureNonTypeToFacet]
-// CHECK:STDERR: fail_use_fake_int.carbon:[[@LINE+5]]:17-19: note: type `Core.X` does not implement interface `Core.ImplicitAs(type)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_use_fake_int.carbon:[[@LINE+5]]:17-19: note: type `Core.X` does not implement interface `Core.ImplicitAs(type)` [MissingImplForType]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_use_fake_int.carbon:[[@LINE+3]]:17-19: error: cannot implicitly convert expression of type `type` to `Core.X` [ConversionFailure]
-// CHECK:STDERR: fail_use_fake_int.carbon:[[@LINE+2]]:17-19: note: type `type` does not implement interface `Core.ImplicitAs(Core.X)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_use_fake_int.carbon:[[@LINE+2]]:17-19: note: type `type` does not implement interface `Core.ImplicitAs(Core.X)` [MissingImplForType]
 // CHECK:STDERR:
 let n: Core.X = i32;
 

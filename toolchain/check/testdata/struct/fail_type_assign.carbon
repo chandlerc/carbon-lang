@@ -13,7 +13,7 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/check/testdata/struct/fail_type_assign.carbon
 
 // CHECK:STDERR: fail_type_assign.carbon:[[@LINE+3]]:1-16: error: cannot implicitly convert expression of type `type` to `{.a: i32}` [ConversionFailure]
-// CHECK:STDERR: fail_type_assign.carbon:[[@LINE+2]]:1-16: note: type `type` does not implement interface `Core.ImplicitAs({.a: i32})` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_type_assign.carbon:[[@LINE+2]]:1-16: note: type `type` does not implement interface `Core.ImplicitAs({.a: i32})` [MissingImplForType]
 // CHECK:STDERR:
 var x: {.a: i32} = {.a: i32};
 
