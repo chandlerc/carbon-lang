@@ -58,10 +58,10 @@ library "[[@TEST_NAME]]";
 
 class FailIncomplete;
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+5]]:17-33: error: function returns incomplete type `FailIncomplete` [IncompleteTypeInFunctionReturnType]
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE-3]]:1-21: note: class was forward declared here [ClassForwardDeclaredHere]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+5]]:1-35: error: invalid signature for builtin function "cpp.std.initializer_list.make" [InvalidBuiltinSignature]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-35: error: invalid signature for builtin function "cpp.std.initializer_list.make" [InvalidBuiltinSignature]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:17-33: error: function returns incomplete type `FailIncomplete` [IncompleteTypeInFunctionReturnType]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE-5]]:1-21: note: class was forward declared here [ClassForwardDeclaredHere]
 // CHECK:STDERR:
 fn Make(n: i32) -> FailIncomplete = "cpp.std.initializer_list.make";
 

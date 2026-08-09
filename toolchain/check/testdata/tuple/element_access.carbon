@@ -133,10 +133,10 @@ library "[[@TEST_NAME]]";
 
 var a: (i32, i32) = (2, 3);
 var b: i32 = 0;
-// CHECK:STDERR: fail_non_deterministic_type.carbon:[[@LINE+5]]:17: error: non-constant call to compile-time-only function [NonConstantCallToCompTimeOnlyFunction]
-// CHECK:STDERR: min_prelude/parts/int.carbon:27:3-34: note: compile-time-only function declared here [CompTimeOnlyFunctionHere]
+// CHECK:STDERR: fail_non_deterministic_type.carbon:[[@LINE+5]]:14-18: error: tuple index must be a constant [TupleIndexNotConstant]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_non_deterministic_type.carbon:[[@LINE+2]]:14-18: error: tuple index must be a constant [TupleIndexNotConstant]
+// CHECK:STDERR: fail_non_deterministic_type.carbon:[[@LINE+3]]:17: error: non-constant call to compile-time-only function [NonConstantCallToCompTimeOnlyFunction]
+// CHECK:STDERR: min_prelude/parts/int.carbon:27:3-34: note: compile-time-only function declared here [CompTimeOnlyFunctionHere]
 // CHECK:STDERR:
 var c: i32 = a.(b);
 

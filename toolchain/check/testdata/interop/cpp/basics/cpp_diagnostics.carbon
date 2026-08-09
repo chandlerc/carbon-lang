@@ -204,15 +204,15 @@ import Cpp library "multi_multiple_warnings.h";
 
 library "[[@TEST_NAME]]";
 
-// CHECK:STDERR: included from: fail_import_multiple_cpp_files_with_errors_and_warnings.carbon:[[@LINE+6]]:10 [InCppInclude]
+// CHECK:STDERR: included from: fail_import_multiple_cpp_files_with_errors_and_warnings.carbon:[[@LINE+3]]:10 [InCppInclude]
 // CHECK:STDERR: ./multi_one_error_and_one_warning.h:2:2-6: error: "error1" [CppInteropParseError]
 // CHECK:STDERR:
-// CHECK:STDERR: included from: fail_import_multiple_cpp_files_with_errors_and_warnings.carbon:[[@LINE+3]]:10 [InCppInclude]
-// CHECK:STDERR: ./multi_one_error_and_one_warning.h:3:2-8: warning: "warning1" [CppInteropParseWarning]
-// CHECK:STDERR:
 import Cpp library "multi_one_error_and_one_warning.h";
-// CHECK:STDERR: included from: fail_import_multiple_cpp_files_with_errors_and_warnings.carbon:[[@LINE+15]]:10 [InCppInclude]
+// CHECK:STDERR: included from: fail_import_multiple_cpp_files_with_errors_and_warnings.carbon:[[@LINE+18]]:10 [InCppInclude]
 // CHECK:STDERR: ./multi_multiple_errors_and_multiple_warnings.h:2:2-6: error: "error1" [CppInteropParseError]
+// CHECK:STDERR:
+// CHECK:STDERR: included from: fail_import_multiple_cpp_files_with_errors_and_warnings.carbon:[[@LINE-4]]:10 [InCppInclude]
+// CHECK:STDERR: ./multi_one_error_and_one_warning.h:3:2-8: warning: "warning1" [CppInteropParseWarning]
 // CHECK:STDERR:
 // CHECK:STDERR: included from: fail_import_multiple_cpp_files_with_errors_and_warnings.carbon:[[@LINE+12]]:10 [InCppInclude]
 // CHECK:STDERR: ./multi_multiple_errors_and_multiple_warnings.h:3:2-6: error: "error2" [CppInteropParseError]

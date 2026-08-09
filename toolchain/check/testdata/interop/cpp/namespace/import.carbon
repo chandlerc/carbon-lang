@@ -242,10 +242,10 @@ fn CallFoo() {
 library "[[@TEST_NAME]]";
 
 // CHECK:STDERR: imported from: fail_indirect_namespace_no_import.carbon:[[@LINE+6]]:1 [InImport]
-// CHECK:STDERR: namespace_alias.carbon:4:1-30: error: semantics TODO: `indirect import of C++ declaration with no direct Cpp import` [SemanticsTodo]
+// CHECK:STDERR: namespace_alias.carbon: error: semantics TODO: `indirect import of C++ declaration with no direct Cpp import` [SemanticsTodo]
 // CHECK:STDERR:
 // CHECK:STDERR: imported from: fail_indirect_namespace_no_import.carbon:[[@LINE+3]]:1 [InImport]
-// CHECK:STDERR: namespace_alias.carbon: error: semantics TODO: `indirect import of C++ declaration with no direct Cpp import` [SemanticsTodo]
+// CHECK:STDERR: namespace_alias.carbon:4:1-30: error: semantics TODO: `indirect import of C++ declaration with no direct Cpp import` [SemanticsTodo]
 // CHECK:STDERR:
 import library "namespace_alias";
 
