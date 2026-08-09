@@ -280,6 +280,11 @@ it marks the right thing:
     way is worth it, because the reader is being shown where each half of the
     sentence came from.
 
+-   In the lexer, a location is a `Lex::SourceLoc`: a position converts
+    implicitly, and a range is spelled out. That way round is deliberate --
+    `llvm::StringRef` would build itself from a bare `const char*` by scanning
+    to the next null, which in a source buffer is the end of the file.
+
 -   Where the right range isn't reachable, attach the closest one that is and
     leave a TODO saying which range it should be and what would make it
     available. A diagnostic marking its whole call because nothing names its
