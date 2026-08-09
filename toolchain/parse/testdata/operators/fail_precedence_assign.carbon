@@ -12,12 +12,16 @@ fn F() {
   var a: i32;
   // Assignment can only appear as an expression statement, not as a subexpression.
   // TODO: Produce the "can only be used as a complete statement" diagnostic in each of these cases.
-  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+2]]:10: error: expected `,` or `)` [UnexpectedTokenAfterListElement]
+  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+3]]:8: error: expected `,` or `)` [UnexpectedTokenAfterListElement]
+  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+2]]:8: note: expected `,` or `)` after this token [ListSeparatorGoesAfter]
   // CHECK:STDERR:
   1 + (a = 1);
-  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+4]]:19-20: error: expected `else` after `if ... then ...` [ExpectedElseAfterIf]
+  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+7]]:17: error: expected `else` after `if ... then ...` [ExpectedElseAfterIf]
+  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+6]]:17: note: expected `else` after this token [ElseGoesAfter]
+  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+5]]:12-15: note: this `then` needs an `else` [ThenNeedsElse]
   // CHECK:STDERR:
-  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+2]]:19-20: error: expected `,` or `)` [UnexpectedTokenAfterListElement]
+  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+3]]:17: error: expected `,` or `)` [UnexpectedTokenAfterListElement]
+  // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+2]]:17: note: expected `,` or `)` after this token [ListSeparatorGoesAfter]
   // CHECK:STDERR:
   (if true then a += 1 else a /= 2);
   // CHECK:STDERR: fail_precedence_assign.carbon:[[@LINE+2]]:7-8: error: operator `++` can only be used as a complete statement [StatementOperatorAsSubExpr]

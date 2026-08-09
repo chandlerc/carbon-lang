@@ -29,7 +29,10 @@ static auto HandleUnrecognizedDecl(Context& context, int32_t subtree_start)
     -> void {
   CARBON_DIAGNOSTIC(UnrecognizedDecl, Error,
                     "unrecognized declaration introducer");
-  context.emitter().Emit(*context.position(), UnrecognizedDecl);
+  context.emitter()
+      .Build(*context.position(), UnrecognizedDecl)
+      .Attach(*context.position())
+      .Emit();
   FinishAndSkipInvalidDecl(context, subtree_start);
 }
 

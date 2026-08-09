@@ -9,7 +9,9 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/if_expr/fail_else_missing.carbon
 
 fn F() {
-  // CHECK:STDERR: fail_else_missing.carbon:[[@LINE+2]]:30: error: expected `else` after `if ... then ...` [ExpectedElseAfterIf]
+  // CHECK:STDERR: fail_else_missing.carbon:[[@LINE+4]]:29: error: expected `else` after `if ... then ...` [ExpectedElseAfterIf]
+  // CHECK:STDERR: fail_else_missing.carbon:[[@LINE+3]]:29: note: expected `else` after this token [ElseGoesAfter]
+  // CHECK:STDERR: fail_else_missing.carbon:[[@LINE+2]]:24-27: note: this `then` needs an `else` [ThenNeedsElse]
   // CHECK:STDERR:
   var n: i32 = if true then 1;
 }

@@ -22,7 +22,8 @@ observe T impls ;
 
 // --- fail_missing_impls.carbon
 
-// CHECK:STDERR: fail_missing_impls.carbon:[[@LINE+2]]:11: error: observe should use `==` or `impls` operator [ExpectedObserveOperator]
+// CHECK:STDERR: fail_missing_impls.carbon:[[@LINE+3]]:9: error: observe should use `==` or `impls` operator [ExpectedObserveOperator]
+// CHECK:STDERR: fail_missing_impls.carbon:[[@LINE+2]]:9: note: expected `==` or `impls` after this token [ObserveOperatorGoesAfter]
 // CHECK:STDERR:
 observe T ;
 

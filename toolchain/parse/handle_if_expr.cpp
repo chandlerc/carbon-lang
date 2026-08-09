@@ -18,11 +18,17 @@ auto HandleIfExprFinishCondition(Context& context) -> void {
     context.ConsumeChecked(Lex::TokenKind::Then);
     context.PushStateForExpr(*PrecedenceGroup::ForLeading(Lex::TokenKind::If));
   } else {
-    // TODO: Include the location of the `if` token.
     CARBON_DIAGNOSTIC(ExpectedThenAfterIf, Error,
                       "expected `then` after `if` condition");
+    CARBON_DIAGNOSTIC_LABEL(ThenGoesAfter, Primary,
+                            "expected `then` after this token");
+    CARBON_DIAGNOSTIC_LABEL(InIfExpr, Info, "in this `if` expression");
     if (!state.has_error) {
-      context.emitter().Emit(*context.position(), ExpectedThenAfterIf);
+      context.emitter()
+          .Build(*(context.position() - 1), ExpectedThenAfterIf)
+          .Attach(*(context.position() - 1), ThenGoesAfter)
+          .Attach(state.token, InIfExpr)
+          .Emit();
     }
     // Add invalid nodes to substitute for `IfExprThen` and the final `Expr`.
     context.AddInvalidParse(*context.position());
@@ -41,11 +47,17 @@ auto HandleIfExprFinishThen(Context& context) -> void {
     context.ConsumeChecked(Lex::TokenKind::Else);
     context.PushStateForExpr(*PrecedenceGroup::ForLeading(Lex::TokenKind::If));
   } else {
-    // TODO: Include the location of the `if` token.
     CARBON_DIAGNOSTIC(ExpectedElseAfterIf, Error,
                       "expected `else` after `if ... then ...`");
+    CARBON_DIAGNOSTIC_LABEL(ElseGoesAfter, Primary,
+                            "expected `else` after this token");
+    CARBON_DIAGNOSTIC_LABEL(ThenNeedsElse, Info, "this `then` needs an `else`");
     if (!state.has_error) {
-      context.emitter().Emit(*context.position(), ExpectedElseAfterIf);
+      context.emitter()
+          .Build(*(context.position() - 1), ExpectedElseAfterIf)
+          .Attach(*(context.position() - 1), ElseGoesAfter)
+          .Attach(state.token, ThenNeedsElse)
+          .Emit();
     }
     // Add an invalid node to substitute for the final `Expr`.
     context.AddInvalidParse(*context.position());

@@ -95,8 +95,13 @@ auto HandleStructPatternFieldAfterDesignator(Context& context) -> void {
 
       CARBON_DIAGNOSTIC(ExpectedStructPatternDesignatedField, Error,
                         "expected `= value` after `.field`");
-      context.emitter().Emit(*context.position(),
-                             ExpectedStructPatternDesignatedField);
+      CARBON_DIAGNOSTIC_LABEL(DesignatedFieldValueGoesAfter, Primary,
+                              "expected `= value` after this token");
+      context.emitter()
+          .Build(*(context.position() - 1),
+                 ExpectedStructPatternDesignatedField)
+          .Attach(*(context.position() - 1), DesignatedFieldValueGoesAfter)
+          .Emit();
     }
     skip_to_recovery_position(/*add_invalid_parse=*/true);
 
@@ -138,8 +143,11 @@ auto HandleStructPatternUnderscore(Context& context) -> void {
         ExpectedCloseAfterUnderscore, Error,
         "unexpected token `{0}` after `_` in struct pattern, expected `}`",
         Lex::TokenKind);
-    context.emitter().Emit(*context.position(), ExpectedCloseAfterUnderscore,
-                           context.PositionKind());
+    context.emitter()
+        .Build(*context.position(), ExpectedCloseAfterUnderscore,
+               context.PositionKind())
+        .Attach(*context.position())
+        .Emit();
     state.has_error = true;
   }
 
@@ -215,16 +223,22 @@ static auto HandlePatternList(Context& context, NodeKind node_kind,
       CARBON_DIAGNOSTIC(NestedTuplePatternInStructPatternShortField, Error,
                         "Tuple pattern in shorthand struct pattern field. Use "
                         "`.field = (...)` instead");
-      context.emitter().Emit(*context.position(),
-                             NestedTuplePatternInStructPatternShortField);
+      context.emitter()
+          .Build(*context.position(),
+                 NestedTuplePatternInStructPatternShortField)
+          .Attach(*context.position())
+          .Emit();
 
       context.ReturnErrorOnState();
     } else if (node_kind == NodeKind::StructPatternStart) {
       CARBON_DIAGNOSTIC(NestedStructPatternStructPatternShortField, Error,
                         "Struct pattern in shorthand struct pattern field. Use "
                         "`.field = {{...}` instead");
-      context.emitter().Emit(*context.position(),
-                             NestedStructPatternStructPatternShortField);
+      context.emitter()
+          .Build(*context.position(),
+                 NestedStructPatternStructPatternShortField)
+          .Attach(*context.position())
+          .Emit();
 
       context.ReturnErrorOnState();
     }

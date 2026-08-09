@@ -21,7 +21,8 @@ fn F() {
 // --- fail_relational.carbon
 
 fn G() {
-  // CHECK:STDERR: fail_relational.carbon:[[@LINE+2]]:9-10: error: `let` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_relational.carbon:[[@LINE+3]]:7: error: `let` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_relational.carbon:[[@LINE+2]]:7: note: expected `;` after this token [DeclSemiGoesAfter]
   // CHECK:STDERR:
   let a == b = c;
 }
@@ -29,7 +30,8 @@ fn G() {
 // --- fail_logical.carbon
 
 fn H() {
-  // CHECK:STDERR: fail_logical.carbon:[[@LINE+2]]:9-11: error: `let` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_logical.carbon:[[@LINE+3]]:7: error: `let` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_logical.carbon:[[@LINE+2]]:7: note: expected `;` after this token [DeclSemiGoesAfter]
   // CHECK:STDERR:
   let a and b = c;
 }

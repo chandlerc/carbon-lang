@@ -8,7 +8,8 @@
 // TIP: To dump output, run:
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/generics/interface/fail_missing_name.carbon
 
-// CHECK:STDERR: fail_missing_name.carbon:[[@LINE+2]]:11: error: `interface` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_missing_name.carbon:[[@LINE+3]]:1-9: error: `interface` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_missing_name.carbon:[[@LINE+2]]:1-9: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 interface {
 }

@@ -54,14 +54,20 @@ static auto ResolveBindingPhase(Context& context, Context::State& state,
         RedundantGenericModifier, Error,
         "`generic` is redundant here; this binding is a checked generic by "
         "default");
-    context.emitter().Emit(*generic_token, RedundantGenericModifier);
+    context.emitter()
+        .Build(*generic_token, RedundantGenericModifier)
+        .Attach(*generic_token)
+        .Emit();
     redundant_modifier = true;
   } else if (runtime_token &&
              state.binding_context == BindingContext::ExplicitParam) {
     CARBON_DIAGNOSTIC(
         RedundantRuntimeModifier, Error,
         "`runtime` is redundant here; this binding is runtime by default");
-    context.emitter().Emit(*runtime_token, RedundantRuntimeModifier);
+    context.emitter()
+        .Build(*runtime_token, RedundantRuntimeModifier)
+        .Attach(*runtime_token)
+        .Emit();
     redundant_modifier = true;
   }
 
@@ -92,7 +98,7 @@ auto HandleBindingPattern(Context& context) -> void {
   auto ref_token = context.ConsumeIf(Lex::TokenKind::Ref);
   if (ref_token && state.in_var_pattern) {
     CARBON_DIAGNOSTIC(RefInsideVar, Error, "found `ref` inside `var` pattern");
-    context.emitter().Emit(*ref_token, RefInsideVar);
+    context.emitter().Build(*ref_token, RefInsideVar).Attach(*ref_token).Emit();
     state.has_error = true;
   }
 
@@ -130,8 +136,10 @@ auto HandleBindingPattern(Context& context) -> void {
           AnonymousBindingInStructPattern, Error,
           "Anonymous binding found in struct pattern. Use `.field = "
           "_: field_type` or `unused field: field_type`");
-      context.emitter().Emit(*context.position(),
-                             AnonymousBindingInStructPattern);
+      context.emitter()
+          .Build(*underscore, AnonymousBindingInStructPattern)
+          .Attach(*underscore)
+          .Emit();
       state.has_error = true;
     }
     context.AddLeafNode(NodeKind::UnderscoreName, *underscore);
@@ -249,8 +257,11 @@ auto HandleBindingPattern(Context& context) -> void {
   if (misordered_unused_token && !redundant_modifier && !state.has_error) {
     CARBON_DIAGNOSTIC(UnusedAfterBindingModifier, Error,
                       "`unused` must be written before `{0}`", Lex::TokenKind);
-    context.emitter().Emit(*misordered_unused_token, UnusedAfterBindingModifier,
-                           misordered_unused_modifier);
+    context.emitter()
+        .Build(*misordered_unused_token, UnusedAfterBindingModifier,
+               misordered_unused_modifier)
+        .Attach(*misordered_unused_token)
+        .Emit();
     state.has_error = true;
   }
 
@@ -290,9 +301,11 @@ static auto HandleBindingPatternFinish(Context& context, StateKind finish_kind)
       CARBON_DIAGNOSTIC(NonRegularBindingInVarDecl, Error,
                         "found {0:generic|`:?`} binding inside `var` pattern",
                         Diagnostics::BoolAsSelect);
-      context.emitter().Emit(
-          *context.position(), NonRegularBindingInVarDecl,
-          finish_kind == StateKind::BindingPatternFinishAsGeneric);
+      context.emitter()
+          .Build(*context.position(), NonRegularBindingInVarDecl,
+                 finish_kind == StateKind::BindingPatternFinishAsGeneric)
+          .Attach(*context.position())
+          .Emit();
       state.has_error = true;
     }
   } else {

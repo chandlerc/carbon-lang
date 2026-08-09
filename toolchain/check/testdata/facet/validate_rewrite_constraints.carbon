@@ -95,7 +95,8 @@ library "[[@TEST_NAME]]";
 interface I { let X: type; }
 interface J { let Y: type; }
 
-// CHECK:STDERR: fail_todo_dependent_rules_compound.carbon:[[@LINE+4]]:30: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_todo_dependent_rules_compound.carbon:[[@LINE+5]]:29: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_todo_dependent_rules_compound.carbon:[[@LINE+4]]:29: note: expected identifier or `Self` after this token [DesignatorNameGoesAfter]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_todo_dependent_rules_compound.carbon:[[@LINE+2]]:30: error: semantics TODO: `handle invalid parse trees in `check`` [SemanticsTodo]
 // CHECK:STDERR:
@@ -125,7 +126,8 @@ interface I(T: type) { let X: type; }
 
 final impl forall [J: I(())] J as I({}) where .X = {} {}
 
-// CHECK:STDERR: fail_todo_parameterized_interface_compound.carbon:[[@LINE+4]]:38: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_todo_parameterized_interface_compound.carbon:[[@LINE+5]]:37: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_todo_parameterized_interface_compound.carbon:[[@LINE+4]]:37: note: expected identifier or `Self` after this token [DesignatorNameGoesAfter]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_todo_parameterized_interface_compound.carbon:[[@LINE+2]]:38: error: semantics TODO: `handle invalid parse trees in `check`` [SemanticsTodo]
 // CHECK:STDERR:

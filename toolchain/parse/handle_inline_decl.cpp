@@ -18,7 +18,12 @@ auto HandleInlineDeclAfterIntroducer(Context& context) -> void {
   } else {
     CARBON_DIAGNOSTIC(ExpectedCppAfterInline, Error,
                       "expected `Cpp` after `inline`");
-    context.emitter().Emit(*context.position(), ExpectedCppAfterInline);
+    CARBON_DIAGNOSTIC_LABEL(CppGoesAfter, Primary,
+                            "expected `Cpp` after this token");
+    context.emitter()
+        .Build(state.token, ExpectedCppAfterInline)
+        .Attach(state.token, CppGoesAfter)
+        .Emit();
     context.AddNode(NodeKind::InlineCppDecl,
                     context.SkipPastLikelyEnd(state.token),
                     /*has_error=*/true);
@@ -33,7 +38,12 @@ auto HandleInlineDeclAfterIntroducer(Context& context) -> void {
   } else {
     CARBON_DIAGNOSTIC(ExpectedStringAfterInlineCpp, Error,
                       "expected string literal after `inline Cpp`");
-    context.emitter().Emit(*context.position(), ExpectedStringAfterInlineCpp);
+    CARBON_DIAGNOSTIC_LABEL(InlineCppStringGoesAfter, Primary,
+                            "expected string literal after this token");
+    context.emitter()
+        .Build(*(context.position() - 1), ExpectedStringAfterInlineCpp)
+        .Attach(*(context.position() - 1), InlineCppStringGoesAfter)
+        .Emit();
     context.AddNode(NodeKind::InlineCppDecl,
                     context.SkipPastLikelyEnd(state.token),
                     /*has_error=*/true);

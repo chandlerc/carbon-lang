@@ -22,13 +22,15 @@ extern library default fn G();
 
 // --- fail_name_missing.carbon
 
-// CHECK:STDERR: fail_name_missing.carbon:[[@LINE+2]]:16-17: error: expected `default` or a string literal to specify the library name [ExpectedLibraryNameOrDefault]
+// CHECK:STDERR: fail_name_missing.carbon:[[@LINE+3]]:8-14: error: expected `default` or a string literal to specify the library name [ExpectedLibraryNameOrDefault]
+// CHECK:STDERR: fail_name_missing.carbon:[[@LINE+2]]:8-14: note: expected the library name after this token [LibraryNameGoesAfter]
 // CHECK:STDERR:
 extern library fn G();
 
 // --- fail_identifier.carbon
 
-// CHECK:STDERR: fail_identifier.carbon:[[@LINE+4]]:16-18: error: expected `default` or a string literal to specify the library name [ExpectedLibraryNameOrDefault]
+// CHECK:STDERR: fail_identifier.carbon:[[@LINE+5]]:8-14: error: expected `default` or a string literal to specify the library name [ExpectedLibraryNameOrDefault]
+// CHECK:STDERR: fail_identifier.carbon:[[@LINE+4]]:8-14: note: expected the library name after this token [LibraryNameGoesAfter]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_identifier.carbon:[[@LINE+2]]:16-18: error: unrecognized declaration introducer [UnrecognizedDecl]
 // CHECK:STDERR:

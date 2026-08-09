@@ -235,11 +235,13 @@ interface J {
 // now it's failing due to compound member access in a rewrite constraint not
 // working.
 //
-// CHECK:STDERR: fail_todo_cycle_between_interfaces.carbon:[[@LINE+6]]:45: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_todo_cycle_between_interfaces.carbon:[[@LINE+8]]:44: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_todo_cycle_between_interfaces.carbon:[[@LINE+7]]:44: note: expected identifier or `Self` after this token [DesignatorNameGoesAfter]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_todo_cycle_between_interfaces.carbon:[[@LINE+4]]:45: error: semantics TODO: `handle invalid parse trees in `check`` [SemanticsTodo]
+// CHECK:STDERR: fail_todo_cycle_between_interfaces.carbon:[[@LINE+5]]:45: error: semantics TODO: `handle invalid parse trees in `check`` [SemanticsTodo]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_todo_cycle_between_interfaces.carbon:[[@LINE+2]]:71: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_todo_cycle_between_interfaces.carbon:[[@LINE+3]]:70: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_todo_cycle_between_interfaces.carbon:[[@LINE+2]]:70: note: expected identifier or `Self` after this token [DesignatorNameGoesAfter]
 // CHECK:STDERR:
 impl () as I where .Self impls J and .X1 = .(J.X3) and .X2 = .X1 and .(J.X3) = .X2 {}
 

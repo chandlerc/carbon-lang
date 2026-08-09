@@ -8,11 +8,13 @@
 // TIP: To dump output, run:
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/generics/named_constraint/fail_incomplete.carbon
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:12-16: error: `constraint` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:1-10: error: `constraint` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-10: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 constraint "Foo"
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-10: error: `constraint` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:1-10: error: `constraint` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-10: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 constraint
 

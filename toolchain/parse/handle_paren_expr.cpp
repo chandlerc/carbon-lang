@@ -31,8 +31,16 @@ auto HandleOnlyParenExprFinish(Context& context) -> void {
     if (!state.has_error) {
       CARBON_DIAGNOSTIC(UnexpectedTokenInCompoundMemberAccess, Error,
                         "expected `)`");
-      context.emitter().Emit(*context.position(),
-                             UnexpectedTokenInCompoundMemberAccess);
+      CARBON_DIAGNOSTIC_LABEL(MemberAccessCloseParenGoesAfter, Primary,
+                              "expected `)` after this token");
+      CARBON_DIAGNOSTIC_LABEL(MemberAccessParenOpenedHere, Info,
+                              "to match this `(`");
+      context.emitter()
+          .Build(*(context.position() - 1),
+                 UnexpectedTokenInCompoundMemberAccess)
+          .Attach(*(context.position() - 1), MemberAccessCloseParenGoesAfter)
+          .Attach(state.token, MemberAccessParenOpenedHere)
+          .Emit();
       state.has_error = true;
     }
 

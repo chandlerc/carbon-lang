@@ -8,27 +8,33 @@
 // TIP: To dump output, run:
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/namespace/fail_incomplete.carbon
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:11-13: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:1-9: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-9: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 namespace 123
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:11-12: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:1-9: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-9: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 namespace ""
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:11: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:1-9: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-9: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 namespace +
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:11-14: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:1-9: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-9: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 namespace bool
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:11-19: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:1-9: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-9: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 namespace namespace namespace namespace namespace
 
-// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-9: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+3]]:1-9: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete.carbon:[[@LINE+2]]:1-9: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 namespace
 

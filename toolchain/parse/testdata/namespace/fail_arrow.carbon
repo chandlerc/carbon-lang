@@ -10,7 +10,8 @@
 
 namespace Foo;
 
-// CHECK:STDERR: fail_arrow.carbon:[[@LINE+2]]:10-11: error: `class` declarations must either end with a `;` or have a `{ ... }` block for a definition [ExpectedDeclSemiOrDefinition]
+// CHECK:STDERR: fail_arrow.carbon:[[@LINE+3]]:7-9: error: `class` declarations must either end with a `;` or have a `{ ... }` block for a definition [ExpectedDeclSemiOrDefinition]
+// CHECK:STDERR: fail_arrow.carbon:[[@LINE+2]]:7-9: note: expected `;` or `{` after this token [DeclSemiOrBlockGoesAfter]
 // CHECK:STDERR:
 class Foo->Bar {}
 

@@ -10,7 +10,8 @@
 
 // NOTE: Move to its own directory when more tests are added.
 fn F() {
-  // CHECK:STDERR: fail_invalid_designators.carbon:[[@LINE+2]]:5: error: expected identifier after `.` [ExpectedIdentifierAfterPeriodOrArrow]
+  // CHECK:STDERR: fail_invalid_designators.carbon:[[@LINE+3]]:4: error: expected identifier after `.` [ExpectedIdentifierAfterPeriodOrArrow]
+  // CHECK:STDERR: fail_invalid_designators.carbon:[[@LINE+2]]:4: note: expected identifier after this token [MemberNameGoesAfter]
   // CHECK:STDERR:
   a.;
   // CHECK:STDERR: fail_invalid_designators.carbon:[[@LINE+2]]:5-6: error: expected identifier after `.`; prefix reserved word with `r#` to form a valid identifier [ExpectedIdentifierAfterPeriodOrArrow]

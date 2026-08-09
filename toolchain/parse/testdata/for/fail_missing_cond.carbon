@@ -9,12 +9,15 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/for/fail_missing_cond.carbon
 
 fn F() {
-  // CHECK:STDERR: fail_missing_cond.carbon:[[@LINE+2]]:7: error: expected `(` after `for` [ExpectedParenAfter]
+  // CHECK:STDERR: fail_missing_cond.carbon:[[@LINE+3]]:3-5: error: expected `(` after `for` [ExpectedParenAfter]
+  // CHECK:STDERR: fail_missing_cond.carbon:[[@LINE+2]]:3-5: note: expected `(` after this token [ParenGoesAfter]
   // CHECK:STDERR:
   for {
+  // CHECK:STDERR: fail_missing_cond.carbon:[[@LINE+4]]:3: error: expected `in` after loop pattern [ExpectedIn]
+  // CHECK:STDERR: fail_missing_cond.carbon:[[@LINE+3]]:3: note: expected `in` after this token [InGoesAfter]
+  // CHECK:STDERR: fail_missing_cond.carbon:[[@LINE-3]]:3-5: note: in this `for` header [InForHeader]
+  // CHECK:STDERR:
   }
-// CHECK:STDERR: fail_missing_cond.carbon:[[@LINE+8]]:1: error: expected `in` after loop pattern [ExpectedIn]
-// CHECK:STDERR:
 // CHECK:STDERR: fail_missing_cond.carbon:[[@LINE+6]]:1: error: expected expression [ExpectedExpr]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_missing_cond.carbon:[[@LINE+4]]:1: error: expected braced code block [ExpectedCodeBlock]

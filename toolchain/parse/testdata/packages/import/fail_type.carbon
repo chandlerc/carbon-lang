@@ -8,7 +8,8 @@
 // TIP: To dump output, run:
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/packages/import/fail_type.carbon
 
-// CHECK:STDERR: fail_type.carbon:[[@LINE+2]]:17-19: error: `import` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_type.carbon:[[@LINE+3]]:8-15: error: `import` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_type.carbon:[[@LINE+2]]:8-15: note: expected `;` after this token [DeclSemiGoesAfter]
 // CHECK:STDERR:
 import Geometry api;
 

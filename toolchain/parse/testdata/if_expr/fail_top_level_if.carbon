@@ -9,7 +9,8 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/if_expr/fail_top_level_if.carbon
 
 fn F() {
-  // CHECK:STDERR: fail_top_level_if.carbon:[[@LINE+6]]:6-9: error: expected `(` after `if` [ExpectedParenAfter]
+  // CHECK:STDERR: fail_top_level_if.carbon:[[@LINE+7]]:3-4: error: expected `(` after `if` [ExpectedParenAfter]
+  // CHECK:STDERR: fail_top_level_if.carbon:[[@LINE+6]]:3-4: note: expected `(` after this token [ParenGoesAfter]
   // CHECK:STDERR:
   // CHECK:STDERR: fail_top_level_if.carbon:[[@LINE+4]]:11-14: error: expected braced code block [ExpectedCodeBlock]
   // CHECK:STDERR:

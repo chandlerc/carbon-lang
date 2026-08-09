@@ -10,7 +10,8 @@
 
 
 fn f() -> i32 {
-  // CHECK:STDERR: fail_missing_cases.carbon:[[@LINE+2]]:14: error: expected cases [ExpectedMatchCases]
+  // CHECK:STDERR: fail_missing_cases.carbon:[[@LINE+3]]:14: error: expected cases [ExpectedMatchCases]
+  // CHECK:STDERR: fail_missing_cases.carbon:[[@LINE+2]]:13: note: this block needs at least one `case` or `default` [EmptyCasesBlock]
   // CHECK:STDERR:
   match (3) {}
   return 0;

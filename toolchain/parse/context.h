@@ -57,7 +57,10 @@ class Context {
 
    protected:
     // Applies the `position_` to the `last_byte_offset` returned by
-    // `TokenToDiagnosticLoc`.
+    // `TokenToDiagnosticLoc`, so that a diagnostic sorts by how far the parser
+    // had read rather than by the token it names. Several diagnostics
+    // therefore tie here, and `SortingConsumer` puts those in the order they
+    // print.
     auto ConvertLoc(Lex::TokenIndex token, ContextFnT /*context_fn*/) const
         -> Diagnostics::ConvertedLoc override {
       auto converted = context_->tokens().TokenToDiagnosticLoc(token);

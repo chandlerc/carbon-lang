@@ -42,7 +42,12 @@ auto HandleVarAsReturned(Context& context) -> void {
   if (!context.PositionIs(Lex::TokenKind::Var)) {
     CARBON_DIAGNOSTIC(ExpectedVarAfterReturned, Error,
                       "expected `var` after `returned`");
-    context.emitter().Emit(*context.position(), ExpectedVarAfterReturned);
+    CARBON_DIAGNOSTIC_LABEL(VarGoesAfter, Primary,
+                            "expected `var` after this token");
+    context.emitter()
+        .Build(returned_token, ExpectedVarAfterReturned)
+        .Attach(returned_token, VarGoesAfter)
+        .Emit();
     context.AddLeafNode(NodeKind::EmptyDecl,
                         context.SkipPastLikelyEnd(returned_token),
                         /*has_error=*/true);
@@ -92,7 +97,10 @@ auto HandleVariablePattern(Context& context) -> void {
   auto state = context.PopState();
   if (state.in_var_pattern) {
     CARBON_DIAGNOSTIC(NestedVar, Error, "`var` nested within another `var`");
-    context.emitter().Emit(*context.position(), NestedVar);
+    context.emitter()
+        .Build(*context.position(), NestedVar)
+        .Attach(*context.position())
+        .Emit();
     state.has_error = true;
   }
   state.kind = StateKind::FinishVariablePattern;

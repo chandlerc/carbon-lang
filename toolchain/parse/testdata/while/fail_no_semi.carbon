@@ -11,14 +11,16 @@
 fn F() {
   while (a) {
     if (b) {
+      // CHECK:STDERR: fail_no_semi.carbon:[[@LINE+3]]:7-11: error: `break` statements must end with a `;` [ExpectedStatementSemi]
+      // CHECK:STDERR: fail_no_semi.carbon:[[@LINE+2]]:7-11: note: expected `;` after this token [StatementSemiGoesAfter]
+      // CHECK:STDERR:
       break
-    // CHECK:STDERR: fail_no_semi.carbon:[[@LINE+2]]:5: error: `break` statements must end with a `;` [ExpectedStatementSemi]
-    // CHECK:STDERR:
     }
     if (c) {
+      // CHECK:STDERR: fail_no_semi.carbon:[[@LINE+3]]:7-14: error: `continue` statements must end with a `;` [ExpectedStatementSemi]
+      // CHECK:STDERR: fail_no_semi.carbon:[[@LINE+2]]:7-14: note: expected `;` after this token [StatementSemiGoesAfter]
+      // CHECK:STDERR:
       continue
-    // CHECK:STDERR: fail_no_semi.carbon:[[@LINE+2]]:5: error: `continue` statements must end with a `;` [ExpectedStatementSemi]
-    // CHECK:STDERR:
     }
   }
 }

@@ -18,7 +18,8 @@ fn F() {
   // The error skips past the string literal's group and the tokens after the
   // closing delimiter, ending the declaration at the `;` so that the following
   // declaration parses cleanly.
-  // CHECK:STDERR: fail_string_in_skipped_group.carbon:[[@LINE+2]]:20-22: error: `var` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_string_in_skipped_group.carbon:[[@LINE+3]]:16-18: error: `var` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_string_in_skipped_group.carbon:[[@LINE+2]]:16-18: note: expected `;` after this token [DeclSemiGoesAfter]
   // CHECK:STDERR:
   var x: i32 = bad bad ('''
 str

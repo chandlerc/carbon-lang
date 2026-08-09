@@ -9,7 +9,8 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/if/fail_square_brackets.carbon
 
 fn F() {
-  // CHECK:STDERR: fail_square_brackets.carbon:[[@LINE+8]]:6: error: expected `(` after `if` [ExpectedParenAfter]
+  // CHECK:STDERR: fail_square_brackets.carbon:[[@LINE+9]]:3-4: error: expected `(` after `if` [ExpectedParenAfter]
+  // CHECK:STDERR: fail_square_brackets.carbon:[[@LINE+8]]:3-4: note: expected `(` after this token [ParenGoesAfter]
   // CHECK:STDERR:
   // CHECK:STDERR: fail_square_brackets.carbon:[[@LINE+6]]:6: error: expected expression [ExpectedExpr]
   // CHECK:STDERR:

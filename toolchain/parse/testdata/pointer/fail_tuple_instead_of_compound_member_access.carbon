@@ -13,15 +13,21 @@ fn F() {
   // CHECK:STDERR:
   x.();
 
-  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:7: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+4]]:6: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+3]]:6: note: expected `)` after this token [MemberAccessCloseParenGoesAfter]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:5: note: to match this `(` [MemberAccessParenOpenedHere]
   // CHECK:STDERR:
   y.(1,);
 
-  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:7: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+4]]:6: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+3]]:6: note: expected `)` after this token [MemberAccessCloseParenGoesAfter]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:5: note: to match this `(` [MemberAccessParenOpenedHere]
   // CHECK:STDERR:
   z.(a, b);
 
-  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:8: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+4]]:6: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+3]]:6: note: expected `)` after this token [MemberAccessCloseParenGoesAfter]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:5: note: to match this `(` [MemberAccessParenOpenedHere]
   // CHECK:STDERR:
   w.(c d e ());
 
@@ -29,15 +35,21 @@ fn F() {
   // CHECK:STDERR:
   v->();
 
-  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:8: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+4]]:7: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+3]]:7: note: expected `)` after this token [MemberAccessCloseParenGoesAfter]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:6: note: to match this `(` [MemberAccessParenOpenedHere]
   // CHECK:STDERR:
   u->(f,);
 
-  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:8: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+4]]:7: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+3]]:7: note: expected `)` after this token [MemberAccessCloseParenGoesAfter]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:6: note: to match this `(` [MemberAccessParenOpenedHere]
   // CHECK:STDERR:
   t->(2, 3);
 
-  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:9: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+4]]:7: error: expected `)` [UnexpectedTokenInCompoundMemberAccess]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+3]]:7: note: expected `)` after this token [MemberAccessCloseParenGoesAfter]
+  // CHECK:STDERR: fail_tuple_instead_of_compound_member_access.carbon:[[@LINE+2]]:6: note: to match this `(` [MemberAccessParenOpenedHere]
   // CHECK:STDERR:
   s->(g h i ());
 }

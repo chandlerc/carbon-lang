@@ -31,7 +31,8 @@ fn DotSelf(generic W: K where .Self = f32);
 
 // --- fail_dot_keyword.carbon
 
-// CHECK:STDERR: fail_dot_keyword.carbon:[[@LINE+2]]:35-37: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_dot_keyword.carbon:[[@LINE+3]]:34: error: expected identifier or `Self` after `.` [ExpectedIdentifierOrSelfAfterPeriod]
+// CHECK:STDERR: fail_dot_keyword.carbon:[[@LINE+2]]:34: note: expected identifier or `Self` after this token [DesignatorNameGoesAfter]
 // CHECK:STDERR:
 fn DotKeyword(generic W: K where .and = u8);
 

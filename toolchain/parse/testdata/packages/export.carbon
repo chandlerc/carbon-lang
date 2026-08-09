@@ -28,7 +28,8 @@ export Foo.Bar;
 
 package Pkg;
 
-// CHECK:STDERR: fail_expr.carbon:[[@LINE+2]]:8: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_expr.carbon:[[@LINE+3]]:1-6: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_expr.carbon:[[@LINE+2]]:1-6: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 export ();
 
@@ -36,7 +37,8 @@ export ();
 
 package Pkg;
 
-// CHECK:STDERR: fail_package_in_name.carbon:[[@LINE+2]]:8-14: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_package_in_name.carbon:[[@LINE+3]]:1-6: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_package_in_name.carbon:[[@LINE+2]]:1-6: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 export package.Bar;
 
@@ -44,7 +46,8 @@ export package.Bar;
 
 package Pkg;
 
-// CHECK:STDERR: fail_keyword_only:[[@LINE+2]]:1-6: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_keyword_only:[[@LINE+3]]:1-6: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_keyword_only:[[@LINE+2]]:1-6: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 export
 
@@ -52,7 +55,8 @@ export
 
 package Pkg;
 
-// CHECK:STDERR: fail_no_name.carbon:[[@LINE+2]]:8: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_no_name.carbon:[[@LINE+3]]:1-6: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_no_name.carbon:[[@LINE+2]]:1-6: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 export ;
 
@@ -60,15 +64,17 @@ export ;
 
 package Pkg;
 
-export Foo
-// CHECK:STDERR: fail_no_semi.carbon:[[@LINE+2]]:1: error: `export` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_no_semi.carbon:[[@LINE+3]]:8-10: error: `export` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_no_semi.carbon:[[@LINE+2]]:8-10: note: expected `;` after this token [DeclSemiGoesAfter]
 // CHECK:STDERR:
+export Foo
 
 // --- fail_incomplete_qual_name.carbon
 
 package Pkg;
 
-// CHECK:STDERR: fail_incomplete_qual_name.carbon:[[@LINE+2]]:12: error: `.` should be followed by a name [ExpectedDeclNameAfterPeriod]
+// CHECK:STDERR: fail_incomplete_qual_name.carbon:[[@LINE+3]]:11: error: `.` should be followed by a name [ExpectedDeclNameAfterPeriod]
+// CHECK:STDERR: fail_incomplete_qual_name.carbon:[[@LINE+2]]:11: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 export Foo.;
 
@@ -76,7 +82,8 @@ export Foo.;
 
 package Pkg;
 
-// CHECK:STDERR: fail_incomplete_qual_name2.carbon:[[@LINE+2]]:8: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete_qual_name2.carbon:[[@LINE+3]]:1-6: error: `export` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_incomplete_qual_name2.carbon:[[@LINE+2]]:1-6: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 export .Bar;
 

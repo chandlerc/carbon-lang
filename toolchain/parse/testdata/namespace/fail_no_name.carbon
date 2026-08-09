@@ -8,7 +8,8 @@
 // TIP: To dump output, run:
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/namespace/fail_no_name.carbon
 
-// CHECK:STDERR: fail_no_name.carbon:[[@LINE+2]]:10: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_no_name.carbon:[[@LINE+3]]:1-9: error: `namespace` introducer should be followed by a name [ExpectedDeclName]
+// CHECK:STDERR: fail_no_name.carbon:[[@LINE+2]]:1-9: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
 namespace;
 
