@@ -65,8 +65,9 @@ class Generic(unused T: type) {
   fn TooFew();
 }
 
-// CHECK:STDERR: fail_mismatched_too_few_args.carbon:[[@LINE+3]]:4-10: error: redeclaration differs because of parameter count of 0 [RedeclParamCountDiffers]
-// CHECK:STDERR: fail_mismatched_too_few_args.carbon:[[@LINE-5]]:1-31: note: previously declared with parameter count of 1 [RedeclParamCountPrevious]
+// CHECK:STDERR: fail_mismatched_too_few_args.carbon:[[@LINE+4]]:4-10: error: redeclaration differs because of parameter count of 0 [RedeclParamCountDiffers]
+// CHECK:STDERR: fail_mismatched_too_few_args.carbon:[[@LINE-5]]:22-28: note: this parameter has no counterpart [RedeclParamWithoutCounterpart]
+// CHECK:STDERR: fail_mismatched_too_few_args.carbon:[[@LINE-6]]:1-31: note: previously declared with parameter count of 1 [RedeclParamCountPrevious]
 // CHECK:STDERR:
 fn Generic().TooFew() {}
 
@@ -78,8 +79,9 @@ class Generic(T: type) {
   fn TooMany();
 }
 
-// CHECK:STDERR: fail_mismatched_too_many_args.carbon:[[@LINE+3]]:4-10: error: redeclaration differs because of parameter count of 2 [RedeclParamCountDiffers]
-// CHECK:STDERR: fail_mismatched_too_many_args.carbon:[[@LINE-5]]:1-24: note: previously declared with parameter count of 1 [RedeclParamCountPrevious]
+// CHECK:STDERR: fail_mismatched_too_many_args.carbon:[[@LINE+4]]:4-10: error: redeclaration differs because of parameter count of 2 [RedeclParamCountDiffers]
+// CHECK:STDERR: fail_mismatched_too_many_args.carbon:[[@LINE+3]]:35-41: note: this parameter has no counterpart [RedeclParamWithoutCounterpart]
+// CHECK:STDERR: fail_mismatched_too_many_args.carbon:[[@LINE-6]]:1-24: note: previously declared with parameter count of 1 [RedeclParamCountPrevious]
 // CHECK:STDERR:
 fn Generic(unused T: type, unused U: type).TooMany() {}
 

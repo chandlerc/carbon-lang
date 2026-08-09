@@ -108,7 +108,7 @@ fn F(generic Fm: Core.Form, unused x:? Fm) {}
 
 fn G() {
   var x: i32;
-  // CHECK:STDERR: fail_todo_composite_generic_form.carbon:[[@LINE+4]]:3-47: error: cannot implicitly convert expression of type `(Core.Form, Core.Form)` to `Core.Form` [ConversionFailure]
+  // CHECK:STDERR: fail_todo_composite_generic_form.carbon:[[@LINE+4]]:5-34: error: cannot implicitly convert expression of type `(Core.Form, Core.Form)` to `Core.Form` [ConversionFailure]
   // CHECK:STDERR: fail_todo_composite_generic_form.carbon:[[@LINE+3]]:3-47: note: type `(Core.Form, Core.Form)` does not implement interface `Core.ImplicitAs(Core.Form)` [MissingImplForType]
   // CHECK:STDERR: fail_todo_composite_generic_form.carbon:[[@LINE-6]]:14-26: note: initializing generic parameter `Fm` declared here [InitializingGenericParam]
   // CHECK:STDERR:
@@ -122,8 +122,9 @@ fn F[Fm: Core.Form](v:? Fm);
 
 fn G() {
   var v: i32 = 0;
-  // CHECK:STDERR: fail_todo_deduce_generic_form.carbon:[[@LINE+3]]:3-10: error: cannot deduce value for generic parameter `Fm` [DeductionIncomplete]
-  // CHECK:STDERR: fail_todo_deduce_generic_form.carbon:[[@LINE-5]]:1-28: note: while deducing parameters of generic declared here [DeductionGenericHere]
+  // CHECK:STDERR: fail_todo_deduce_generic_form.carbon:[[@LINE+4]]:3-10: error: cannot deduce value for generic parameter `Fm` [DeductionIncomplete]
+  // CHECK:STDERR: fail_todo_deduce_generic_form.carbon:[[@LINE-5]]:6-18: note: no value was deduced for this parameter [DeductionIncompleteParam]
+  // CHECK:STDERR: fail_todo_deduce_generic_form.carbon:[[@LINE-6]]:1-28: note: while deducing parameters of generic declared here [DeductionGenericHere]
   // CHECK:STDERR:
   F(ref v);
 }
@@ -135,7 +136,7 @@ fn F(generic Fm: Core.Form, unused x:? Fm) {}
 
 fn G() {
   var x: i32;
-  // CHECK:STDERR: fail_form_generic_arg_not_form.carbon:[[@LINE+4]]:3-11: error: cannot implicitly convert expression of type `type` to `Core.Form` [ConversionFailure]
+  // CHECK:STDERR: fail_form_generic_arg_not_form.carbon:[[@LINE+4]]:5-7: error: cannot implicitly convert expression of type `type` to `Core.Form` [ConversionFailure]
   // CHECK:STDERR: fail_form_generic_arg_not_form.carbon:[[@LINE+3]]:3-11: note: type `type` does not implement interface `Core.ImplicitAs(Core.Form)` [MissingImplForType]
   // CHECK:STDERR: fail_form_generic_arg_not_form.carbon:[[@LINE-6]]:14-26: note: initializing generic parameter `Fm` declared here [InitializingGenericParam]
   // CHECK:STDERR:

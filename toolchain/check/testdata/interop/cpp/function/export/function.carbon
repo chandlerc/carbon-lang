@@ -95,9 +95,10 @@ fn HasGenericArg(generic T: type, a: T) { a; }
 
 library "[[@TEST_NAME]]";
 
-// CHECK:STDERR: imported from: fail_todo_generic.carbon:[[@LINE+4]]:1 [InImport]
+// CHECK:STDERR: imported from: fail_todo_generic.carbon:[[@LINE+5]]:1 [InImport]
 // CHECK:STDERR: other_generic.carbon:3:1-41: error: 1 argument passed to function expecting 2 arguments [CallArgCountMismatch]
-// CHECK:STDERR: other_generic.carbon:3:1-41: note: calling function declared here [InCallToEntity]
+// CHECK:STDERR: other_generic.carbon:3:1-41: note: 1 argument passed here [ArgsPassedHere]
+// CHECK:STDERR: other_generic.carbon:3:1-41: note: calling function declared here, expecting 2 arguments [InCallToEntity]
 // CHECK:STDERR:
 import OtherGeneric;
 import Cpp inline '''

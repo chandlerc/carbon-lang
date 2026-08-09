@@ -4,6 +4,8 @@
 
 #include "toolchain/check/merge.h"
 
+#include <algorithm>
+
 #include "toolchain/base/kind_switch.h"
 #include "toolchain/check/import.h"
 #include "toolchain/check/import_ref.h"
@@ -49,6 +51,9 @@ static auto DiagnoseExternMismatch(Context& context, Lex::TokenKind decl_kind,
   CARBON_DIAGNOSTIC(RedeclExternMismatch, Error,
                     "redeclarations of `{0} {1}` must match use of `extern`",
                     Lex::TokenKind, SemIR::NameId);
+  // TODO: Mark the `extern` keyword on whichever declaration has it, rather
+  // than the whole declaration; neither declaration records the keyword's
+  // location.
   context.emitter()
       .Build(new_loc_id, RedeclExternMismatch, decl_kind, name_id)
       .Attach(prev_loc_id, RedeclPrevDecl)
@@ -390,12 +395,26 @@ static auto CheckRedeclParams(Context& context, SemIR::LocId new_decl_loc_id,
         RedeclParamCountPrevious, Info,
         "previously declared with {0:implicit |}parameter count of {1}",
         Diagnostics::BoolAsSelect, int32_t);
-    context.emitter()
-        .Build(new_decl_loc_id, RedeclParamCountDiffers, is_implicit_param,
-               new_param_pattern_ids.size())
-        .Attach(prev_decl_loc_id, RedeclParamCountPrevious, is_implicit_param,
-                prev_param_pattern_ids.size())
-        .Emit();
+    // The counts alone leave the reader counting parameters. The first one with
+    // nothing opposite it is what has to be added or removed.
+    CARBON_DIAGNOSTIC_LABEL(RedeclParamWithoutCounterpart, Primary,
+                            "this parameter has no counterpart");
+    size_t shorter =
+        std::min(new_param_pattern_ids.size(), prev_param_pattern_ids.size());
+    auto longer = new_param_pattern_ids.size() > shorter
+                      ? new_param_pattern_ids
+                      : prev_param_pattern_ids;
+    auto diag = context.emitter().Build(
+        new_decl_loc_id, RedeclParamCountDiffers, is_implicit_param,
+        new_param_pattern_ids.size());
+    // The uncounterparted parameter is in whichever declaration is longer, so
+    // it does not always fall in the one being reported. Marking that one is
+    // what keeps the reported location from being drawn bare.
+    diag.Attach(new_decl_loc_id);
+    diag.Attach(longer[shorter], RedeclParamWithoutCounterpart);
+    diag.Attach(prev_decl_loc_id, RedeclParamCountPrevious, is_implicit_param,
+                prev_param_pattern_ids.size());
+    diag.Emit();
     return false;
   }
   for (auto [index, new_param_pattern_id, prev_param_pattern_id] :

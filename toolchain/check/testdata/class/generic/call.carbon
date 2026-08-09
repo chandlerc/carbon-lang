@@ -29,8 +29,9 @@ library "[[@TEST_NAME]]";
 
 class Class(T: type, N: i32) {}
 
-// CHECK:STDERR: fail_too_few.carbon:[[@LINE+3]]:8-18: error: 1 argument passed to generic class expecting 2 arguments [CallArgCountMismatch]
-// CHECK:STDERR: fail_too_few.carbon:[[@LINE-3]]:1-30: note: calling generic class declared here [InCallToEntity]
+// CHECK:STDERR: fail_too_few.carbon:[[@LINE+4]]:8-18: error: 1 argument passed to generic class expecting 2 arguments [CallArgCountMismatch]
+// CHECK:STDERR: fail_too_few.carbon:[[@LINE+3]]:8-18: note: 1 argument passed here [ArgsPassedHere]
+// CHECK:STDERR: fail_too_few.carbon:[[@LINE-4]]:1-30: note: calling generic class declared here, expecting 2 arguments [InCallToEntity]
 // CHECK:STDERR:
 var a: Class(i32*);
 
@@ -40,8 +41,9 @@ library "[[@TEST_NAME]]";
 
 class Class(T: type, N: i32) {}
 
-// CHECK:STDERR: fail_too_many.carbon:[[@LINE+3]]:8-24: error: 3 arguments passed to generic class expecting 2 arguments [CallArgCountMismatch]
-// CHECK:STDERR: fail_too_many.carbon:[[@LINE-3]]:1-30: note: calling generic class declared here [InCallToEntity]
+// CHECK:STDERR: fail_too_many.carbon:[[@LINE+4]]:8-24: error: 3 arguments passed to generic class expecting 2 arguments [CallArgCountMismatch]
+// CHECK:STDERR: fail_too_many.carbon:[[@LINE+3]]:8-24: note: 3 arguments passed here [ArgsPassedHere]
+// CHECK:STDERR: fail_too_many.carbon:[[@LINE-4]]:1-30: note: calling generic class declared here, expecting 2 arguments [InCallToEntity]
 // CHECK:STDERR:
 var a: Class(i32*, 1, 2);
 
@@ -51,7 +53,7 @@ library "[[@TEST_NAME]]";
 
 class Class(T: type, N: i32) {}
 
-// CHECK:STDERR: fail_no_conversion.carbon:[[@LINE+4]]:8-21: error: cannot implicitly convert non-type value of type `Core.IntLiteral` to `type` [ConversionFailureNonTypeToFacet]
+// CHECK:STDERR: fail_no_conversion.carbon:[[@LINE+4]]:14: error: cannot implicitly convert non-type value of type `Core.IntLiteral` to `type` [ConversionFailureNonTypeToFacet]
 // CHECK:STDERR: fail_no_conversion.carbon:[[@LINE+3]]:8-21: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(type)` [MissingImplForType]
 // CHECK:STDERR: fail_no_conversion.carbon:[[@LINE-4]]:13-19: note: initializing generic parameter `T` declared here [InitializingGenericParam]
 // CHECK:STDERR:

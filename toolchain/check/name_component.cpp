@@ -89,10 +89,15 @@ auto PopNameComponentWithoutParams(Context& context, Lex::TokenKind introducer,
                       "`{0}` declaration cannot have parameters",
                       Lex::TokenKind);
     // Point to the lexically first parameter list in the diagnostic.
-    context.emitter().Emit(name.implicit_param_patterns_id.has_value()
-                               ? name.implicit_params_loc_id
-                               : name.params_loc_id,
-                           UnexpectedDeclNameParams, introducer);
+    context.emitter()
+        .Build(name.implicit_param_patterns_id.has_value()
+                   ? name.implicit_params_loc_id
+                   : name.params_loc_id,
+               UnexpectedDeclNameParams, introducer)
+        .Attach(name.implicit_param_patterns_id.has_value()
+                    ? name.implicit_params_loc_id
+                    : name.params_loc_id)
+        .Emit();
 
     name.call_params_id = SemIR::InstBlockId::None;
     if (diagnosed_params) {

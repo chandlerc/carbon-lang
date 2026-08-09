@@ -47,8 +47,9 @@ class D {
 }
 
 fn Test(d: D) {
-  // CHECK:STDERR: fail_no_such_member.carbon:[[@LINE+3]]:3: error: unable to monomorphize specific `F(D)` [ResolvingSpecificHere]
+  // CHECK:STDERR: fail_no_such_member.carbon:[[@LINE+4]]:3: error: unable to monomorphize specific `F(D)` [ResolvingSpecificHere]
   // CHECK:STDERR: fail_no_such_member.carbon:[[@LINE-10]]:16-18: note: member name `n` not found in `D` [MemberNameNotFoundInInstScope]
+  // CHECK:STDERR: fail_no_such_member.carbon:[[@LINE-7]]:1-9: note: no member `n` in `D` declared here [MemberNameNotFoundScope]
   // CHECK:STDERR:
   F(d);
 }
@@ -85,7 +86,8 @@ base class C {
 
 //@dump-sem-ir-begin
 fn F[template T: type](x: T) -> i32 {
-  // CHECK:STDERR: fail_todo_compound_member_access.carbon:[[@LINE+2]]:3-17: error: value of type `<dependent type>` is not callable [CallToNonCallable]
+  // CHECK:STDERR: fail_todo_compound_member_access.carbon:[[@LINE+3]]:3-17: error: value of type `<dependent type>` is not callable [CallToNonCallable]
+  // CHECK:STDERR: fail_todo_compound_member_access.carbon:[[@LINE-2]]:33-35: note: return type of function is `i32` [ReturnTypeHereNote]
   // CHECK:STDERR:
   return x.(C.n);
 }
@@ -305,8 +307,8 @@ fn G(d: D) -> i32 {
 // CHECK:STDOUT:   %F.type: type = fn_type @F [concrete]
 // CHECK:STDOUT:   %F: %F.type = struct_value () [concrete]
 // CHECK:STDOUT:   %require_complete.944: <witness> = require_complete_type %T [template]
-// CHECK:STDOUT:   %.b3e: %T = splice_inst @F.%.loc12_11.3 [template]
-// CHECK:STDOUT:   %.1a3: @F.%.loc12_11.6 (@F.%.loc12_11.6) = splice_inst @F.%.loc12_11.5 [template]
+// CHECK:STDOUT:   %.b3e: %T = splice_inst @F.%.loc13_11.3 [template]
+// CHECK:STDOUT:   %.1a3: @F.%.loc13_11.6 (@F.%.loc13_11.6) = splice_inst @F.%.loc13_11.5 [template]
 // CHECK:STDOUT:   %Dest: type = symbolic_binding Dest, 0 [symbolic]
 // CHECK:STDOUT:   %ImplicitAs.type.3aa: type = facet_type <@ImplicitAs, @ImplicitAs(%Dest)> [symbolic]
 // CHECK:STDOUT:   %Self.294: %ImplicitAs.type.3aa = symbolic_binding Self, 1 [symbolic]
@@ -314,7 +316,7 @@ fn G(d: D) -> i32 {
 // CHECK:STDOUT:   %ImplicitAs.WithSelf.Convert.945: %ImplicitAs.WithSelf.Convert.type.97e = struct_value () [symbolic]
 // CHECK:STDOUT:   %ImplicitAs.assoc_type.e23: type = assoc_entity_type @ImplicitAs, @ImplicitAs(%i32) [concrete]
 // CHECK:STDOUT:   %assoc0.368: %ImplicitAs.assoc_type.e23 = assoc_entity element0, imports.%Core.import_ref.cb2 [concrete]
-// CHECK:STDOUT:   %.d1c: @F.%.loc12_17.4 (@F.%.loc12_17.4) = splice_inst @F.%.loc12_17.3 [template]
+// CHECK:STDOUT:   %.d1c: @F.%.loc13_17.4 (@F.%.loc13_17.4) = splice_inst @F.%.loc13_17.3 [template]
 // CHECK:STDOUT:   %D: type = class_type @D [concrete]
 // CHECK:STDOUT:   %struct_type.base.085: type = struct_type {.base: %C} [concrete]
 // CHECK:STDOUT:   %complete_type.756: <witness> = complete_type_witness %struct_type.base.085 [concrete]
@@ -373,24 +375,24 @@ fn G(d: D) -> i32 {
 // CHECK:STDOUT:
 // CHECK:STDOUT: !definition:
 // CHECK:STDOUT:   %require_complete: <witness> = require_complete_type %T.loc9_16.1 [template = %require_complete (constants.%require_complete.944)]
-// CHECK:STDOUT:   %.loc12_11.3: <instruction> = refine_type_action %x.ref, %T.loc9_16.1 [template]
-// CHECK:STDOUT:   %.loc12_11.4: @F.%T.loc9_16.1 (%T) = splice_inst %.loc12_11.3 [template = %.loc12_11.4 (constants.%.b3e)]
-// CHECK:STDOUT:   %.loc12_11.5: <instruction> = compound_member_access_action %.loc12_11.1, %n.ref [template]
-// CHECK:STDOUT:   %.loc12_11.6: type = type_of_inst %.loc12_11.5 [template]
-// CHECK:STDOUT:   %.loc12_11.7: @F.%.loc12_11.6 (@F.%.loc12_11.6) = splice_inst %.loc12_11.5 [template = %.loc12_11.7 (constants.%.1a3)]
-// CHECK:STDOUT:   %.loc12_17.3: <instruction> = compound_member_access_action %.loc12_11.2, constants.%assoc0.368 [template]
-// CHECK:STDOUT:   %.loc12_17.4: type = type_of_inst %.loc12_17.3 [template]
-// CHECK:STDOUT:   %.loc12_17.5: @F.%.loc12_17.4 (@F.%.loc12_17.4) = splice_inst %.loc12_17.3 [template = %.loc12_17.5 (constants.%.d1c)]
+// CHECK:STDOUT:   %.loc13_11.3: <instruction> = refine_type_action %x.ref, %T.loc9_16.1 [template]
+// CHECK:STDOUT:   %.loc13_11.4: @F.%T.loc9_16.1 (%T) = splice_inst %.loc13_11.3 [template = %.loc13_11.4 (constants.%.b3e)]
+// CHECK:STDOUT:   %.loc13_11.5: <instruction> = compound_member_access_action %.loc13_11.1, %n.ref [template]
+// CHECK:STDOUT:   %.loc13_11.6: type = type_of_inst %.loc13_11.5 [template]
+// CHECK:STDOUT:   %.loc13_11.7: @F.%.loc13_11.6 (@F.%.loc13_11.6) = splice_inst %.loc13_11.5 [template = %.loc13_11.7 (constants.%.1a3)]
+// CHECK:STDOUT:   %.loc13_17.3: <instruction> = compound_member_access_action %.loc13_11.2, constants.%assoc0.368 [template]
+// CHECK:STDOUT:   %.loc13_17.4: type = type_of_inst %.loc13_17.3 [template]
+// CHECK:STDOUT:   %.loc13_17.5: @F.%.loc13_17.4 (@F.%.loc13_17.4) = splice_inst %.loc13_17.3 [template = %.loc13_17.5 (constants.%.d1c)]
 // CHECK:STDOUT:
 // CHECK:STDOUT:   fn(%x.param: @F.%T.loc9_16.1 (%T)) -> out %return.param: %i32 {
 // CHECK:STDOUT:   !entry:
 // CHECK:STDOUT:     %x.ref: @F.%T.loc9_16.1 (%T) = name_ref x, %x
 // CHECK:STDOUT:     %C.ref: type = name_ref C, file.%C.decl [concrete = constants.%C]
 // CHECK:STDOUT:     %n.ref: %C.elem = name_ref n, @C.%.loc5 [concrete = @C.%.loc5]
-// CHECK:STDOUT:     %.loc12_11.1: @F.%T.loc9_16.1 (%T) = splice_inst %.loc12_11.3 [template = %.loc12_11.4 (constants.%.b3e)]
-// CHECK:STDOUT:     %.loc12_11.2: @F.%.loc12_11.6 (@F.%.loc12_11.6) = splice_inst %.loc12_11.5 [template = %.loc12_11.7 (constants.%.1a3)]
-// CHECK:STDOUT:     %.loc12_17.1: @F.%.loc12_17.4 (@F.%.loc12_17.4) = splice_inst %.loc12_17.3 [template = %.loc12_17.5 (constants.%.d1c)]
-// CHECK:STDOUT:     %.loc12_17.2: %i32 = converted %.loc12_11.2, <error> [concrete = <error>]
+// CHECK:STDOUT:     %.loc13_11.1: @F.%T.loc9_16.1 (%T) = splice_inst %.loc13_11.3 [template = %.loc13_11.4 (constants.%.b3e)]
+// CHECK:STDOUT:     %.loc13_11.2: @F.%.loc13_11.6 (@F.%.loc13_11.6) = splice_inst %.loc13_11.5 [template = %.loc13_11.7 (constants.%.1a3)]
+// CHECK:STDOUT:     %.loc13_17.1: @F.%.loc13_17.4 (@F.%.loc13_17.4) = splice_inst %.loc13_17.3 [template = %.loc13_17.5 (constants.%.d1c)]
+// CHECK:STDOUT:     %.loc13_17.2: %i32 = converted %.loc13_11.2, <error> [concrete = <error>]
 // CHECK:STDOUT:     return <error>
 // CHECK:STDOUT:   }
 // CHECK:STDOUT: }
@@ -412,13 +414,13 @@ fn G(d: D) -> i32 {
 // CHECK:STDOUT:
 // CHECK:STDOUT: !definition:
 // CHECK:STDOUT:   %require_complete => constants.%complete_type.756
-// CHECK:STDOUT:   %.loc12_11.3 => constants.%inst.as_compatible
-// CHECK:STDOUT:   %.loc12_11.4 => invalid
-// CHECK:STDOUT:   %.loc12_11.5 => constants.%inst.splice_block.08b
-// CHECK:STDOUT:   %.loc12_11.6 => constants.%i32
-// CHECK:STDOUT:   %.loc12_11.7 => invalid
-// CHECK:STDOUT:   %.loc12_17.3 => constants.%inst.splice_block.edd
-// CHECK:STDOUT:   %.loc12_17.4 => <error>
-// CHECK:STDOUT:   %.loc12_17.5 => <error>
+// CHECK:STDOUT:   %.loc13_11.3 => constants.%inst.as_compatible
+// CHECK:STDOUT:   %.loc13_11.4 => invalid
+// CHECK:STDOUT:   %.loc13_11.5 => constants.%inst.splice_block.08b
+// CHECK:STDOUT:   %.loc13_11.6 => constants.%i32
+// CHECK:STDOUT:   %.loc13_11.7 => invalid
+// CHECK:STDOUT:   %.loc13_17.3 => constants.%inst.splice_block.edd
+// CHECK:STDOUT:   %.loc13_17.4 => <error>
+// CHECK:STDOUT:   %.loc13_17.5 => <error>
 // CHECK:STDOUT: }
 // CHECK:STDOUT:

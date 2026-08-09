@@ -63,8 +63,9 @@ library "[[@TEST_NAME]]";
 
 interface Generic(T: type) {}
 
-// CHECK:STDERR: fail_args_count_mismatch.carbon:[[@LINE+3]]:24-38: error: 2 arguments passed to generic interface expecting 1 argument [CallArgCountMismatch]
-// CHECK:STDERR: fail_args_count_mismatch.carbon:[[@LINE-3]]:1-28: note: calling generic interface declared here [InCallToEntity]
+// CHECK:STDERR: fail_args_count_mismatch.carbon:[[@LINE+4]]:24-38: error: 2 arguments passed to generic interface expecting 1 argument [CallArgCountMismatch]
+// CHECK:STDERR: fail_args_count_mismatch.carbon:[[@LINE+3]]:24-38: note: 2 arguments passed here [ArgsPassedHere]
+// CHECK:STDERR: fail_args_count_mismatch.carbon:[[@LINE-4]]:1-28: note: calling generic interface declared here, expecting 1 argument [InCallToEntity]
 // CHECK:STDERR:
 fn F(unused generic T: Generic((), ())) {}
 
@@ -663,8 +664,8 @@ fn F(unused generic T: Generic((), ())) {}
 // CHECK:STDOUT:     %.1: <error> = splice_block <error> [concrete = <error>] {
 // CHECK:STDOUT:       %.Self.frozen: %type = symbolic_binding .Self [symbolic_self = constants.%.Self.frozen]
 // CHECK:STDOUT:       %Generic.ref: %Generic.type.30d = name_ref Generic, file.%Generic.decl [concrete = constants.%Generic.generic]
-// CHECK:STDOUT:       %.loc8_33: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
-// CHECK:STDOUT:       %.loc8_37: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:       %.loc9_33: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:       %.loc9_37: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
 // CHECK:STDOUT:     }
 // CHECK:STDOUT:     %T: <error> = symbolic_binding T, 0 [concrete = <error>]
 // CHECK:STDOUT:   }

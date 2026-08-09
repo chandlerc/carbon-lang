@@ -28,12 +28,13 @@ library "[[@TEST_NAME]]";
 
 fn F(generic T: type, generic U: type) -> T*;
 
-// CHECK:STDERR: fail_different_return_type.carbon:[[@LINE+3]]:1-46: error: function redeclaration differs because return type is `U*` [FunctionRedeclReturnTypeDiffers]
-// CHECK:STDERR: fail_different_return_type.carbon:[[@LINE-3]]:1-45: note: previously declared with return type `T*` [FunctionRedeclReturnTypePrevious]
+// CHECK:STDERR: fail_different_return_type.carbon:[[@LINE+3]]:43-44: error: function redeclaration differs because return type is `U*` [FunctionRedeclReturnTypeDiffers]
+// CHECK:STDERR: fail_different_return_type.carbon:[[@LINE-3]]:43-44: note: previously declared with return type `T*` [FunctionRedeclReturnTypePrevious]
 // CHECK:STDERR:
 fn F(generic T: type, generic U: type) -> U* {
-  // CHECK:STDERR: fail_different_return_type.carbon:[[@LINE+3]]:10-13: error: 1 argument passed to function expecting 2 arguments [CallArgCountMismatch]
-  // CHECK:STDERR: fail_different_return_type.carbon:[[@LINE-7]]:1-45: note: calling function declared here [InCallToEntity]
+  // CHECK:STDERR: fail_different_return_type.carbon:[[@LINE+4]]:10-13: error: 1 argument passed to function expecting 2 arguments [CallArgCountMismatch]
+  // CHECK:STDERR: fail_different_return_type.carbon:[[@LINE+3]]:10-13: note: 1 argument passed here [ArgsPassedHere]
+  // CHECK:STDERR: fail_different_return_type.carbon:[[@LINE-8]]:1-45: note: calling function declared here, expecting 2 arguments [InCallToEntity]
   // CHECK:STDERR:
   return F(T);
 }
@@ -48,8 +49,9 @@ fn F(generic T: type, generic U: type) -> T*;
 // CHECK:STDERR: fail_reorder.carbon:[[@LINE-3]]:14-20: note: previous declaration's corresponding parameter here [RedeclParamPrevious]
 // CHECK:STDERR:
 fn F(unused generic U: type, generic T: type) -> T* {
-  // CHECK:STDERR: fail_reorder.carbon:[[@LINE+3]]:10-13: error: 1 argument passed to function expecting 2 arguments [CallArgCountMismatch]
-  // CHECK:STDERR: fail_reorder.carbon:[[@LINE-7]]:1-45: note: calling function declared here [InCallToEntity]
+  // CHECK:STDERR: fail_reorder.carbon:[[@LINE+4]]:10-13: error: 1 argument passed to function expecting 2 arguments [CallArgCountMismatch]
+  // CHECK:STDERR: fail_reorder.carbon:[[@LINE+3]]:10-13: note: 1 argument passed here [ArgsPassedHere]
+  // CHECK:STDERR: fail_reorder.carbon:[[@LINE-8]]:1-45: note: calling function declared here, expecting 2 arguments [InCallToEntity]
   // CHECK:STDERR:
   return F(T);
 }
@@ -64,8 +66,9 @@ fn F(generic T: type, generic U: type) -> T*;
 // CHECK:STDERR: fail_rename.carbon:[[@LINE-3]]:14-20: note: previous declaration's corresponding parameter here [RedeclParamPrevious]
 // CHECK:STDERR:
 fn F(generic U: type, generic T: type) -> U* {
-  // CHECK:STDERR: fail_rename.carbon:[[@LINE+3]]:10-13: error: 1 argument passed to function expecting 2 arguments [CallArgCountMismatch]
-  // CHECK:STDERR: fail_rename.carbon:[[@LINE-7]]:1-45: note: calling function declared here [InCallToEntity]
+  // CHECK:STDERR: fail_rename.carbon:[[@LINE+4]]:10-13: error: 1 argument passed to function expecting 2 arguments [CallArgCountMismatch]
+  // CHECK:STDERR: fail_rename.carbon:[[@LINE+3]]:10-13: note: 1 argument passed here [ArgsPassedHere]
+  // CHECK:STDERR: fail_rename.carbon:[[@LINE-8]]:1-45: note: calling function declared here, expecting 2 arguments [InCallToEntity]
   // CHECK:STDERR:
   return F(T);
 }
@@ -440,7 +443,7 @@ fn F(generic U: type, generic T: type) -> U* {
 // CHECK:STDOUT:   fn() -> out %return.param: @F.loc9.%ptr.loc9_51.1 (%ptr.18e) {
 // CHECK:STDOUT:   !entry:
 // CHECK:STDOUT:     %F.ref: %F.type.eb3ec9.1 = name_ref F, file.%F.decl.loc4 [concrete = constants.%F.7088cc.1]
-// CHECK:STDOUT:     %T.ref.loc13: type = name_ref T, %T.loc9_39.2 [symbolic = %T.loc9_39.1 (constants.%T.091)]
+// CHECK:STDOUT:     %T.ref.loc14: type = name_ref T, %T.loc9_39.2 [symbolic = %T.loc9_39.1 (constants.%T.091)]
 // CHECK:STDOUT:     return <error>
 // CHECK:STDOUT:   }
 // CHECK:STDOUT: }

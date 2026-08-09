@@ -273,6 +273,14 @@ auto MatchContext::Match(State state, WorkItem entry) -> void {
           CARBON_DIAGNOSTIC_LABEL(InCallToFunctionParam, Info,
                                   "initializing function parameter");
           builder.Attach(entry.pattern_id, InCallToFunctionParam);
+        } else if (std::holds_alternative<LocalState*>(state)) {
+          // Everything that can go wrong initializing a binding is about the
+          // type it was declared with, and the pattern is where that type is
+          // written, so marking it puts the declaration next to the initializer
+          // however far apart they are.
+          CARBON_DIAGNOSTIC_LABEL(InBindingInit, Info,
+                                  "initializing this binding");
+          builder.Attach(entry.pattern_id, InBindingInit);
         }
       });
   CARBON_CHECK(stack_.empty());
@@ -753,9 +761,18 @@ auto MatchContext::DoPreWork(State state, SemIR::TuplePattern tuple_pattern,
                         "tuple pattern expects {0} element{0:s}, but tuple "
                         "literal has {1}",
                         Diagnostics::IntAsSelect, Diagnostics::IntAsSelect);
-      context_.emitter().Emit(entry.pattern_id,
-                              TuplePatternSizeDoesntMatchLiteral,
-                              subpattern_ids.size(), subscrutinee_ids.size());
+      // The message names both counts, so both the pattern and the literal it
+      // was matched against are marked with the one they contributed.
+      CARBON_DIAGNOSTIC_LABEL(TupleLiteralElementCount, Primary,
+                              "tuple literal has {0} element{0:s}",
+                              Diagnostics::IntAsSelect);
+      context_.emitter()
+          .Build(entry.pattern_id, TuplePatternSizeDoesntMatchLiteral,
+                 subpattern_ids.size(), subscrutinee_ids.size())
+          .Attach(entry.pattern_id)
+          .Attach(scrutinee_id, TupleLiteralElementCount,
+                  subscrutinee_ids.size())
+          .Emit();
       return;
     }
     add_all_subscrutinees(subscrutinee_ids);

@@ -100,6 +100,7 @@ static auto IsValidParamForIntroducer(Context& context, SemIR::LocId loc_id,
                           "parameters of generic types must be constant");
         auto builder =
             context.emitter().Build(loc_id, GenericParamMustBeConstant);
+        builder.Attach(loc_id);
         if (is_var) {
           CARBON_DIAGNOSTIC_LABEL(VarParamIsRuntime, Info,
                                   "`var` parameters are runtime");
@@ -267,6 +268,7 @@ static auto HandleAnyBindingPatternType(
             "not constrain the binding");
         auto builder =
             context.emitter().Build(where_loc_id, InvalidWhereInsideBinding);
+        builder.Attach(where_loc_id);
         builder.Emit();
       }
       original_inst_id = SemIR::ErrorInst::InstId;

@@ -79,8 +79,9 @@ library "[[@TEST_NAME]]";
 
 fn Add(a: i32, b: i32) -> i32 = "int.uadd";
 
-// CHECK:STDERR: fail_bad_call.carbon:[[@LINE+3]]:26-37: error: 3 arguments passed to function expecting 2 arguments [CallArgCountMismatch]
-// CHECK:STDERR: fail_bad_call.carbon:[[@LINE-3]]:1-31: note: calling function declared here [InCallToEntity]
+// CHECK:STDERR: fail_bad_call.carbon:[[@LINE+4]]:26-37: error: 3 arguments passed to function expecting 2 arguments [CallArgCountMismatch]
+// CHECK:STDERR: fail_bad_call.carbon:[[@LINE+3]]:26-37: note: 3 arguments passed here [ArgsPassedHere]
+// CHECK:STDERR: fail_bad_call.carbon:[[@LINE-4]]:1-31: note: calling function declared here, expecting 2 arguments [InCallToEntity]
 // CHECK:STDERR:
 var bad_call: array(i32, Add(1, 2, 3));
 

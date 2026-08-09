@@ -50,8 +50,9 @@ library "[[@TEST_NAME]]";
 class A {}
 
 class C(T: type);
-// CHECK:STDERR: fail_mismatch_param_count.carbon:[[@LINE+3]]:1-24: error: redeclaration differs because of parameter count of 2 [RedeclParamCountDiffers]
-// CHECK:STDERR: fail_mismatch_param_count.carbon:[[@LINE-2]]:1-17: note: previously declared with parameter count of 1 [RedeclParamCountPrevious]
+// CHECK:STDERR: fail_mismatch_param_count.carbon:[[@LINE+4]]:1-24: error: redeclaration differs because of parameter count of 2 [RedeclParamCountDiffers]
+// CHECK:STDERR: fail_mismatch_param_count.carbon:[[@LINE+3]]:18-21: note: this parameter has no counterpart [RedeclParamWithoutCounterpart]
+// CHECK:STDERR: fail_mismatch_param_count.carbon:[[@LINE-3]]:1-17: note: previously declared with parameter count of 1 [RedeclParamCountPrevious]
 // CHECK:STDERR:
 class C(T: type, U: A) {}
 
@@ -335,9 +336,9 @@ class E(U: type) {}
 // CHECK:STDOUT:   %pattern_type.9ef: type = pattern_type %A [concrete]
 // CHECK:STDOUT:   %U.patt: %pattern_type.9ef = symbolic_binding_pattern U, 1 [symbolic]
 // CHECK:STDOUT:   %U: %A = symbolic_binding U, 1 [symbolic]
-// CHECK:STDOUT:   %C.type.a601fe.2: type = generic_class_type @C.loc10 [concrete]
+// CHECK:STDOUT:   %C.type.a601fe.2: type = generic_class_type @C.loc11 [concrete]
 // CHECK:STDOUT:   %C.generic.4b4597.2: %C.type.a601fe.2 = struct_value () [concrete]
-// CHECK:STDOUT:   %C.394: type = class_type @C.loc10, @C.loc10(%T, %U) [symbolic]
+// CHECK:STDOUT:   %C.394: type = class_type @C.loc11, @C.loc11(%T, %U) [symbolic]
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
 // CHECK:STDOUT: imports {
@@ -364,20 +365,20 @@ class E(U: type) {}
 // CHECK:STDOUT:     }
 // CHECK:STDOUT:     %T.loc6_10.2: type = symbolic_binding T, 0 [symbolic = %T.loc6_10.1 (constants.%T)]
 // CHECK:STDOUT:   }
-// CHECK:STDOUT:   %C.decl.loc10: %C.type.a601fe.2 = class_decl @C.loc10 [concrete = constants.%C.generic.4b4597.2] {
-// CHECK:STDOUT:     %T.patt.loc10_10.1: %pattern_type.98f = symbolic_binding_pattern T, 0 [symbolic = %T.patt.loc10_10.2 (constants.%T.patt)]
-// CHECK:STDOUT:     %U.patt.loc10_19.1: %pattern_type.9ef = symbolic_binding_pattern U, 1 [symbolic = %U.patt.loc10_19.2 (constants.%U.patt)]
+// CHECK:STDOUT:   %C.decl.loc11: %C.type.a601fe.2 = class_decl @C.loc11 [concrete = constants.%C.generic.4b4597.2] {
+// CHECK:STDOUT:     %T.patt.loc11_10.1: %pattern_type.98f = symbolic_binding_pattern T, 0 [symbolic = %T.patt.loc11_10.2 (constants.%T.patt)]
+// CHECK:STDOUT:     %U.patt.loc11_19.1: %pattern_type.9ef = symbolic_binding_pattern U, 1 [symbolic = %U.patt.loc11_19.2 (constants.%U.patt)]
 // CHECK:STDOUT:   } {
-// CHECK:STDOUT:     %.loc10_12.1: type = splice_block %.loc10_12.2 [concrete = type] {
-// CHECK:STDOUT:       %.Self.frozen.loc10_10: %type = symbolic_binding .Self [symbolic_self = constants.%.Self.frozen]
-// CHECK:STDOUT:       %.loc10_12.2: type = type_literal type [concrete = type]
+// CHECK:STDOUT:     %.loc11_12.1: type = splice_block %.loc11_12.2 [concrete = type] {
+// CHECK:STDOUT:       %.Self.frozen.loc11_10: %type = symbolic_binding .Self [symbolic_self = constants.%.Self.frozen]
+// CHECK:STDOUT:       %.loc11_12.2: type = type_literal type [concrete = type]
 // CHECK:STDOUT:     }
-// CHECK:STDOUT:     %T.loc10_10.2: type = symbolic_binding T, 0 [symbolic = %T.loc10_10.1 (constants.%T)]
-// CHECK:STDOUT:     %.loc10_21: type = splice_block %A.ref [concrete = constants.%A] {
-// CHECK:STDOUT:       %.Self.frozen.loc10_19: %type = symbolic_binding .Self [symbolic_self = constants.%.Self.frozen]
+// CHECK:STDOUT:     %T.loc11_10.2: type = symbolic_binding T, 0 [symbolic = %T.loc11_10.1 (constants.%T)]
+// CHECK:STDOUT:     %.loc11_21: type = splice_block %A.ref [concrete = constants.%A] {
+// CHECK:STDOUT:       %.Self.frozen.loc11_19: %type = symbolic_binding .Self [symbolic_self = constants.%.Self.frozen]
 // CHECK:STDOUT:       %A.ref: type = name_ref A, file.%A.decl [concrete = constants.%A]
 // CHECK:STDOUT:     }
-// CHECK:STDOUT:     %U.loc10_19.2: %A = symbolic_binding U, 1 [symbolic = %U.loc10_19.1 (constants.%U)]
+// CHECK:STDOUT:     %U.loc11_19.2: %A = symbolic_binding U, 1 [symbolic = %U.loc11_19.1 (constants.%U)]
 // CHECK:STDOUT:   }
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
@@ -396,11 +397,11 @@ class E(U: type) {}
 // CHECK:STDOUT:   class;
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
-// CHECK:STDOUT: generic class @C.loc10(%T.loc10_10.2: type, %U.loc10_19.2: %A) {
-// CHECK:STDOUT:   %T.patt.loc10_10.2: %pattern_type.98f = symbolic_binding_pattern T, 0 [symbolic = %T.patt.loc10_10.2 (constants.%T.patt)]
-// CHECK:STDOUT:   %T.loc10_10.1: type = symbolic_binding T, 0 [symbolic = %T.loc10_10.1 (constants.%T)]
-// CHECK:STDOUT:   %U.patt.loc10_19.2: %pattern_type.9ef = symbolic_binding_pattern U, 1 [symbolic = %U.patt.loc10_19.2 (constants.%U.patt)]
-// CHECK:STDOUT:   %U.loc10_19.1: %A = symbolic_binding U, 1 [symbolic = %U.loc10_19.1 (constants.%U)]
+// CHECK:STDOUT: generic class @C.loc11(%T.loc11_10.2: type, %U.loc11_19.2: %A) {
+// CHECK:STDOUT:   %T.patt.loc11_10.2: %pattern_type.98f = symbolic_binding_pattern T, 0 [symbolic = %T.patt.loc11_10.2 (constants.%T.patt)]
+// CHECK:STDOUT:   %T.loc11_10.1: type = symbolic_binding T, 0 [symbolic = %T.loc11_10.1 (constants.%T)]
+// CHECK:STDOUT:   %U.patt.loc11_19.2: %pattern_type.9ef = symbolic_binding_pattern U, 1 [symbolic = %U.patt.loc11_19.2 (constants.%U.patt)]
+// CHECK:STDOUT:   %U.loc11_19.1: %A = symbolic_binding U, 1 [symbolic = %U.loc11_19.1 (constants.%U)]
 // CHECK:STDOUT:
 // CHECK:STDOUT: !definition:
 // CHECK:STDOUT:
@@ -418,11 +419,11 @@ class E(U: type) {}
 // CHECK:STDOUT:   %T.loc6_10.1 => constants.%T
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
-// CHECK:STDOUT: specific @C.loc10(constants.%T, constants.%U) {
-// CHECK:STDOUT:   %T.patt.loc10_10.2 => constants.%T.patt
-// CHECK:STDOUT:   %T.loc10_10.1 => constants.%T
-// CHECK:STDOUT:   %U.patt.loc10_19.2 => constants.%U.patt
-// CHECK:STDOUT:   %U.loc10_19.1 => constants.%U
+// CHECK:STDOUT: specific @C.loc11(constants.%T, constants.%U) {
+// CHECK:STDOUT:   %T.patt.loc11_10.2 => constants.%T.patt
+// CHECK:STDOUT:   %T.loc11_10.1 => constants.%T
+// CHECK:STDOUT:   %U.patt.loc11_19.2 => constants.%U.patt
+// CHECK:STDOUT:   %U.loc11_19.1 => constants.%U
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
 // CHECK:STDOUT: --- fail_mismatch_param_type.carbon

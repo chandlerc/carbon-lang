@@ -61,6 +61,7 @@ auto CheckAssociatedFunctionImplementation(
       auto builder = context.emitter().Build(
           impl_decl_id, ImplFunctionWithNonFunction,
           context.functions().Get(interface_function_type.function_id).name_id);
+      builder.Attach(impl_decl_id);
       NoteAssociatedFunction(context, builder,
                              interface_function_type.function_id);
       builder.Emit();
@@ -264,6 +265,9 @@ static auto ApplyExtendImplAs(Context& context, SemIR::LocId loc_id,
       CARBON_DIAGNOSTIC(
           ExtendImplOutsideClass, Error,
           "`extend impl` can only be used in an interface or class");
+      // TODO: Mark the enclosing declaration, to say what scope this is in
+      // instead. Every scope that reaches here is a namespace -- the file or
+      // package -- which has no declaration to point at.
       context.emitter().Emit(loc_id, ExtendImplOutsideClass);
     }
     return false;
@@ -748,6 +752,7 @@ auto FinishImplWitness(Context& context, const SemIR::Impl& impl) -> void {
           auto builder =
               context.emitter().Build(impl.definition_id, ImplMissingFunction,
                                       fn.name_id, interface.name_id);
+          builder.Attach(impl.definition_id);
           NoteAssociatedFunction(context, builder, fn_type->function_id);
           builder.Emit();
 
@@ -910,6 +915,10 @@ auto CheckRequireDeclsSatisfied(Context& context, SemIR::LocId loc_id,
                         "implements `{2}`",
                         SemIR::DeclaredFacetTypeId, InstIdAsConstant,
                         SemIR::SpecificInterface);
+      // TODO: Mark the `require ... impls` clause this constraint came from,
+      // the way the interface variant below does. The `required_impls()`
+      // entry here carries no declaration id to point at; once it does, this
+      // should attach it.
       context.emitter().Emit(
           loc_id, IdentifiedRequireImplsNotImplemented,
           context.insts()
@@ -967,12 +976,20 @@ auto CheckRequireDeclsSatisfied(Context& context, SemIR::LocId loc_id,
                         "implements {2}",
                         SemIR::SpecificInterface, SemIR::TypeId,
                         SemIR::DeclaredFacetTypeId);
-      context.emitter().Emit(
-          loc_id, InterfaceRequireImplsNotImplemented, impl.interface,
-          context.types().GetTypeIdForTypeConstantId(req_self_const_id),
-          context.constant_values()
-              .GetInstAs<SemIR::FacetType>(req_facet_type_const_id)
-              .declared_facet_type_id);
+      // The `require impls` that imposed this can be in an interface the
+      // reader never opened, so the message names an obligation with no
+      // indication of where it came from.
+      CARBON_DIAGNOSTIC_LABEL(RequireImplsDeclaredHere, Info,
+                              "required by this `require impls` declaration");
+      context.emitter()
+          .Build(loc_id, InterfaceRequireImplsNotImplemented, impl.interface,
+                 context.types().GetTypeIdForTypeConstantId(req_self_const_id),
+                 context.constant_values()
+                     .GetInstAs<SemIR::FacetType>(req_facet_type_const_id)
+                     .declared_facet_type_id)
+          .Attach(loc_id)
+          .Attach(require.decl_id, RequireImplsDeclaredHere)
+          .Emit();
     }
     if (!result.has_value() || result.has_error_value()) {
       FillImplWitnessWithErrors(context, impl);

@@ -43,6 +43,9 @@ static auto DiagnoseNotAllowed(
     SemIR::LocId context_loc_id) -> void {
   auto diag = StartDiagnoseNotAllowed(context, diagnostic_base, modifier_node,
                                       decl_kind);
+  // Every modifier diagnostic is about the modifier it names, so all of them
+  // mark it here rather than each one saying so for itself.
+  diag.Attach(modifier_node);
   if (context_loc_id.has_value()) {
     CARBON_DIAGNOSTIC_LABEL(ModifierNotInContext, Info,
                             "containing definition here");
@@ -209,8 +212,11 @@ auto RestrictExternModifierOnDecl(Context& context,
     // assume there is some other, correct value that we just don't know here.
     CARBON_DIAGNOSTIC(ExternLibraryIsCurrentLibrary, Error,
                       "`extern library` cannot specify the current library");
-    context.emitter().Emit(introducer.modifier_node_id(ModifierOrder::Extern),
-                           ExternLibraryIsCurrentLibrary);
+    context.emitter()
+        .Build(introducer.modifier_node_id(ModifierOrder::Extern),
+               ExternLibraryIsCurrentLibrary)
+        .Attach(introducer.modifier_node_id(ModifierOrder::Extern))
+        .Emit();
     introducer.extern_library = SemIR::LibraryNameId::Error;
     // Right now this can produce both this and the below diagnostic.
   }
@@ -219,8 +225,11 @@ auto RestrictExternModifierOnDecl(Context& context,
     CARBON_DIAGNOSTIC(ExternLibraryOnDefinition, Error,
                       "a library cannot be provided for an `extern` modifier "
                       "on a definition");
-    context.emitter().Emit(introducer.modifier_node_id(ModifierOrder::Extern),
-                           ExternLibraryOnDefinition);
+    context.emitter()
+        .Build(introducer.modifier_node_id(ModifierOrder::Extern),
+               ExternLibraryOnDefinition)
+        .Attach(introducer.modifier_node_id(ModifierOrder::Extern))
+        .Emit();
   }
 }
 

@@ -26,7 +26,8 @@ eval fn F() -> i32 { return 3; }
 
 // Ensure we get an error about the over-sized initializer and aren't just
 // treating all `eval fn` calls as silent errors.
-// CHECK:STDERR: fail_call_wrong_value.carbon:[[@LINE+2]]:26-37: error: cannot initialize array of 3 elements from 4 initializers [ArrayInitFromLiteralArgCountMismatch]
+// CHECK:STDERR: fail_call_wrong_value.carbon:[[@LINE+3]]:26-37: error: cannot initialize array of 3 elements from 4 initializers [ArrayInitFromLiteralArgCountMismatch]
+// CHECK:STDERR: fail_call_wrong_value.carbon:[[@LINE+2]]:1-22: note: initializing this binding [InBindingInit]
 // CHECK:STDERR:
 var a: array(i32, F()) = (0, 1, 2, 3);
 
@@ -66,7 +67,8 @@ library "[[@TEST_NAME]]";
 eval fn F(x: i32) -> i32 { return x; }
 
 fn G(generic N: i32) {
-  // CHECK:STDERR: fail_todo_dependent_call.carbon:[[@LINE+4]]:36-44: error: cannot initialize array with dependent bound from a list of initializers [ArrayInitDependentBound]
+  // CHECK:STDERR: fail_todo_dependent_call.carbon:[[@LINE+5]]:36-44: error: cannot initialize array with dependent bound from a list of initializers [ArrayInitDependentBound]
+  // CHECK:STDERR: fail_todo_dependent_call.carbon:[[@LINE+4]]:3-32: note: initializing this binding [InBindingInit]
   // CHECK:STDERR:
   // CHECK:STDERR: fail_todo_dependent_call.carbon:[[@LINE+2]]:3-32: error: value of type `<dependent type>` is not callable [CallToNonCallable]
   // CHECK:STDERR:
@@ -85,7 +87,8 @@ eval fn F(_: i32) -> type {
 }
 
 fn UseFGenerically(generic X: i32) {
-  // CHECK:STDERR: fail_todo_dependent_call_type.carbon:[[@LINE+4]]:3-20: error: value of type `<dependent type>` is not callable [CallToNonCallable]
+  // CHECK:STDERR: fail_todo_dependent_call_type.carbon:[[@LINE+5]]:3-20: error: value of type `<dependent type>` is not callable [CallToNonCallable]
+  // CHECK:STDERR: fail_todo_dependent_call_type.carbon:[[@LINE+4]]:3-20: note: initializing this binding [InBindingInit]
   // CHECK:STDERR:
   // CHECK:STDERR: fail_todo_dependent_call_type.carbon:[[@LINE+2]]:3-20: error: value of type `<dependent type>` is not callable [CallToNonCallable]
   // CHECK:STDERR:

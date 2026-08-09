@@ -83,6 +83,7 @@ auto HandleParseNode(Context& context, Parse::ImplTypeAsId node_id) -> bool {
       CARBON_DIAGNOSTIC(ExtendImplSelfAs, Error,
                         "cannot `extend` an `impl` with an explicit self type");
       auto diag = context.emitter().Build(extend_node, ExtendImplSelfAs);
+      diag.Attach(extend_node);
 
       if (self_type.type_id == GetImplDefaultSelfType(context, *class_scope)) {
         // If the explicit self type is the default, suggest removing it with a
@@ -139,6 +140,9 @@ auto HandleParseNode(Context& context, Parse::ImplDefaultSelfAsId node_id)
   } else {
     CARBON_DIAGNOSTIC(ImplAsOutsideClass, Error,
                       "`impl as` can only be used in a class");
+    // TODO: Mark the enclosing declaration, to say what scope this is in
+    // instead. The scope stack has no instruction for the scopes that reach
+    // here, so there is nothing to point at.
     context.emitter().Emit(node_id, ImplAsOutsideClass);
     self_inst_id = SemIR::ErrorInst::TypeInstId;
   }

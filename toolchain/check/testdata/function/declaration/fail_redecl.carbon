@@ -25,8 +25,9 @@ fn B(x: ());
 fn B(x: ());
 
 fn C();
-// CHECK:STDERR: fail_redecl.carbon:[[@LINE+3]]:1-12: error: redeclaration differs because of parameter count of 1 [RedeclParamCountDiffers]
-// CHECK:STDERR: fail_redecl.carbon:[[@LINE-2]]:1-7: note: previously declared with parameter count of 0 [RedeclParamCountPrevious]
+// CHECK:STDERR: fail_redecl.carbon:[[@LINE+4]]:1-12: error: redeclaration differs because of parameter count of 1 [RedeclParamCountDiffers]
+// CHECK:STDERR: fail_redecl.carbon:[[@LINE+3]]:6-10: note: this parameter has no counterpart [RedeclParamWithoutCounterpart]
+// CHECK:STDERR: fail_redecl.carbon:[[@LINE-3]]:1-7: note: previously declared with parameter count of 0 [RedeclParamCountPrevious]
 // CHECK:STDERR:
 fn C(x: ());
 
@@ -56,13 +57,13 @@ fn E() {}
 // CHECK:STDOUT:   %B: %B.type = struct_value () [concrete]
 // CHECK:STDOUT:   %C.type.322e3b.1: type = fn_type @C.loc27 [concrete]
 // CHECK:STDOUT:   %C.010386.1: %C.type.322e3b.1 = struct_value () [concrete]
-// CHECK:STDOUT:   %C.type.322e3b.2: type = fn_type @C.loc31 [concrete]
+// CHECK:STDOUT:   %C.type.322e3b.2: type = fn_type @C.loc32 [concrete]
 // CHECK:STDOUT:   %C.010386.2: %C.type.322e3b.2 = struct_value () [concrete]
 // CHECK:STDOUT:   %D.type: type = fn_type @D [concrete]
 // CHECK:STDOUT:   %D: %D.type = struct_value () [concrete]
-// CHECK:STDOUT:   %E.type.53e05b.1: type = fn_type @E.loc39 [concrete]
+// CHECK:STDOUT:   %E.type.53e05b.1: type = fn_type @E.loc40 [concrete]
 // CHECK:STDOUT:   %E.3f2512.1: %E.type.53e05b.1 = struct_value () [concrete]
-// CHECK:STDOUT:   %E.type.53e05b.2: type = fn_type @E.loc43 [concrete]
+// CHECK:STDOUT:   %E.type.53e05b.2: type = fn_type @E.loc44 [concrete]
 // CHECK:STDOUT:   %E.3f2512.2: %E.type.53e05b.2 = struct_value () [concrete]
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
@@ -71,8 +72,8 @@ fn E() {}
 // CHECK:STDOUT:     .A = %A.decl.loc15
 // CHECK:STDOUT:     .B = %B.decl.loc21
 // CHECK:STDOUT:     .C = %C.decl.loc27
-// CHECK:STDOUT:     .D = %D.decl.loc33
-// CHECK:STDOUT:     .E = %E.decl.loc39
+// CHECK:STDOUT:     .D = %D.decl.loc34
+// CHECK:STDOUT:     .E = %E.decl.loc40
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   %A.decl.loc15: %A.type = fn_decl @A [concrete = constants.%A] {} {}
 // CHECK:STDOUT:   %A.decl.loc19: %A.type = fn_decl @A [concrete = constants.%A] {} {}
@@ -99,21 +100,21 @@ fn E() {}
 // CHECK:STDOUT:     %x.loc25: %empty_tuple.type = wrapper_binding x, %x.param.loc25
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   %C.decl.loc27: %C.type.322e3b.1 = fn_decl @C.loc27 [concrete = constants.%C.010386.1] {} {}
-// CHECK:STDOUT:   %C.decl.loc31: %C.type.322e3b.2 = fn_decl @C.loc31 [concrete = constants.%C.010386.2] {
+// CHECK:STDOUT:   %C.decl.loc32: %C.type.322e3b.2 = fn_decl @C.loc32 [concrete = constants.%C.010386.2] {
 // CHECK:STDOUT:     %x.param_patt: %pattern_type = value_param_pattern [concrete = constants.%x.param_patt]
 // CHECK:STDOUT:     %x.patt: %pattern_type = wrapper_binding_pattern x, %x.param_patt [concrete = constants.%x.patt]
 // CHECK:STDOUT:   } {
 // CHECK:STDOUT:     %x.param: %empty_tuple.type = value_param call_param0
-// CHECK:STDOUT:     %.loc31_10.1: type = splice_block %.loc31_10.3 [concrete = constants.%empty_tuple.type] {
-// CHECK:STDOUT:       %.loc31_10.2: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
-// CHECK:STDOUT:       %.loc31_10.3: type = converted %.loc31_10.2, constants.%empty_tuple.type [concrete = constants.%empty_tuple.type]
+// CHECK:STDOUT:     %.loc32_10.1: type = splice_block %.loc32_10.3 [concrete = constants.%empty_tuple.type] {
+// CHECK:STDOUT:       %.loc32_10.2: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:       %.loc32_10.3: type = converted %.loc32_10.2, constants.%empty_tuple.type [concrete = constants.%empty_tuple.type]
 // CHECK:STDOUT:     }
 // CHECK:STDOUT:     %x: %empty_tuple.type = wrapper_binding x, %x.param
 // CHECK:STDOUT:   }
-// CHECK:STDOUT:   %D.decl.loc33: %D.type = fn_decl @D [concrete = constants.%D] {} {}
-// CHECK:STDOUT:   %D.decl.loc37: %D.type = fn_decl @D [concrete = constants.%D] {} {}
-// CHECK:STDOUT:   %E.decl.loc39: %E.type.53e05b.1 = fn_decl @E.loc39 [concrete = constants.%E.3f2512.1] {} {}
-// CHECK:STDOUT:   %E.decl.loc43: %E.type.53e05b.2 = fn_decl @E.loc43 [concrete = constants.%E.3f2512.2] {} {}
+// CHECK:STDOUT:   %D.decl.loc34: %D.type = fn_decl @D [concrete = constants.%D] {} {}
+// CHECK:STDOUT:   %D.decl.loc38: %D.type = fn_decl @D [concrete = constants.%D] {} {}
+// CHECK:STDOUT:   %E.decl.loc40: %E.type.53e05b.1 = fn_decl @E.loc40 [concrete = constants.%E.3f2512.1] {} {}
+// CHECK:STDOUT:   %E.decl.loc44: %E.type.53e05b.2 = fn_decl @E.loc44 [concrete = constants.%E.3f2512.2] {} {}
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
 // CHECK:STDOUT: fn @A();
@@ -122,19 +123,19 @@ fn E() {}
 // CHECK:STDOUT:
 // CHECK:STDOUT: fn @C.loc27();
 // CHECK:STDOUT:
-// CHECK:STDOUT: fn @C.loc31(%x.param: %empty_tuple.type);
+// CHECK:STDOUT: fn @C.loc32(%x.param: %empty_tuple.type);
 // CHECK:STDOUT:
 // CHECK:STDOUT: fn @D() {
 // CHECK:STDOUT: !entry:
 // CHECK:STDOUT:   return
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
-// CHECK:STDOUT: fn @E.loc39() {
+// CHECK:STDOUT: fn @E.loc40() {
 // CHECK:STDOUT: !entry:
 // CHECK:STDOUT:   return
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
-// CHECK:STDOUT: fn @E.loc43() {
+// CHECK:STDOUT: fn @E.loc44() {
 // CHECK:STDOUT: !entry:
 // CHECK:STDOUT:   return
 // CHECK:STDOUT: }

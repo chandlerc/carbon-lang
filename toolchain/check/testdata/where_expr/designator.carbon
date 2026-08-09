@@ -34,7 +34,8 @@ interface J {
   let Member: type;
 }
 
-// CHECK:STDERR: fail_wrong_member.carbon:[[@LINE+2]]:38-46: error: member name `Mismatch` not found in `J` [MemberNameNotFoundInSpecificScope]
+// CHECK:STDERR: fail_wrong_member.carbon:[[@LINE+3]]:38-46: error: member name `Mismatch` not found in `J` [MemberNameNotFoundInSpecificScope]
+// CHECK:STDERR: fail_wrong_member.carbon:[[@LINE-5]]:1-13: note: no member `Mismatch` in this scope [MemberNameNotFoundSpecificScope]
 // CHECK:STDERR:
 fn PeriodMismatch(generic W: J where .Mismatch = {});
 

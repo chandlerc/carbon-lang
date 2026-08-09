@@ -193,6 +193,32 @@ class FullPatternStack {
     return var_info.storage_id;
   }
 
+  // Returns the `VarPattern` of a binding in the full-pattern whose initializer
+  // is being handled, or `None` if it has none.
+  //
+  // For diagnostics: a name that resolves to `InitTombstone` is being used
+  // inside its own initializer, and this is what declared it. Reads the pending
+  // patterns without consuming them, so it doesn't disturb the visit order
+  // `GetLocalVarStorage` enforces.
+  //
+  // The top frame is taken to be the full-pattern whose initializer is being
+  // handled, which holds as long as an initializer can't contain a nested
+  // full-pattern; a lambda in an initializer would break it.
+  //
+  // TODO: A `let` binding records no `VarPattern`, so this returns `None` for
+  // one and its use-before-initialization diagnostic loses the label. Track
+  // the binding pattern itself to cover both.
+  auto GetPatternBeingInitialized() const -> SemIR::InstId {
+    if (kind_stack_.empty()) {
+      return SemIR::InstId::None;
+    }
+    auto patterns = var_pattern_stack_.PeekArray();
+    if (patterns.empty()) {
+      return SemIR::InstId::None;
+    }
+    return patterns.front().pattern_id;
+  }
+
   // Runs verification that the processing cleanly finished.
   auto VerifyOnFinish() const -> void {
     CARBON_CHECK(kind_stack_.empty(),

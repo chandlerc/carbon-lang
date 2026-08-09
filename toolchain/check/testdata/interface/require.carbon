@@ -118,7 +118,8 @@ interface Z {
 fn F(generic T: Z) {
   // This should fail name lookup since Z does not extend Y.
   //
-  // CHECK:STDERR: fail_implicit_self_no_extend_name_lookup_fails.carbon:[[@LINE+2]]:3-6: error: member name `YY` not found in `Z` [MemberNameNotFoundInSpecificScope]
+  // CHECK:STDERR: fail_implicit_self_no_extend_name_lookup_fails.carbon:[[@LINE+3]]:3-6: error: member name `YY` not found in `Z` [MemberNameNotFoundInSpecificScope]
+  // CHECK:STDERR: fail_implicit_self_no_extend_name_lookup_fails.carbon:[[@LINE-8]]:1-13: note: no member `YY` in this scope [MemberNameNotFoundSpecificScope]
   // CHECK:STDERR:
   T.YY();
 }
@@ -137,7 +138,8 @@ interface Z {
 fn F(generic T: Z) {
   // This should fail name lookup since Z does not extend Y.
   //
-  // CHECK:STDERR: fail_explicit_self_no_extend_name_lookup_fails.carbon:[[@LINE+2]]:3-6: error: member name `YY` not found in `Z` [MemberNameNotFoundInSpecificScope]
+  // CHECK:STDERR: fail_explicit_self_no_extend_name_lookup_fails.carbon:[[@LINE+3]]:3-6: error: member name `YY` not found in `Z` [MemberNameNotFoundInSpecificScope]
+  // CHECK:STDERR: fail_explicit_self_no_extend_name_lookup_fails.carbon:[[@LINE-8]]:1-13: note: no member `YY` in this scope [MemberNameNotFoundSpecificScope]
   // CHECK:STDERR:
   T.YY();
 }
@@ -264,7 +266,8 @@ interface Z(T: type) {
 library "[[@TEST_NAME]]";
 
 interface Z(T: type) {
-  // CHECK:STDERR: fail_self_impls_self.carbon:[[@LINE+2]]:17-20: error: `require` declaration constrained by a non-facet type; expected an `interface` or `constraint` name after `impls` [RequireImplsMissingFacetType]
+  // CHECK:STDERR: fail_self_impls_self.carbon:[[@LINE+3]]:17-20: error: `require` declaration constrained by a non-facet type; expected an `interface` or `constraint` name after `impls` [RequireImplsMissingFacetType]
+  // CHECK:STDERR: fail_self_impls_self.carbon:[[@LINE+2]]:17-20: note: this names type `<invalid>` [RequireImplsNonFacetType]
   // CHECK:STDERR:
   require impls Self;
 }
@@ -275,7 +278,8 @@ library "[[@TEST_NAME]]";
 class C(T: type) {}
 
 interface Z(T: type) {
-  // CHECK:STDERR: fail_impls_type.carbon:[[@LINE+2]]:19-25: error: `require` declaration constrained by a non-facet type; expected an `interface` or `constraint` name after `impls` [RequireImplsMissingFacetType]
+  // CHECK:STDERR: fail_impls_type.carbon:[[@LINE+3]]:19-25: error: `require` declaration constrained by a non-facet type; expected an `interface` or `constraint` name after `impls` [RequireImplsMissingFacetType]
+  // CHECK:STDERR: fail_impls_type.carbon:[[@LINE+2]]:19-25: note: this names type `C(Self)` [RequireImplsNonFacetType]
   // CHECK:STDERR:
   require T impls C(Self);
 }
@@ -298,7 +302,8 @@ library "[[@TEST_NAME]]";
 interface Y {}
 
 interface Z(T: type) {
-  // CHECK:STDERR: fail_impls_non_type.carbon:[[@LINE+2]]:17: error: `require` declaration constrained by a non-facet type; expected an `interface` or `constraint` name after `impls` [RequireImplsMissingFacetType]
+  // CHECK:STDERR: fail_impls_non_type.carbon:[[@LINE+3]]:17: error: `require` declaration constrained by a non-facet type; expected an `interface` or `constraint` name after `impls` [RequireImplsMissingFacetType]
+  // CHECK:STDERR: fail_impls_non_type.carbon:[[@LINE+2]]:17: note: this names type `<invalid>` [RequireImplsNonFacetType]
   // CHECK:STDERR:
   require impls 1;
 }

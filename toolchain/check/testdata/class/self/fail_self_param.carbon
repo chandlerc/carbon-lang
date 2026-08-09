@@ -18,8 +18,9 @@ library "[[@TEST_NAME]]";
 // CHECK:STDERR: fail_self_param.carbon:[[@LINE+2]]:9-18: error: `self` parameter only allowed on functions [SelfParameterNotAllowed]
 // CHECK:STDERR:
 class C(self: type, x: self) {}
-// CHECK:STDERR: fail_self_param.carbon:[[@LINE+3]]:8-12: error: 1 argument passed to generic class expecting 2 arguments [CallArgCountMismatch]
-// CHECK:STDERR: fail_self_param.carbon:[[@LINE-2]]:1-30: note: calling generic class declared here [InCallToEntity]
+// CHECK:STDERR: fail_self_param.carbon:[[@LINE+4]]:8-12: error: 1 argument passed to generic class expecting 2 arguments [CallArgCountMismatch]
+// CHECK:STDERR: fail_self_param.carbon:[[@LINE+3]]:8-12: note: 1 argument passed here [ArgsPassedHere]
+// CHECK:STDERR: fail_self_param.carbon:[[@LINE-3]]:1-30: note: calling generic class declared here, expecting 2 arguments [InCallToEntity]
 // CHECK:STDERR:
 var v: C(());
 

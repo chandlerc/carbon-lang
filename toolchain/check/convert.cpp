@@ -289,11 +289,17 @@ static auto ConvertTupleToArray(Context& context, SemIR::TupleType tuple_type,
           "cannot initialize array of {0} element{0:s} from tuple "
           "with {1} element{1:s}",
           Diagnostics::IntAsSelect, Diagnostics::IntAsSelect);
-      context.emitter().Emit(value_loc_id,
-                             literal_elems.empty()
-                                 ? ArrayInitFromExprArgCountMismatch
-                                 : ArrayInitFromLiteralArgCountMismatch,
-                             *array_bound, tuple_elem_types.size());
+      // TODO: Mark where the bound was written, which is where the reader has
+      // to go to change it. `bound_id` is a canonicalized `IntValue` with no
+      // source of its own, and the array type expression that named it is not
+      // reachable from here.
+      context.emitter()
+          .Build(value_loc_id,
+                 literal_elems.empty() ? ArrayInitFromExprArgCountMismatch
+                                       : ArrayInitFromLiteralArgCountMismatch,
+                 *array_bound, tuple_elem_types.size())
+          .Attach(value_loc_id)
+          .Emit();
     }
     return SemIR::ErrorInst::InstId;
   }
@@ -375,8 +381,24 @@ static auto ConvertTupleToTuple(Context& context, SemIR::TupleType src_type,
           "cannot initialize tuple of {0} element{0:s} from tuple "
           "with {1} element{1:s}",
           Diagnostics::IntAsSelect, Diagnostics::IntAsSelect);
-      context.emitter().Emit(value_loc_id, TupleInitElementCountMismatch,
-                             dest_elem_types.size(), src_elem_types.size());
+      // The counts alone leave the reader counting elements. Where the source
+      // is a literal, the first element with nothing opposite it is what has to
+      // go.
+      CARBON_DIAGNOSTIC_LABEL(TupleElementWithoutCounterpart, Primary,
+                              "this element has no counterpart");
+      auto builder = context.emitter().Build(
+          value_loc_id, TupleInitElementCountMismatch, dest_elem_types.size(),
+          src_elem_types.size());
+      if (src_elem_types.size() > dest_elem_types.size() &&
+          literal_elems.size() == src_elem_types.size()) {
+        builder.Attach(literal_elems[dest_elem_types.size()],
+                       TupleElementWithoutCounterpart);
+      } else {
+        // Nothing narrower to point at: the source is a value rather than a
+        // literal, or it is the destination that has the extra elements.
+        builder.Attach(value_loc_id);
+      }
+      builder.Emit();
     }
     return SemIR::ErrorInst::InstId;
   }
@@ -617,11 +639,18 @@ static auto ConvertPartialInitializerToNonPartial(
 }
 
 // Common implementation for ConvertStructToStruct and ConvertStructToClass.
-template <typename TargetAccessInstT, typename GetDefault>
+//
+// `get_field_decl` names where a destination field was declared, for
+// diagnostics that send the reader there. The fields themselves come from the
+// destination's object representation, whose types are canonicalized and so
+// have no location of their own.
+template <typename TargetAccessInstT, typename GetDefault,
+          typename GetFieldDecl>
 static auto ConvertStructToStructOrClass(
     Context& context, SemIR::StructType src_type, SemIR::StructType dest_type,
     SemIR::InstId value_id, ConversionTarget target, GetDefault get_default,
-    SemIR::ClassType* vtable_class_type = nullptr) -> SemIR::InstId {
+    GetFieldDecl get_field_decl, SemIR::ClassType* vtable_class_type = nullptr)
+    -> SemIR::InstId {
   static_assert(std::is_same_v<SemIR::ClassElementAccess, TargetAccessInstT> ||
                 std::is_same_v<SemIR::StructAccess, TargetAccessInstT>);
   constexpr bool ToClass =
@@ -665,9 +694,17 @@ static auto ConvertStructToStructOrClass(
             CARBON_DIAGNOSTIC(StructInitUnexpectedFieldInLiteral, Error,
                               "struct {0} has no field named `{1}`",
                               SemIR::TypeId, SemIR::NameId);
-            context.emitter().Emit(value_loc_id,
-                                   StructInitUnexpectedFieldInLiteral,
-                                   target.type_id, field.name_id);
+            // The whole literal is marked by the message, which in a literal of
+            // any size leaves the reader to find the offending field by name.
+            CARBON_DIAGNOSTIC_LABEL(StructInitUnexpectedFieldHere, Primary,
+                                    "no field `{0}` in the destination type",
+                                    SemIR::NameId);
+            context.emitter()
+                .Build(value_loc_id, StructInitUnexpectedFieldInLiteral,
+                       target.type_id, field.name_id)
+                .Attach(literal_elems[i], StructInitUnexpectedFieldHere,
+                        field.name_id)
+                .Emit();
           } else {
             CARBON_DIAGNOSTIC(StructInitUnexpectedFieldInConversion, Error,
                               "cannot convert from struct type {0} to {1}: "
@@ -788,8 +825,20 @@ static auto ConvertStructToStructOrClass(
               StructInitMissingFieldInLiteral, Error,
               "missing value for field `{0}` in struct initialization",
               SemIR::NameId);
-          context.emitter().Emit(value_loc_id, StructInitMissingFieldInLiteral,
-                                 dest_field.name_id);
+          // Which field is missing is only actionable with somewhere to go and
+          // read what it wants.
+          CARBON_DIAGNOSTIC_LABEL(StructFieldDeclaredHere, Info,
+                                  "field `{0}` declared here", SemIR::NameId);
+          auto builder = context.emitter().Build(
+              value_loc_id, StructInitMissingFieldInLiteral,
+              dest_field.name_id);
+          builder.Attach(value_loc_id);
+          if (auto field_decl_id = get_field_decl(dest_field.name_id);
+              field_decl_id.has_value()) {
+            builder.Attach(field_decl_id, StructFieldDeclaredHere,
+                           dest_field.name_id);
+          }
+          builder.Emit();
         } else {
           CARBON_DIAGNOSTIC(StructInitMissingFieldInConversion, Error,
                             "cannot convert from struct type {0} to {1}: "
@@ -854,7 +903,8 @@ static auto ConvertStructToStruct(Context& context, SemIR::StructType src_type,
                                   ConversionTarget target) -> SemIR::InstId {
   return ConvertStructToStructOrClass<SemIR::StructAccess>(
       context, src_type, dest_type, value_id, target,
-      /*get_default=*/[](SemIR::NameId) { return SemIR::InstId::None; });
+      /*get_default=*/[](SemIR::NameId) { return SemIR::InstId::None; },
+      /*get_field_decl=*/[](SemIR::NameId) { return SemIR::InstId::None; });
 }
 
 // Performs a conversion from a struct to a class type. This function only
@@ -873,7 +923,15 @@ static auto ConvertStructToClass(Context& context, SemIR::StructType src_type,
       dest_class_info.inheritance_kind == SemIR::Class::Abstract) {
     CARBON_DIAGNOSTIC(AbstractTypeInInit, Error,
                       "initialization of abstract class {0}", SemIR::TypeId);
-    context.emitter().Emit(value_id, AbstractTypeInInit, target.type_id);
+    // Nothing at the initialization says the class is abstract, so without the
+    // declaration the message gives the reader nowhere to go.
+    CARBON_DIAGNOSTIC_LABEL(ClassDeclaredAbstractHere, Info,
+                            "class was declared abstract here");
+    context.emitter()
+        .Build(value_id, AbstractTypeInInit, target.type_id)
+        .Attach(value_id)
+        .Attach(dest_class_info.definition_id, ClassDeclaredAbstractHere)
+        .Emit();
   }
   auto object_repr_id =
       dest_class_info.GetObjectRepr(context.sem_ir(), dest_type.specific_id);
@@ -899,6 +957,19 @@ static auto ConvertStructToClass(Context& context, SemIR::StructType src_type,
   const auto& dest_class_scope =
       context.name_scopes().Get(dest_class_info.scope_id);
 
+  // Returns the `FieldDecl` for a field of the destination class, or `None` if
+  // the class has no such field.
+  auto get_field_decl = [&](SemIR::NameId name_id) {
+    auto entry_id = dest_class_scope.Lookup(name_id);
+    if (!entry_id.has_value()) {
+      return SemIR::InstId::None;
+    }
+    auto field_inst_id =
+        dest_class_scope.GetEntry(*entry_id).result.target_inst_id();
+    LoadImportRef(context, field_inst_id);
+    return field_inst_id;
+  };
+
   // Provide the default value for a field. Returns `InstId::None` if no
   // default is available, or `ErrorInst::InstId` if a diagnosed error
   // occurs.
@@ -907,18 +978,13 @@ static auto ConvertStructToClass(Context& context, SemIR::StructType src_type,
       return SemIR::InstId::None;
     }
 
-    // Look up the field name in the class to get the corresponding
-    // `FieldDecl` `InstId`.
-    auto entry_id = dest_class_scope.Lookup(name_id);
-    if (!entry_id.has_value()) {
+    auto field_inst_id = get_field_decl(name_id);
+    if (!field_inst_id.has_value()) {
       return SemIR::InstId::None;
     }
 
     // Look up the initializer `InstId` for the field and eval as a
     // constant.
-    auto field_inst_id =
-        dest_class_scope.GetEntry(*entry_id).result.target_inst_id();
-    LoadImportRef(context, field_inst_id);
     field_inst_id = context.constant_values().GetConstantInstId(field_inst_id);
     auto field_decl = context.insts().GetAs<SemIR::FieldDecl>(field_inst_id);
     auto field = context.fields().Get(field_decl.field_id);
@@ -938,7 +1004,7 @@ static auto ConvertStructToClass(Context& context, SemIR::StructType src_type,
 
   return ConvertStructToStructOrClass<SemIR::ClassElementAccess>(
       context, src_type, dest_struct_type, value_id, target, get_default,
-      is_partial ? nullptr : &dest_type);
+      get_field_decl, is_partial ? nullptr : &dest_type);
 }
 
 // Represents an edge in the inheritance graph, created by a `base` declaration.
@@ -1200,6 +1266,10 @@ static auto DiagnoseConversionFailureToConstraintValue(
   auto const_expr_id = GetCanonicalFacetOrTypeValue(context, expr_id);
   auto const_expr_type_id = context.insts().Get(const_expr_id).type_id();
 
+  // TODO: The message names the type being converted to, and nothing here
+  // names where that type was written, so only the expression is marked.
+  // Marking the target as well would say where each half of the message came
+  // from; that needs the conversion target to carry its location.
   if (context.types().Is<SemIR::FacetType>(const_expr_type_id)) {
     CARBON_DIAGNOSTIC(ConversionFailureFacetToFacet, Error,
                       "cannot convert type {0} that implements {1} into type "
@@ -1714,8 +1784,13 @@ static auto GetConversionInterfaceName(ConversionTarget::Kind kind)
 
 // Performs a user-defined conversion of `expr_id` to `target`, by calling a
 // function from a suitable conversion interface.
+//
+// `orig_expr_id` is the expression as it was written, which is what a failure
+// marks. `expr_id` may be what an earlier conversion produced from it, and one
+// of those has no source of its own to point at.
 static auto PerformUserDefinedConversion(Context& context, SemIR::LocId loc_id,
                                          SemIR::InstId expr_id,
+                                         SemIR::InstId orig_expr_id,
                                          ConversionTarget target)
     -> SemIR::InstId {
   if (context.insts().Get(expr_id).type_id() == target.type_id) {
@@ -1744,9 +1819,9 @@ static auto PerformUserDefinedConversion(Context& context, SemIR::LocId loc_id,
               "{0:=1: with `as`|=2: with `unsafe as`|:}",
               Diagnostics::IntAsSelect, TypeOfInstId, Diagnostics::BoolAsSelect,
               SemIR::TypeId);
-          builder.Attach(loc_id, ConversionFailureNonTypeToFacet,
-                         target_kind_for_diag, expr_id,
-                         target.type_id == SemIR::TypeType::TypeId,
+          builder.Attach(SemIR::LocId(orig_expr_id),
+                         ConversionFailureNonTypeToFacet, target_kind_for_diag,
+                         expr_id, target.type_id == SemIR::TypeType::TypeId,
                          target.type_id);
         } else {
           CARBON_DIAGNOSTIC_CONTEXT(
@@ -1754,8 +1829,8 @@ static auto PerformUserDefinedConversion(Context& context, SemIR::LocId loc_id,
               "cannot{0:=0: implicitly|:} convert expression of type "
               "{1} to {2}{0:=1: with `as`|=2: with `unsafe as`|:}",
               Diagnostics::IntAsSelect, TypeOfInstId, SemIR::TypeId);
-          builder.Attach(loc_id, ConversionFailure, target_kind_for_diag,
-                         expr_id, target.type_id);
+          builder.Attach(SemIR::LocId(orig_expr_id), ConversionFailure,
+                         target_kind_for_diag, expr_id, target.type_id);
         }
       });
 
@@ -2071,7 +2146,8 @@ auto PerformAction(Context& context, SemIR::LocId loc_id,
 
   auto expr_id =
       PerformBuiltinConversion(context, loc_id, action.inst_id, target);
-  expr_id = PerformUserDefinedConversion(context, loc_id, expr_id, target);
+  expr_id = PerformUserDefinedConversion(context, loc_id, expr_id,
+                                         action.inst_id, target);
   return PerformCategoryConversion(context, loc_id, expr_id, target);
 }
 
@@ -2092,7 +2168,8 @@ auto PerformAction(Context& context, SemIR::LocId loc_id,
 
   auto expr_id =
       PerformBuiltinConversion(context, loc_id, action.inst_id, target);
-  expr_id = PerformUserDefinedConversion(context, loc_id, expr_id, target);
+  expr_id = PerformUserDefinedConversion(context, loc_id, expr_id,
+                                         action.inst_id, target);
   return PerformCategoryConversion(context, loc_id, expr_id, target);
 }
 
@@ -2249,7 +2326,8 @@ auto Convert(Context& context, SemIR::LocId loc_id, SemIR::InstId expr_id,
   }
 
   // If this is not a builtin conversion, try an `ImplicitAs` conversion.
-  expr_id = PerformUserDefinedConversion(context, loc_id, expr_id, target);
+  expr_id = PerformUserDefinedConversion(context, loc_id, expr_id, orig_expr_id,
+                                         target);
 
   // Track that we performed a type conversion, if we did so.
   if (original_inner_expr_id != expr_id) {

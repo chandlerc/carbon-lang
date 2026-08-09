@@ -231,24 +231,32 @@ auto CheckFunctionReturnTypeMatches(Context& context,
     CARBON_DIAGNOSTIC(
         FunctionRedeclReturnTypeDiffersNoReturn, Error,
         "function redeclaration differs because no return type is provided");
-    auto diag =
-        new_return_type_id.has_value()
-            ? context.emitter().Build(new_function.latest_decl_id(),
-                                      FunctionRedeclReturnTypeDiffers,
-                                      new_return_type_id)
-            : context.emitter().Build(new_function.latest_decl_id(),
-                                      FunctionRedeclReturnTypeDiffersNoReturn);
+    // The declarations differ in one place, so that is what each side marks.
+    // Underlining two whole `fn` declarations to say their return types
+    // disagree leaves the reader to find the difference.
+    auto new_loc_id = new_function.return_type_inst_id.has_value()
+                          ? SemIR::LocId(new_function.return_type_inst_id)
+                          : SemIR::LocId(new_function.latest_decl_id());
+    auto prev_loc_id = prev_function.return_type_inst_id.has_value()
+                           ? SemIR::LocId(prev_function.return_type_inst_id)
+                           : SemIR::LocId(prev_function.latest_decl_id());
+    auto diag = new_return_type_id.has_value()
+                    ? context.emitter().Build(new_loc_id,
+                                              FunctionRedeclReturnTypeDiffers,
+                                              new_return_type_id)
+                    : context.emitter().Build(
+                          new_loc_id, FunctionRedeclReturnTypeDiffersNoReturn);
+    diag.Attach(new_loc_id);
     if (prev_return_type_id.has_value()) {
       CARBON_DIAGNOSTIC_LABEL(FunctionRedeclReturnTypePrevious, Info,
                               "previously declared with return type {0}",
                               SemIR::TypeId);
-      diag.Attach(prev_function.latest_decl_id(),
-                  FunctionRedeclReturnTypePrevious, prev_return_type_id);
+      diag.Attach(prev_loc_id, FunctionRedeclReturnTypePrevious,
+                  prev_return_type_id);
     } else {
       CARBON_DIAGNOSTIC_LABEL(FunctionRedeclReturnTypePreviousNoReturn, Info,
                               "previously declared with no return type");
-      diag.Attach(prev_function.latest_decl_id(),
-                  FunctionRedeclReturnTypePreviousNoReturn);
+      diag.Attach(prev_loc_id, FunctionRedeclReturnTypePreviousNoReturn);
     }
     diag.Emit();
     return false;
@@ -286,6 +294,8 @@ static auto CheckFunctionEvaluationModeMatches(
       "function redeclaration differs because new function is "
       "{0:=-1:not `eval`|=-2:not `musteval`|=1:`eval`|=2:`musteval`}",
       Diagnostics::IntAsSelect);
+  // TODO: Mark the `eval` or `musteval` keyword itself rather than the whole
+  // declaration; the function doesn't record the keyword's location.
   CARBON_DIAGNOSTIC_LABEL(
       FunctionRedeclEvaluationModePrevious, Info,
       "previously {0:<0:not |:}declared as "

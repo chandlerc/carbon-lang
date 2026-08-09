@@ -323,6 +323,7 @@ static auto BuildVtable(Context& context, Parse::ClassDefinitionId node_id,
           Diagnostics::BoolAsSelect);
       auto builder = context.emitter().Build(SemIR::LocId(inst_id),
                                              OverrideWithoutVirtualInBase);
+      builder.Attach(SemIR::LocId(inst_id));
       if (base_vtable_id.has_value()) {
         const auto& base_vtable = context.vtables().Get(base_vtable_id);
         auto base_vtable_inst_block =

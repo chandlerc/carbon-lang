@@ -20,14 +20,26 @@ namespace Carbon::Check {
 
 auto HandleParseNode(Context& context, Parse::ObserveIntroducerId node_id)
     -> bool {
+  // A code block's scope has no instruction, which also means there is no
+  // enclosing declaration to point at.
   auto scope_inst_id = context.scope_stack().PeekInstId();
-  if (!context.insts()
+  if (!scope_inst_id.has_value() ||
+      !context.insts()
            .IsOneOf<SemIR::InterfaceWithSelfDecl, SemIR::FunctionDecl>(
                scope_inst_id)) {
     CARBON_DIAGNOSTIC(
         ObserveInWrongScope, Error,
         "`observe` can only be used in an `interface` or `function`");
-    context.emitter().Emit(node_id, ObserveInWrongScope);
+    // The message lists what is allowed; the enclosing declaration is what the
+    // reader has instead, and in a nested body it is off the screen.
+    CARBON_DIAGNOSTIC_LABEL(ObserveEnclosingScope, Info,
+                            "appears in this declaration");
+    auto builder = context.emitter().Build(node_id, ObserveInWrongScope);
+    builder.Attach(node_id);
+    if (scope_inst_id.has_value()) {
+      builder.Attach(scope_inst_id, ObserveEnclosingScope);
+    }
+    builder.Emit();
     scope_inst_id = SemIR::ErrorInst::InstId;
   }
 

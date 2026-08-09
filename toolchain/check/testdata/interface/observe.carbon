@@ -38,18 +38,19 @@ import library "transitive";
 fn F[T: Transitive](t: T) {
   var a: T.A = t.GetA();
 
-  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+3]]:3-12: error: cannot implicitly convert expression of type `T.(Transitive.A)` to `T.(Transitive.B)` [ConversionFailure]
-  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+2]]:3-12: note: type `T.(Transitive.A)` does not implement interface `Core.ImplicitAs(T.(Transitive.B))` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+4]]:16: error: cannot implicitly convert expression of type `T.(Transitive.A)` to `T.(Transitive.B)` [ConversionFailure]
+  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+3]]:3-12: note: type `T.(Transitive.A)` does not implement interface `Core.ImplicitAs(T.(Transitive.B))` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+2]]:3-12: note: initializing this binding [InBindingInit]
   // CHECK:STDERR:
   var b: T.B = a;
   b.InQ();
 
   // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+4]]:3-15: error: cannot convert type `T.(Transitive.A)` that implements `Core.Destroy & P` into type implementing `R` [ConversionFailureFacetToFacet]
-  // CHECK:STDERR: imported from: fail_todo_equivalent.carbon:[[@LINE-12]]:1 [InImport]
+  // CHECK:STDERR: imported from: fail_todo_equivalent.carbon:[[@LINE-13]]:1 [InImport]
   // CHECK:STDERR: transitive.carbon:5:15-27: note: while deducing parameters of generic declared here [DeductionGenericHere]
   // CHECK:STDERR:
   a.(T.C.InR)();
-  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+3]]:4-11: error: cannot convert expression of type `T.(Transitive.A)` to `T.(Transitive.C)` with `as` [ConversionFailure]
+  // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+3]]:4: error: cannot convert expression of type `T.(Transitive.A)` to `T.(Transitive.C)` with `as` [ConversionFailure]
   // CHECK:STDERR: fail_todo_equivalent.carbon:[[@LINE+2]]:4-11: note: type `T.(Transitive.A)` does not implement interface `Core.As(T.(Transitive.C))` [MissingImplForType]
   // CHECK:STDERR:
   (a as T.C).InR();
@@ -265,7 +266,8 @@ fn F[T: A, U: B](x: U) {
 library "[[@TEST_NAME]]";
 
 class C(T: type, U: type) {
-  // CHECK:STDERR: fail_wrong_scope_class.carbon:[[@LINE+2]]:3-9: error: `observe` can only be used in an `interface` or `function` [ObserveInWrongScope]
+  // CHECK:STDERR: fail_wrong_scope_class.carbon:[[@LINE+3]]:3-9: error: `observe` can only be used in an `interface` or `function` [ObserveInWrongScope]
+  // CHECK:STDERR: fail_wrong_scope_class.carbon:[[@LINE-2]]:1-27: note: appears in this declaration [ObserveEnclosingScope]
   // CHECK:STDERR:
   observe T == U;
 }
@@ -274,7 +276,8 @@ class C(T: type, U: type) {
 library "[[@TEST_NAME]]";
 
 constraint C(T: type, U: type) {
-  // CHECK:STDERR: fail_wrong_scope_named_constraint.carbon:[[@LINE+2]]:3-9: error: `observe` can only be used in an `interface` or `function` [ObserveInWrongScope]
+  // CHECK:STDERR: fail_wrong_scope_named_constraint.carbon:[[@LINE+3]]:3-9: error: `observe` can only be used in an `interface` or `function` [ObserveInWrongScope]
+  // CHECK:STDERR: fail_wrong_scope_named_constraint.carbon:[[@LINE-2]]:1-32: note: appears in this declaration [ObserveEnclosingScope]
   // CHECK:STDERR:
   observe T == U;
 }
@@ -323,6 +326,22 @@ fn F[T: I(C)](t: T) {
   // CHECK:STDERR: generic_observe.carbon:10:3-24: note: while deducing parameters of generic declared here [DeductionGenericHere]
   // CHECK:STDERR:
   t.TakesT(u);
+}
+
+// --- fail_wrong_scope_code_block.carbon
+library "[[@TEST_NAME]]";
+
+// A code block's scope has no enclosing declaration to mark at all.
+// CHECK:STDERR: fail_wrong_scope_code_block.carbon:[[@LINE+6]]:8: error: expected expression [ExpectedExpr]
+// CHECK:STDERR:
+// CHECK:STDERR: fail_wrong_scope_code_block.carbon:[[@LINE+4]]:8: error: semantics TODO: `handle invalid parse trees in `check`` [SemanticsTodo]
+// CHECK:STDERR:
+// CHECK:STDERR: fail_wrong_scope_code_block.carbon:[[@LINE+2]]:18: error: expected expression [ExpectedExpr]
+// CHECK:STDERR:
+fn F(T:! type, U:! type) {
+  if (true) {
+    observe T == U;
+  }
 }
 
 // CHECK:STDOUT: --- transitive.carbon

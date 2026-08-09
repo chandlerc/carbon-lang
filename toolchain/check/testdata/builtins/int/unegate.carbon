@@ -81,8 +81,9 @@ library "[[@TEST_NAME]]";
 
 fn Negate(a: u32) -> u32 = "int.unegate";
 
-// CHECK:STDERR: fail_bad_call.carbon:[[@LINE+3]]:26-37: error: 2 arguments passed to function expecting 1 argument [CallArgCountMismatch]
-// CHECK:STDERR: fail_bad_call.carbon:[[@LINE-3]]:1-26: note: calling function declared here [InCallToEntity]
+// CHECK:STDERR: fail_bad_call.carbon:[[@LINE+4]]:26-37: error: 2 arguments passed to function expecting 1 argument [CallArgCountMismatch]
+// CHECK:STDERR: fail_bad_call.carbon:[[@LINE+3]]:26-37: note: 2 arguments passed here [ArgsPassedHere]
+// CHECK:STDERR: fail_bad_call.carbon:[[@LINE-4]]:1-26: note: calling function declared here, expecting 1 argument [InCallToEntity]
 // CHECK:STDERR:
 var bad_call: array(u32, Negate(1, 2));
 

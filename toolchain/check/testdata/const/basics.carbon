@@ -47,8 +47,9 @@ class C;
 // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE+2]]:9-23: warning: `const` applied repeatedly to the same type has no additional effect [RepeatedConst]
 // CHECK:STDERR:
 fn G(p: const (const C)**) -> C** {
-  // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE+3]]:3-11: error: cannot implicitly convert expression of type `const C**` to `C**` [ConversionFailure]
-  // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE+2]]:3-11: note: type `const C**` does not implement interface `Core.ImplicitAs(C**)` [MissingImplForType]
+  // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE+4]]:10: error: cannot implicitly convert expression of type `const C**` to `C**` [ConversionFailure]
+  // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE+3]]:3-11: note: type `const C**` does not implement interface `Core.ImplicitAs(C**)` [MissingImplForType]
+  // CHECK:STDERR: fail_collapse_in_error.carbon:[[@LINE-3]]:31-33: note: return type of function is `C**` [ReturnTypeHereNote]
   // CHECK:STDERR:
   return p;
 }

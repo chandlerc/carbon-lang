@@ -217,7 +217,7 @@ fn F() {
   var c: Cpp.BinaryC = {};
 
   // Simple assignment.
-  // CHECK:STDERR: fail_todo_import_assignment.carbon:[[@LINE+3]]:3-8: error: cannot implicitly convert expression of type `Core.IntLiteral` to `Cpp.BinaryC` [ConversionFailure]
+  // CHECK:STDERR: fail_todo_import_assignment.carbon:[[@LINE+3]]:7-8: error: cannot implicitly convert expression of type `Core.IntLiteral` to `Cpp.BinaryC` [ConversionFailure]
   // CHECK:STDERR: fail_todo_import_assignment.carbon:[[@LINE+2]]:3-8: note: type `Core.IntLiteral` does not implement interface `Core.ImplicitAs(Cpp.BinaryC)` [MissingImplForType]
   // CHECK:STDERR:
   c = 42;

@@ -48,7 +48,9 @@ Context::Context(DiagnosticEmitterBase* emitter,
 
 auto Context::TODO(SemIR::LocId loc_id, std::string label) -> bool {
   CARBON_DIAGNOSTIC(SemanticsTodo, Error, "semantics TODO: `{0}`", std::string);
-  emitter_->Emit(loc_id, SemanticsTodo, std::move(label));
+  emitter_->Build(loc_id, SemanticsTodo, std::move(label))
+      .Attach(loc_id)
+      .Emit();
   return false;
 }
 

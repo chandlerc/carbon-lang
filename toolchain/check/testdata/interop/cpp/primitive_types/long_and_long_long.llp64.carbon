@@ -79,8 +79,9 @@ import Cpp;
 
 fn F() {
   let cpp_long: Cpp.long = 1;
-  // CHECK:STDERR: fail_implicit_conversion_long_to_i32.carbon:[[@LINE+3]]:32-39: error: cannot implicitly convert expression of type `Cpp.long` to `i32` [ConversionFailure]
-  // CHECK:STDERR: fail_implicit_conversion_long_to_i32.carbon:[[@LINE+2]]:32-39: note: type `Cpp.long` does not implement interface `Core.ImplicitAs(i32)` [MissingImplForType]
+  // CHECK:STDERR: fail_implicit_conversion_long_to_i32.carbon:[[@LINE+4]]:32-39: error: cannot implicitly convert expression of type `Cpp.long` to `i32` [ConversionFailure]
+  // CHECK:STDERR: fail_implicit_conversion_long_to_i32.carbon:[[@LINE+3]]:32-39: note: type `Cpp.long` does not implement interface `Core.ImplicitAs(i32)` [MissingImplForType]
+  // CHECK:STDERR: fail_implicit_conversion_long_to_i32.carbon:[[@LINE+2]]:14-28: note: initializing this binding [InBindingInit]
   // CHECK:STDERR:
   let unused carbon_i32: i32 = cpp_long;
 }
@@ -666,8 +667,9 @@ fn F() {
 
   // For portability reasons, this is not allowed even though `unsigned long`
   // happens to fit in `u32` on this target.
-  // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+5]]:25-41: error: cannot implicitly convert expression of type `Cpp.unsigned_long` to `u32` [ConversionFailure]
-  // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+4]]:25-41: note: type `Cpp.unsigned_long` does not implement interface `Core.ImplicitAs(u32)` [MissingImplForType]
+  // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+6]]:25-41: error: cannot implicitly convert expression of type `Cpp.unsigned_long` to `u32` [ConversionFailure]
+  // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+5]]:25-41: note: type `Cpp.unsigned_long` does not implement interface `Core.ImplicitAs(u32)` [MissingImplForType]
+  // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+4]]:7-21: note: initializing this binding [InBindingInit]
   // CHECK:STDERR:
   // CHECK:STDERR: fail_no_ulong_to_u32.carbon:[[@LINE+2]]:7-21: warning: binding `carbon_u32` unused [UnusedBinding]
   // CHECK:STDERR:

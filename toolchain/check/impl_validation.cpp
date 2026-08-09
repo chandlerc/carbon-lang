@@ -257,6 +257,7 @@ static auto DiagnoseNonFinalImplsWithSameTypeStructureOutsideMatchFirst(
                       "structure as another non-final `impl`");
     auto builder = context.emitter().Build(impl_b.latest_decl_id,
                                            ImplNonFinalSameTypeStructure);
+    builder.Attach(impl_b.latest_decl_id);
     CARBON_DIAGNOSTIC_LABEL(ImplNonFinalSameTypeStructureNote, Info,
                             "other `impl` here");
     builder.Attach(impl_a.latest_decl_id, ImplNonFinalSameTypeStructureNote);
@@ -285,6 +286,7 @@ static auto DiagnoseUnmatchableNonFinalImplWithFinalImpl(Context& context,
                         "`impl` will never be used");
       auto builder = context.emitter().Build(query_impl.latest_decl_id,
                                              ImplFinalOverlapsNonFinal);
+      builder.Attach(query_impl.latest_decl_id);
       CARBON_DIAGNOSTIC_LABEL(
           ImplFinalOverlapsNonFinalNote, Info,
           "`final impl` declared here would always be used instead");
@@ -321,11 +323,13 @@ static auto DiagnoseFinalImplsOverlapInDifferentFiles(Context& context,
     if (impl_a.is_local) {
       auto builder = context.emitter().Build(impl_a.latest_decl_id,
                                              FinalImplOverlapsDifferentFile);
+      builder.Attach(impl_a.latest_decl_id);
       builder.Attach(impl_b.latest_decl_id, FinalImplOverlapsDifferentFileNote);
       builder.Emit();
     } else {
       auto builder = context.emitter().Build(impl_b.latest_decl_id,
                                              FinalImplOverlapsDifferentFile);
+      builder.Attach(impl_b.latest_decl_id);
       builder.Attach(impl_a.latest_decl_id, FinalImplOverlapsDifferentFileNote);
       builder.Emit();
     }
@@ -351,6 +355,7 @@ static auto DiagnoseFinalImplsOverlapOutsideMatchFirst(Context& context,
                       "outside a `match_first` block");
     auto builder = context.emitter().Build(impl_b.latest_decl_id,
                                            FinalImplOverlapsSameFile);
+    builder.Attach(impl_b.latest_decl_id);
     CARBON_DIAGNOSTIC_LABEL(FinalImplOverlapsSameFileNote, Info,
                             "other `final impl` here");
     builder.Attach(impl_a.latest_decl_id, FinalImplOverlapsSameFileNote);
