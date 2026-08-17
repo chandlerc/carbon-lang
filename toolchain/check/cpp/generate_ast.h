@@ -10,7 +10,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/VirtualFileSystem.h"
 #include "toolchain/check/context.h"
 #include "toolchain/parse/tree.h"
 #include "toolchain/sem_ir/cpp_domain.h"
@@ -27,6 +26,10 @@ class CodeGenerator;
 namespace Carbon::Diagnostics {
 class Consumer;
 }  // namespace Carbon::Diagnostics
+
+namespace llvm::vfs {
+class FileSystem;
+}  // namespace llvm::vfs
 
 namespace Carbon::Check {
 

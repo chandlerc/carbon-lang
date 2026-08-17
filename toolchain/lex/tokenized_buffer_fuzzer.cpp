@@ -6,6 +6,7 @@
 
 #include "common/check.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "testing/fuzzing/libfuzzer.h"
 #include "toolchain/base/shared_value_stores.h"
 #include "toolchain/diagnostics/null_diagnostics.h"

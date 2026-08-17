@@ -8,7 +8,7 @@
 // Libraries should include this header instead of raw_ostream.
 
 #include <concepts>
-#include <ostream>
+#include <iosfwd>
 #include <type_traits>
 
 #include "llvm/Support/Compiler.h"
@@ -30,8 +30,9 @@ class Printable {
   }
 
   // Supports printing to std::ostream.
-  friend auto operator<<(std::ostream& out, const DerivedT& obj)
-      -> std::ostream& {
+  template <typename StreamT>
+    requires std::derived_from<StreamT, std::ostream>
+  friend auto operator<<(StreamT& out, const DerivedT& obj) -> StreamT& {
     llvm::raw_os_ostream raw_os(out);
     obj.Print(raw_os);
     return out;
@@ -40,7 +41,9 @@ class Printable {
   // Allows GoogleTest and GoogleMock to print pointers by dereferencing them.
   // This is important to allow automatic printing of arguments of mocked
   // APIs.
-  friend auto PrintTo(DerivedT* p, std::ostream* out) -> void {
+  template <typename StreamT>
+    requires std::derived_from<StreamT, std::ostream>
+  friend auto PrintTo(DerivedT* p, StreamT* out) -> void {
     *out << static_cast<const void*>(p);
     // Also print the object if non-null.
     if (p) {

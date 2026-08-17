@@ -14,6 +14,7 @@
 #include "common/raw_string_ostream.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "toolchain/base/shared_value_stores.h"
 #include "toolchain/benchmarking/source_gen.h"
 #include "toolchain/diagnostics/emitter.h"

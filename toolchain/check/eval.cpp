@@ -12,6 +12,7 @@
 #include "common/raw_string_ostream.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Support/ConvertUTF.h"
+#include "llvm/Support/Error.h"
 #include "toolchain/base/canonical_value_store.h"
 #include "toolchain/base/int.h"
 #include "toolchain/base/kind_switch.h"

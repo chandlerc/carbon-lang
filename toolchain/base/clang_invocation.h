@@ -11,9 +11,12 @@
 #include "clang/Frontend/CompilerInvocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
-#include "llvm/Support/VirtualFileSystem.h"
 #include "toolchain/base/install_paths.h"
 #include "toolchain/diagnostics/emitter.h"
+
+namespace llvm::vfs {
+class FileSystem;
+}  // namespace llvm::vfs
 
 namespace Carbon {
 

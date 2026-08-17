@@ -10,8 +10,11 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/VirtualFileSystem.h"
 #include "toolchain/diagnostics/emitter.h"
+
+namespace llvm::vfs {
+class FileSystem;
+}  // namespace llvm::vfs
 
 namespace Carbon {
 

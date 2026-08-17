@@ -9,6 +9,7 @@
 #include <optional>
 
 #include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "toolchain/diagnostics/file_diagnostics.h"
 
 namespace Carbon {

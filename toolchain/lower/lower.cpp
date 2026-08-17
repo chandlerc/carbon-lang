@@ -9,6 +9,7 @@
 
 #include "common/vlog.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "toolchain/lower/context.h"
 #include "toolchain/lower/file_context.h"
 

@@ -21,7 +21,6 @@
 #include "llvm/Object/ArchiveWriter.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/ThreadPool.h"
-#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/TargetParser/Triple.h"
 #include "toolchain/base/install_paths.h"
 #include "toolchain/driver/clang_runner.h"

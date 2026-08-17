@@ -11,6 +11,7 @@
 #include "common/raw_string_ostream.h"
 #include "common/vlog.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "toolchain/lower/file_context.h"
 #include "toolchain/sem_ir/inst_namer.h"
