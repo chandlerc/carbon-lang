@@ -26,9 +26,10 @@ fn Test(a: C, b: D, z: bool) -> C {
   if (z) {
     return a + a;
   } else {
-    // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+4]]:12: error: cannot access member of interface `Core.AddWith(D)` in type `C` that does not implement that interface [MissingImplInMemberAccess]
-    // CHECK:STDERR:     return a + b;
-    // CHECK:STDERR:            ^~~~~
+    // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+5]]:14: error: type `C` does not implement interface `Core.AddWith(D)` [MissingImplForType]
+    // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+4]]:14: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+    // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+3]]:12: note: left operand has type `C` [BinaryOperatorLhsType]
+    // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+2]]:16: note: right operand has type `D` [BinaryOperatorRhsType]
     // CHECK:STDERR:
     return a + b;
   }
@@ -39,9 +40,10 @@ fn TestAssign(b: D) {
 
   a += a;
 
-  // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+4]]:3: error: cannot access member of interface `Core.AddAssignWith(D)` in type `C` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   a += b;
-  // CHECK:STDERR:   ^~~~~~
+  // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+5]]:5-6: error: type `C` does not implement interface `Core.AddAssignWith(D)` [MissingImplForType]
+  // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+4]]:5-6: note: `+=` requires an impl of `Core.AddAssignWith` [OperatorInterface]
+  // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+3]]:3: note: left operand has type `C` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_no_impl_for_arg.carbon:[[@LINE+2]]:8: note: right operand has type `D` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a += b;
 }

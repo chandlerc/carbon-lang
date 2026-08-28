@@ -10,16 +10,11 @@
 
 fn f() -> i32 {
   match (true) {
-    // CHECK:STDERR: fail_missing_guard_close_paren.carbon:[[@LINE+11]]:21: error: opening symbol without a corresponding closing symbol [UnmatchedOpening]
-    // CHECK:STDERR:     case x: bool if (false => { return 1; }
-    // CHECK:STDERR:                     ^
-    // CHECK:STDERR: fail_missing_guard_close_paren.carbon:[[@LINE+8]]:30: note: possibly missing `)` here [PossiblyMissingBracketHere]
-    // CHECK:STDERR:     case x: bool if (false => { return 1; }
-    // CHECK:STDERR:                              ^
+    // CHECK:STDERR: fail_missing_guard_close_paren.carbon:[[@LINE+6]]:21: error: opening symbol without a corresponding closing symbol [UnmatchedOpening]
+    // CHECK:STDERR: fail_missing_guard_close_paren.carbon:[[@LINE+5]]:30: note: possibly missing `)` here [PossiblyMissingBracketHere]
     // CHECK:STDERR:
-    // CHECK:STDERR: fail_missing_guard_close_paren.carbon:[[@LINE+4]]:28: error: expected `)` [ExpectedMatchCaseGuardCloseParen]
-    // CHECK:STDERR:     case x: bool if (false => { return 1; }
-    // CHECK:STDERR:                            ^~
+    // CHECK:STDERR: fail_missing_guard_close_paren.carbon:[[@LINE+3]]:22-26: error: expected `)` [ExpectedMatchCaseGuardCloseParen]
+    // CHECK:STDERR: fail_missing_guard_close_paren.carbon:[[@LINE+2]]:22-26: note: expected `)` after this token [MatchCaseGuardCloseParenGoesAfter]
     // CHECK:STDERR:
     case x: bool if (false => { return 1; }
   }

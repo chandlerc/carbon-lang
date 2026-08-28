@@ -61,9 +61,8 @@ interface Z {
 interface Y {}
 
 interface Z {
-  // CHECK:STDERR: fail_missing_impls.carbon:[[@LINE+4]]:12: error: expected `impls` in `require` declaration [RequireExpectedImpls]
-  // CHECK:STDERR:   require Y;
-  // CHECK:STDERR:            ^
+  // CHECK:STDERR: fail_missing_impls.carbon:[[@LINE+3]]:11: error: expected `impls` in `require` declaration [RequireExpectedImpls]
+  // CHECK:STDERR: fail_missing_impls.carbon:[[@LINE+2]]:11: note: expected `impls` after this token [ImplsGoesAfter]
   // CHECK:STDERR:
   require Y;
 }
@@ -73,9 +72,7 @@ interface Z {
 interface Y {}
 
 interface Z {
-  // CHECK:STDERR: fail_wrong_keyword.carbon:[[@LINE+4]]:11: error: expected expression [ExpectedExpr]
-  // CHECK:STDERR:   require as Y;
-  // CHECK:STDERR:           ^~
+  // CHECK:STDERR: fail_wrong_keyword.carbon:[[@LINE+2]]:11-12: error: expected expression [ExpectedExpr]
   // CHECK:STDERR:
   require as Y;
 }
@@ -85,9 +82,8 @@ interface Z {
 interface Y {}
 
 interface Z {
-  // CHECK:STDERR: fail_as_in_self.carbon:[[@LINE+4]]:16: error: expected `impls` in `require` declaration [RequireExpectedImpls]
-  // CHECK:STDERR:   require Self as Y impls Y;
-  // CHECK:STDERR:                ^~
+  // CHECK:STDERR: fail_as_in_self.carbon:[[@LINE+3]]:11-14: error: expected `impls` in `require` declaration [RequireExpectedImpls]
+  // CHECK:STDERR: fail_as_in_self.carbon:[[@LINE+2]]:11-14: note: expected `impls` after this token [ImplsGoesAfter]
   // CHECK:STDERR:
   require Self as Y impls Y;
 }

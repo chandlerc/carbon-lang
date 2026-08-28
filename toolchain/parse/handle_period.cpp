@@ -44,9 +44,19 @@ static auto HandlePeriodOrArrow(Context& context, NodeKind node_kind,
         "expected identifier after `{0:->|.}`"
         "{1:; prefix reserved word with `r#` to form a valid identifier|}",
         Diagnostics::BoolAsSelect, Diagnostics::BoolAsSelect);
-    context.emitter().Emit(*context.position(),
-                           ExpectedIdentifierAfterPeriodOrArrow, is_arrow,
-                           recover_as_raw);
+    CARBON_DIAGNOSTIC_LABEL(MemberNameGoesAfter, Primary,
+                            "expected identifier after this token");
+    // A reserved word that is there is what the message is about; otherwise
+    // the identifier is missing and goes after the `.` or `->`.
+    auto builder = context.emitter().Build(
+        recover_as_raw ? *context.position() : *(context.position() - 1),
+        ExpectedIdentifierAfterPeriodOrArrow, is_arrow, recover_as_raw);
+    if (recover_as_raw) {
+      builder.Attach(*context.position());
+    } else {
+      builder.Attach(*(context.position() - 1), MemberNameGoesAfter);
+    }
+    builder.Emit();
     // If we see a word, assume it was intended to be a name.
     // TODO: Should word tokens be valid here?
     if (recover_as_raw) {

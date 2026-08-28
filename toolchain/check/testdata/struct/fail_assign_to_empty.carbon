@@ -12,9 +12,9 @@
 // TIP: To dump output, run:
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/check/testdata/struct/fail_assign_to_empty.carbon
 
-// CHECK:STDERR: fail_assign_to_empty.carbon:[[@LINE+4]]:13: error: struct `{}` has no field named `a` [StructInitUnexpectedFieldInLiteral]
-// CHECK:STDERR: var x: {} = {.a = 1};
-// CHECK:STDERR:             ^~~~~~~~
+// CHECK:STDERR: fail_assign_to_empty.carbon:[[@LINE+4]]:13-20: error: struct `{}` has no field named `a` [StructInitUnexpectedFieldInLiteral]
+// CHECK:STDERR: fail_assign_to_empty.carbon:[[@LINE+3]]:19: note: no field `a` in the destination type [StructInitUnexpectedFieldHere]
+// CHECK:STDERR: fail_assign_to_empty.carbon:[[@LINE+2]]:1-9: note: initializing this binding [InBindingInit]
 // CHECK:STDERR:
 var x: {} = {.a = 1};
 

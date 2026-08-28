@@ -62,14 +62,14 @@ class D {
 }
 
 fn B(d: D) {
-  // CHECK:STDERR: fail_ambiguous_impls.carbon:[[@LINE+4]]:3: error: ambiguous use of name `A` found in multiple extended scopes [NameAmbiguousDueToExtend]
-  // CHECK:STDERR:   D.A();
-  // CHECK:STDERR:   ^~~
+  // CHECK:STDERR: fail_ambiguous_impls.carbon:[[@LINE+4]]:3-5: error: ambiguous use of name `A` found in multiple extended scopes [NameAmbiguousDueToExtend]
+  // CHECK:STDERR: fail_ambiguous_impls.carbon:[[@LINE-18]]:3-9: note: candidate `A` declared here [NameAmbiguousCandidate]
+  // CHECK:STDERR: fail_ambiguous_impls.carbon:[[@LINE-15]]:3-9: note: candidate `A` declared here [NameAmbiguousCandidate]
   // CHECK:STDERR:
   D.A();
-  // CHECK:STDERR: fail_ambiguous_impls.carbon:[[@LINE+4]]:3: error: ambiguous use of name `A` found in multiple extended scopes [NameAmbiguousDueToExtend]
-  // CHECK:STDERR:   d.A();
-  // CHECK:STDERR:   ^~~
+  // CHECK:STDERR: fail_ambiguous_impls.carbon:[[@LINE+4]]:3-5: error: ambiguous use of name `A` found in multiple extended scopes [NameAmbiguousDueToExtend]
+  // CHECK:STDERR: fail_ambiguous_impls.carbon:[[@LINE-23]]:3-9: note: candidate `A` declared here [NameAmbiguousCandidate]
+  // CHECK:STDERR: fail_ambiguous_impls.carbon:[[@LINE-20]]:3-9: note: candidate `A` declared here [NameAmbiguousCandidate]
   // CHECK:STDERR:
   d.A();
 }
@@ -120,14 +120,14 @@ class L {
 }
 
 fn M(l: L) {
-   // CHECK:STDERR: fail_ambiguous_impl_and_base.carbon:[[@LINE+4]]:4: error: ambiguous use of name `K` found in multiple extended scopes [NameAmbiguousDueToExtend]
-   // CHECK:STDERR:    L.K();
-   // CHECK:STDERR:    ^~~
+   // CHECK:STDERR: fail_ambiguous_impl_and_base.carbon:[[@LINE+4]]:4-6: error: ambiguous use of name `K` found in multiple extended scopes [NameAmbiguousDueToExtend]
+   // CHECK:STDERR: fail_ambiguous_impl_and_base.carbon:[[@LINE-16]]:3-10: note: candidate `K` declared here [NameAmbiguousCandidate]
+   // CHECK:STDERR: fail_ambiguous_impl_and_base.carbon:[[@LINE-13]]:3-9: note: candidate `K` declared here [NameAmbiguousCandidate]
    // CHECK:STDERR:
    L.K();
-   // CHECK:STDERR: fail_ambiguous_impl_and_base.carbon:[[@LINE+4]]:4: error: ambiguous use of name `K` found in multiple extended scopes [NameAmbiguousDueToExtend]
-   // CHECK:STDERR:    l.K();
-   // CHECK:STDERR:    ^~~
+   // CHECK:STDERR: fail_ambiguous_impl_and_base.carbon:[[@LINE+4]]:4-6: error: ambiguous use of name `K` found in multiple extended scopes [NameAmbiguousDueToExtend]
+   // CHECK:STDERR: fail_ambiguous_impl_and_base.carbon:[[@LINE-21]]:3-10: note: candidate `K` declared here [NameAmbiguousCandidate]
+   // CHECK:STDERR: fail_ambiguous_impl_and_base.carbon:[[@LINE-18]]:3-9: note: candidate `K` declared here [NameAmbiguousCandidate]
    // CHECK:STDERR:
    l.K();
 }

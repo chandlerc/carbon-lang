@@ -187,7 +187,22 @@ static auto DiagnoseClassSpecificDeclOutsideClass(Context& context,
                                                   Lex::TokenKind tok) -> void {
   CARBON_DIAGNOSTIC(ClassSpecificDeclOutsideClass, Error,
                     "`{0}` declaration outside class", Lex::TokenKind);
-  context.emitter().Emit(loc_id, ClassSpecificDeclOutsideClass, tok);
+  // The message says where this cannot go; the enclosing declaration is where
+  // it did go, and in a nested body that is off the screen.
+  CARBON_DIAGNOSTIC_LABEL(ClassSpecificDeclEnclosingScope, Info,
+                          "appears in this declaration");
+  auto builder =
+      context.emitter().Build(loc_id, ClassSpecificDeclOutsideClass, tok);
+  builder.Attach(loc_id);
+  // A scope with no instruction -- a code block -- or one that was never
+  // written -- the file's own package namespace -- has no declaration to point
+  // at.
+  if (auto scope_inst_id = context.scope_stack().PeekInstId();
+      scope_inst_id.has_value() &&
+      context.insts().GetCanonicalLocId(scope_inst_id).has_value()) {
+    builder.Attach(scope_inst_id, ClassSpecificDeclEnclosingScope);
+  }
+  builder.Emit();
 }
 
 // Returns the current scope's class declaration, or diagnoses if it isn't a
@@ -215,13 +230,13 @@ static auto DiagnoseClassSpecificDeclRepeated(Context& context,
   CARBON_DIAGNOSTIC(BaseDeclRepeated, Error,
                     "multiple `base` declarations in class; multiple "
                     "inheritance is not permitted");
-  CARBON_DIAGNOSTIC(ClassSpecificDeclPrevious, Note,
-                    "previous `{0}` declaration is here", Lex::TokenKind);
+  CARBON_DIAGNOSTIC_LABEL(ClassSpecificDeclPrevious, Info,
+                          "previous `{0}` declaration is here", Lex::TokenKind);
   CARBON_CHECK(tok == Lex::TokenKind::Adapt || tok == Lex::TokenKind::Base);
   context.emitter()
       .Build(new_loc_id, tok == Lex::TokenKind::Adapt ? AdaptDeclRepeated
                                                       : BaseDeclRepeated)
-      .Note(prev_loc_id, ClassSpecificDeclPrevious, tok)
+      .Attach(prev_loc_id, ClassSpecificDeclPrevious, tok)
       .Emit();
 }
 
@@ -259,18 +274,18 @@ auto HandleParseNode(Context& context, Parse::AdaptDeclId node_id) -> bool {
   if (!RequireConcreteType(
           context, adapted_type_id, node_id,
           [&](auto& builder) {
-            CARBON_DIAGNOSTIC(IncompleteTypeInAdaptDecl, Context,
-                              "adapted type {0} is an incomplete type",
-                              InstIdAsType);
-            builder.Context(node_id, IncompleteTypeInAdaptDecl,
-                            adapted_type_inst_id);
+            CARBON_DIAGNOSTIC_CONTEXT(IncompleteTypeInAdaptDecl,
+                                      "adapted type {0} is an incomplete type",
+                                      InstIdAsType);
+            builder.Attach(node_id, IncompleteTypeInAdaptDecl,
+                           adapted_type_inst_id);
           },
           [&](auto& builder) {
-            CARBON_DIAGNOSTIC(AbstractTypeInAdaptDecl, Context,
-                              "adapted type {0} is an abstract type",
-                              InstIdAsType);
-            builder.Context(node_id, AbstractTypeInAdaptDecl,
-                            adapted_type_inst_id);
+            CARBON_DIAGNOSTIC_CONTEXT(AbstractTypeInAdaptDecl,
+                                      "adapted type {0} is an abstract type",
+                                      InstIdAsType);
+            builder.Attach(node_id, AbstractTypeInAdaptDecl,
+                           adapted_type_inst_id);
           })) {
     adapted_type_id = SemIR::ErrorInst::TypeId;
   }
@@ -318,12 +333,23 @@ constexpr BaseInfo BaseInfo::Error = {.type_id = SemIR::ErrorInst::TypeId,
 
 // Diagnoses an attempt to derive from a final type.
 static auto DiagnoseBaseIsFinal(Context& context, Parse::NodeId node_id,
-                                SemIR::TypeInstId base_type_inst_id) -> void {
+                                SemIR::TypeInstId base_type_inst_id,
+                                SemIR::InstId base_decl_id) -> void {
   CARBON_DIAGNOSTIC(BaseIsFinal, Error,
                     "deriving from final type {0}; base type must be an "
                     "`abstract` or `base` class",
                     InstIdAsType);
-  context.emitter().Emit(node_id, BaseIsFinal, base_type_inst_id);
+  // The fix is a modifier on the base class, so nothing in the `base:` clause
+  // the message marks is where the reader has to go.
+  CARBON_DIAGNOSTIC_LABEL(BaseClassNotInheritable, Info,
+                          "declared without `abstract` or `base` here");
+  auto builder =
+      context.emitter().Build(node_id, BaseIsFinal, base_type_inst_id);
+  builder.Attach(node_id);
+  if (base_decl_id.has_value()) {
+    builder.Attach(base_decl_id, BaseClassNotInheritable);
+  }
+  builder.Emit();
 }
 
 // Checks that the specified base type is valid.
@@ -335,9 +361,10 @@ static auto CheckBaseType(Context& context, Parse::NodeId node_id,
     return BaseInfo::Error;
   }
   if (!RequireCompleteType(context, base_type_id, node_id, [&](auto& builder) {
-        CARBON_DIAGNOSTIC(IncompleteTypeInBaseDecl, Context,
-                          "base {0} is an incomplete type", InstIdAsType);
-        builder.Context(node_id, IncompleteTypeInBaseDecl, base_type_inst_id);
+        CARBON_DIAGNOSTIC_CONTEXT(IncompleteTypeInBaseDecl,
+                                  "base {0} is an incomplete type",
+                                  InstIdAsType);
+        builder.Attach(node_id, IncompleteTypeInBaseDecl, base_type_inst_id);
       })) {
     return BaseInfo::Error;
   }
@@ -350,14 +377,16 @@ static auto CheckBaseType(Context& context, Parse::NodeId node_id,
     // declaration as being final classes.
     // TODO: Once we have a better idea of which types are considered to be
     // classes, produce a better diagnostic for deriving from a non-class type.
-    DiagnoseBaseIsFinal(context, node_id, base_type_inst_id);
+    DiagnoseBaseIsFinal(context, node_id, base_type_inst_id,
+                        SemIR::InstId::None);
     return BaseInfo::Error;
   }
 
   const auto& base_class_info = context.classes().Get(class_type->class_id);
 
   if (base_class_info.inheritance_kind == SemIR::Class::Final) {
-    DiagnoseBaseIsFinal(context, node_id, base_type_inst_id);
+    DiagnoseBaseIsFinal(context, node_id, base_type_inst_id,
+                        base_class_info.latest_decl_id());
   }
 
   CARBON_CHECK(base_class_info.scope_id.has_value(),
@@ -395,12 +424,20 @@ auto HandleParseNode(Context& context, Parse::BaseDeclId node_id) -> bool {
     return true;
   }
 
-  if (!context.field_decls_stack().PeekArray().empty()) {
-    // TODO: Add note that includes the first field location as an example.
+  if (auto field_decls = context.field_decls_stack().PeekArray();
+      !field_decls.empty()) {
     CARBON_DIAGNOSTIC(
         BaseDeclAfterFieldDecl, Error,
         "`base` declaration must appear before field declarations");
-    context.emitter().Emit(node_id, BaseDeclAfterFieldDecl);
+    // Saying it has to come before the fields without showing one leaves the
+    // reader to find where "before" is.
+    CARBON_DIAGNOSTIC_LABEL(BaseDeclAfterThisField, Info,
+                            "this field is declared before it");
+    context.emitter()
+        .Build(node_id, BaseDeclAfterFieldDecl)
+        .Attach(node_id)
+        .Attach(field_decls.front(), BaseDeclAfterThisField)
+        .Emit();
     return true;
   }
 

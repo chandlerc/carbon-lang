@@ -38,7 +38,12 @@ auto HandleObserveOperator(Context& context) -> void {
       if (!state.has_error) {
         CARBON_DIAGNOSTIC(ExpectedObserveOperator, Error,
                           "observe should use `==` or `impls` operator");
-        context.emitter().Emit(*context.position(), ExpectedObserveOperator);
+        CARBON_DIAGNOSTIC_LABEL(ObserveOperatorGoesAfter, Primary,
+                                "expected `==` or `impls` after this token");
+        context.emitter()
+            .Build(*(context.position() - 1), ExpectedObserveOperator)
+            .Attach(*(context.position() - 1), ObserveOperatorGoesAfter)
+            .Emit();
       }
       context.RecoverFromDeclError(state, NodeKind::ObserveDecl,
                                    /*skip_past_likely_end=*/true);

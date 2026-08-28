@@ -39,8 +39,10 @@ auto HandleAssociatedConstant(Context& context) -> void {
       CARBON_DIAGNOSTIC(
           PhaseKeywordInAssociatedConstant, Error,
           "phase keyword is not allowed on an associated constant");
-      context.emitter().Emit(*context.position(),
-                             PhaseKeywordInAssociatedConstant);
+      context.emitter()
+          .Build(*context.position(), PhaseKeywordInAssociatedConstant)
+          .Attach(*context.position())
+          .Emit();
     } else {
       CARBON_DIAGNOSTIC(
           ExpectedAssociatedConstantIdentifier, Error,
@@ -55,8 +57,12 @@ auto HandleAssociatedConstant(Context& context) -> void {
   if (identifier && !colon) {
     CARBON_DIAGNOSTIC(ExpectedAssociatedConstantColon, Error,
                       "expected `:` in associated constant declaration");
-    context.emitter().Emit(*context.position(),
-                           ExpectedAssociatedConstantColon);
+    CARBON_DIAGNOSTIC_LABEL(AssociatedConstantColonGoesAfter, Primary,
+                            "expected `:` after this token");
+    context.emitter()
+        .Build(*identifier, ExpectedAssociatedConstantColon)
+        .Attach(*identifier, AssociatedConstantColonGoesAfter)
+        .Emit();
     state.has_error = true;
   }
 

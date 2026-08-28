@@ -88,22 +88,27 @@ auto HandleDeclNameAndParams(Context& context) -> void {
     return;
   }
 
-  Lex::TokenIndex token = *context.position();
-  if (context.tokens().GetKind(token) == Lex::TokenKind::FileEnd) {
-    // The end of file is an unhelpful diagnostic location. Instead, use the
-    // introducer token.
-    token = state.token;
-  }
+  // The missing name goes after the token before the one the parser stopped
+  // on, which at the end of the file is also the last token anyone wrote.
+  CARBON_DIAGNOSTIC_LABEL(DeclNameGoesAfter, Primary,
+                          "expected name after this token");
+  auto after_token = *(context.position() - 1);
   if (state.token == *context.position()) {
     CARBON_DIAGNOSTIC(ExpectedDeclNameAfterPeriod, Error,
                       "`.` should be followed by a name");
-    context.emitter().Emit(token, ExpectedDeclNameAfterPeriod);
+    context.emitter()
+        .Build(after_token, ExpectedDeclNameAfterPeriod)
+        .Attach(after_token, DeclNameGoesAfter)
+        .Emit();
   } else {
     CARBON_DIAGNOSTIC(ExpectedDeclName, Error,
                       "`{0}` introducer should be followed by a name",
                       Lex::TokenKind);
-    context.emitter().Emit(token, ExpectedDeclName,
-                           context.tokens().GetKind(state.token));
+    context.emitter()
+        .Build(after_token, ExpectedDeclName,
+               context.tokens().GetKind(state.token))
+        .Attach(after_token, DeclNameGoesAfter)
+        .Emit();
   }
   context.ReturnErrorOnState();
   context.AddInvalidParse(*context.position());

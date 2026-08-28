@@ -335,8 +335,11 @@ auto HandleParseNode(Context& context, Parse::LetDeclId node_id) -> bool {
     CARBON_DIAGNOSTIC(
         ExpectedInitializerAfterLet, Error,
         "expected `=`; `let` declaration must have an initializer");
-    context.emitter().Emit(LocIdForDiagnostics::TokenOnly(node_id),
-                           ExpectedInitializerAfterLet);
+    context.emitter()
+        .Build(LocIdForDiagnostics::TokenOnly(node_id),
+               ExpectedInitializerAfterLet)
+        .Attach(LocIdForDiagnostics::TokenOnly(node_id))
+        .Emit();
   }
 
   auto pattern_block_id = context.pattern_block_stack().Pop();

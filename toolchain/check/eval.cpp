@@ -1156,9 +1156,21 @@ static auto PerformArrayIndex(EvalContext& eval_context, SemIR::ArrayIndex inst)
         CARBON_DIAGNOSTIC(ArrayIndexOutOfBounds, Error,
                           "array index `{0}` is past the end of type {1}",
                           TypedInt, SemIR::TypeId);
-        eval_context.emitter().Emit(
-            eval_context.GetDiagnosticLoc(inst.index_id), ArrayIndexOutOfBounds,
-            {.type = index->type_id, .value = index_val}, aggregate_type_id);
+        // The message names the type whose end was passed, so the array that
+        // has that type is marked; the bound itself is a canonicalized constant
+        // with no source to point at.
+        CARBON_DIAGNOSTIC_LABEL(ArrayIndexedObjectHere, Info,
+                                "indexing this array of type {0}",
+                                SemIR::TypeId);
+        eval_context.emitter()
+            .Build(eval_context.GetDiagnosticLoc(inst.index_id),
+                   ArrayIndexOutOfBounds,
+                   {.type = index->type_id, .value = index_val},
+                   aggregate_type_id)
+            .Attach(eval_context.GetDiagnosticLoc(inst.index_id))
+            .Attach(eval_context.GetDiagnosticLoc(inst.array_id),
+                    ArrayIndexedObjectHere, aggregate_type_id)
+            .Emit();
         return SemIR::ErrorInst::ConstantId;
       }
     }
@@ -1812,10 +1824,19 @@ static auto PerformFloatToIntConvert(Context& context, SemIR::LocId loc_id,
 }
 
 // Issues a diagnostic for a compile-time division by zero.
+//
+// TODO: Mark the divisor rather than the whole operation. This only fires when
+// the divisor is a compile-time constant, and a constant is canonicalized
+// without a source of its own -- two zeros written in different places are one
+// instruction -- so saying which operand is at fault needs the argument
+// expression the value was deduced from, which is not reachable here.
 static auto DiagnoseDivisionByZero(Context& context, SemIR::LocId loc_id)
     -> void {
   CARBON_DIAGNOSTIC(CompileTimeDivisionByZero, Error, "division by zero");
-  context.emitter().Emit(loc_id, CompileTimeDivisionByZero);
+  context.emitter()
+      .Build(loc_id, CompileTimeDivisionByZero)
+      .Attach(loc_id)
+      .Emit();
 }
 
 // Performs a builtin unary integer -> integer operation.
@@ -3023,13 +3044,13 @@ static auto MakeConstantForCall(EvalContext& eval_context,
         evaluation_mode == SemIR::Function::EvaluationMode::MustEval) {
       CARBON_DIAGNOSTIC(NonConstantCallToCompTimeOnlyFunction, Error,
                         "non-constant call to compile-time-only function");
-      CARBON_DIAGNOSTIC(CompTimeOnlyFunctionHere, Note,
-                        "compile-time-only function declared here");
+      CARBON_DIAGNOSTIC_LABEL(CompTimeOnlyFunctionHere, Info,
+                              "compile-time-only function declared here");
       const auto& function = eval_context.functions().Get(
           std::get<SemIR::CalleeFunction>(callee).function_id);
       eval_context.emitter()
           .Build(inst_id, NonConstantCallToCompTimeOnlyFunction)
-          .Note(function.latest_decl_id(), CompTimeOnlyFunctionHere)
+          .Attach(function.latest_decl_id(), CompTimeOnlyFunctionHere)
           .Emit();
     }
     return SemIR::ConstantId::NotConstant;
@@ -3515,10 +3536,10 @@ auto TryEvalBlockForSpecific(Context& context, SemIR::LocId loc_id,
 
   Diagnostics::ContextScope diagnostic_context(
       &context.emitter(), [&](auto& builder) {
-        CARBON_DIAGNOSTIC(ResolvingSpecificHere, SoftContext,
-                          "unable to monomorphize specific {0}",
-                          SemIR::SpecificId);
-        builder.Context(loc_id, ResolvingSpecificHere, specific_id);
+        CARBON_DIAGNOSTIC_SOFT_CONTEXT(ResolvingSpecificHere,
+                                       "unable to monomorphize specific {0}",
+                                       SemIR::SpecificId);
+        builder.Attach(loc_id, ResolvingSpecificHere, specific_id);
       });
 
   bool has_error = false;
@@ -3881,9 +3902,9 @@ static auto TryEvalCall(EvalContext& outer_eval_context, SemIR::LocId loc_id,
 
   Diagnostics::AnnotationScope annotate_diagnostics(
       &eval_context.emitter(), [&](auto& builder) {
-        CARBON_DIAGNOSTIC(InCallToEvalFn, Note, "in call to {0} here",
-                          SemIR::NameId);
-        builder.Note(loc_id, InCallToEvalFn, function.name_id);
+        CARBON_DIAGNOSTIC_LABEL(InCallToEvalFn, Info, "in call to {0} here",
+                                SemIR::NameId);
+        builder.Attach(loc_id, InCallToEvalFn, function.name_id);
       });
 
   // Execute the function decl block followed by the body.

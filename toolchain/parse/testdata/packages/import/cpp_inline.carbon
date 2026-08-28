@@ -10,51 +10,44 @@
 
 // --- fail_bad_syntax.carbon
 
-// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+4]]:18: error: expected string literal after `inline` [ExpectedStringAfterInline]
-// CHECK:STDERR: import Cpp inline;
-// CHECK:STDERR:                  ^
+// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+3]]:12-17: error: expected string literal after `inline` [ExpectedStringAfterInline]
+// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+2]]:12-17: note: expected string literal after this token [InlineStringGoesAfter]
 // CHECK:STDERR:
 import Cpp inline;
-// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+4]]:19: error: expected string literal after `inline` [ExpectedStringAfterInline]
-// CHECK:STDERR: import Cpp inline library "foo.h";
-// CHECK:STDERR:                   ^~~~~~~
+// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+3]]:12-17: error: expected string literal after `inline` [ExpectedStringAfterInline]
+// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+2]]:12-17: note: expected string literal after this token [InlineStringGoesAfter]
 // CHECK:STDERR:
 import Cpp inline library "foo.h";
 
 // TODO: We might want to allow this as a "preprocessed source" syntax.
-// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+4]]:28: error: `import` declarations must end with a `;` [ExpectedDeclSemi]
-// CHECK:STDERR: import Cpp library "foo.h" inline "bar";
-// CHECK:STDERR:                            ^~~~~~
+// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+3]]:20-26: error: `import` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+2]]:20-26: note: expected `;` after this token [DeclSemiGoesAfter]
 // CHECK:STDERR:
 import Cpp library "foo.h" inline "bar";
 
-// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+4]]:24: error: `import` declarations must end with a `;` [ExpectedDeclSemi]
-// CHECK:STDERR: import library "foo.h" inline "bar";
-// CHECK:STDERR:                        ^~~~~~
+// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+3]]:16-22: error: `import` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_bad_syntax.carbon:[[@LINE+2]]:16-22: note: expected `;` after this token [DeclSemiGoesAfter]
 // CHECK:STDERR:
 import library "foo.h" inline "bar";
 
 // --- fail_no_semi_at_eof.carbon
 
+// CHECK:STDERR: fail_no_semi_at_eof.carbon:[[@LINE+3]]:12-17: error: expected string literal after `inline` [ExpectedStringAfterInline]
+// CHECK:STDERR: fail_no_semi_at_eof.carbon:[[@LINE+2]]:12-17: note: expected string literal after this token [InlineStringGoesAfter]
+// CHECK:STDERR:
 import Cpp inline
-// CHECK:STDERR: fail_no_semi_at_eof.carbon:[[@LINE+4]]:1: error: expected string literal after `inline` [ExpectedStringAfterInline]
-// CHECK:STDERR:
-// CHECK:STDERR: ^
-// CHECK:STDERR:
 
 // --- fail_package_inline.carbon
 
-// CHECK:STDERR: fail_package_inline.carbon:[[@LINE+4]]:16: error: `package` declarations must end with a `;` [ExpectedDeclSemi]
-// CHECK:STDERR: package NotCpp inline "int n;";
-// CHECK:STDERR:                ^~~~~~
+// CHECK:STDERR: fail_package_inline.carbon:[[@LINE+3]]:9-14: error: `package` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_package_inline.carbon:[[@LINE+2]]:9-14: note: expected `;` after this token [DeclSemiGoesAfter]
 // CHECK:STDERR:
 package NotCpp inline "int n;";
 
 // --- fail_library_inline.carbon
 
-// CHECK:STDERR: fail_library_inline.carbon:[[@LINE+4]]:17: error: `library` declarations must end with a `;` [ExpectedDeclSemi]
-// CHECK:STDERR: library "foo.h" inline "int n;";
-// CHECK:STDERR:                 ^~~~~~
+// CHECK:STDERR: fail_library_inline.carbon:[[@LINE+3]]:9-15: error: `library` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_library_inline.carbon:[[@LINE+2]]:9-15: note: expected `;` after this token [DeclSemiGoesAfter]
 // CHECK:STDERR:
 library "foo.h" inline "int n;";
 
@@ -80,15 +73,13 @@ int n;
 
 // --- fail_inline_cpp_syntax_errors.carbon
 
-// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+4]]:7: error: expected `Cpp` after `inline` [ExpectedCppAfterInline]
-// CHECK:STDERR: inline;
-// CHECK:STDERR:       ^
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+3]]:1-6: error: expected `Cpp` after `inline` [ExpectedCppAfterInline]
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+2]]:1-6: note: expected `Cpp` after this token [CppGoesAfter]
 // CHECK:STDERR:
 inline;
 
-// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+4]]:8: error: expected `Cpp` after `inline` [ExpectedCppAfterInline]
-// CHECK:STDERR: inline '''
-// CHECK:STDERR:        ^~~
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+3]]:1-6: error: expected `Cpp` after `inline` [ExpectedCppAfterInline]
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+2]]:1-6: note: expected `Cpp` after this token [CppGoesAfter]
 // CHECK:STDERR:
 inline '''
 int n;
@@ -96,33 +87,29 @@ int n;
 
 // Recovery skips to the `;` even when tokens follow the closing `'''` on its
 // line, so the `;` ends the declaration rather than starting an empty one.
-// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+4]]:8: error: expected `Cpp` after `inline` [ExpectedCppAfterInline]
-// CHECK:STDERR: inline '''
-// CHECK:STDERR:        ^~~
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+3]]:1-6: error: expected `Cpp` after `inline` [ExpectedCppAfterInline]
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+2]]:1-6: note: expected `Cpp` after this token [CppGoesAfter]
 // CHECK:STDERR:
 inline '''
 int n;
 ''' + "more";
 
-// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+4]]:11: error: expected string literal after `inline Cpp` [ExpectedStringAfterInlineCpp]
-// CHECK:STDERR: inline Cpp;
-// CHECK:STDERR:           ^
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+3]]:8-10: error: expected string literal after `inline Cpp` [ExpectedStringAfterInlineCpp]
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+2]]:8-10: note: expected string literal after this token [InlineCppStringGoesAfter]
 // CHECK:STDERR:
 inline Cpp;
 
-// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+4]]:12: error: expected string literal after `inline Cpp` [ExpectedStringAfterInlineCpp]
-// CHECK:STDERR: inline Cpp x;
-// CHECK:STDERR:            ^
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+3]]:8-10: error: expected string literal after `inline Cpp` [ExpectedStringAfterInlineCpp]
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+2]]:8-10: note: expected string literal after this token [InlineCppStringGoesAfter]
 // CHECK:STDERR:
 inline Cpp x;
 
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+3]]:12-25: error: `inline` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+2]]:12-25: note: expected `;` after this token [DeclSemiGoesAfter]
+// CHECK:STDERR:
 inline Cpp '''
 int n;
 '''
-// CHECK:STDERR: fail_inline_cpp_syntax_errors.carbon:[[@LINE+4]]:1: error: `inline` declarations must end with a `;` [ExpectedDeclSemi]
-// CHECK:STDERR:
-// CHECK:STDERR: ^
-// CHECK:STDERR:
 
 // --- eof.carbon
 // This split exists to avoid the "no `;` at EOF" diagnostic above pointing to

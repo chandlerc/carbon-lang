@@ -56,7 +56,7 @@ class VectorConsumer : public Consumer {
   }
 
  private:
-  llvm::SmallVector<Diagnostic> diagnostics_;
+  llvm::SmallVector<Diagnostic, 0> diagnostics_;
 };
 
 TEST(SortedEmitterTest, SortErrors) {
@@ -116,6 +116,76 @@ TEST(SortedEmitterTest, SortOnScope) {
                   IsSingleDiagnostic(Kind::TestDiagnosticOnScope, Level::Error,
                                      _, _, "DiagOnScope2"),
               }));
+}
+
+TEST(SortedEmitterTest, SortSameOffsetByPrintedPosition) {
+  VectorConsumer consumer;
+  SortingConsumer sorting_consumer(consumer);
+  FakeEmitter emitter(&sorting_consumer);
+
+  // Found at one point but emitted back to front: the tie is decided by where
+  // each prints, not by which was emitted first.
+  emitter.Emit({3, 20, 1}, TestDiagnostic, 1);
+  emitter.Emit({3, 10, 1}, TestDiagnostic, 2);
+
+  sorting_consumer.Flush();
+  EXPECT_THAT(
+      consumer.diagnostics(),
+      ElementsAreArray({
+          IsSingleDiagnostic(Kind::TestDiagnostic, Level::Error, _, _, "Diag2"),
+          IsSingleDiagnostic(Kind::TestDiagnostic, Level::Error, _, _, "Diag1"),
+      }));
+}
+
+TEST(SortedEmitterTest, LeadingContextDecidesPosition) {
+  CARBON_DIAGNOSTIC_CONTEXT(TestSortContext, "context");
+  VectorConsumer consumer;
+  SortingConsumer sorting_consumer(consumer);
+  FakeEmitter emitter(&sorting_consumer);
+
+  // The context leads the first diagnostic, so its position -- line 20, after
+  // the other diagnostic's line 10 -- is what the tie is decided by, not the
+  // message's own line 5 before it.
+  {
+    ContextScope scope(&emitter, [&](auto& builder) {
+      builder.Attach({3, 20, 1}, TestSortContext);
+    });
+    emitter.Emit({3, 5, 1}, TestDiagnostic, 1);
+  }
+  emitter.Emit({3, 10, 1}, TestDiagnostic, 2);
+
+  sorting_consumer.Flush();
+  EXPECT_THAT(
+      consumer.diagnostics(),
+      ElementsAreArray({
+          IsSingleDiagnostic(Kind::TestDiagnostic, Level::Error, _, _, "Diag2"),
+          Testing::IsDiagnostic(
+              Level::Error,
+              Testing::IsDiagnosticMessage(Kind::TestDiagnostic, Level::Error,
+                                           _, _, "Diag1"),
+              _, _),
+      }));
+}
+
+TEST(SortedEmitterTest, NoPositionSortsFirstAndStays) {
+  VectorConsumer consumer;
+  SortingConsumer sorting_consumer(consumer);
+  FakeEmitter emitter(&sorting_consumer);
+
+  // Diagnostics with no position compare equal among themselves, keeping
+  // emission order, and sort before anything positioned at the same offset.
+  emitter.Emit({3, 5, 1}, TestDiagnostic, 1);
+  emitter.Emit({3, -1, -1}, TestDiagnostic, 2);
+  emitter.Emit({3, -1, -1}, TestDiagnostic, 3);
+
+  sorting_consumer.Flush();
+  EXPECT_THAT(
+      consumer.diagnostics(),
+      ElementsAreArray({
+          IsSingleDiagnostic(Kind::TestDiagnostic, Level::Error, _, _, "Diag2"),
+          IsSingleDiagnostic(Kind::TestDiagnostic, Level::Error, _, _, "Diag3"),
+          IsSingleDiagnostic(Kind::TestDiagnostic, Level::Error, _, _, "Diag1"),
+      }));
 }
 
 TEST(SortedEmitterTest, MixedScope) {

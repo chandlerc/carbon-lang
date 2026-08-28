@@ -11,21 +11,16 @@
 // api.carbon
 
 class C {
-  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+7]]:3: error: the `package` declaration must be the first non-comment line [PackageTooLate]
-  // CHECK:STDERR:   package P;
-  // CHECK:STDERR:   ^~~~~~~
-  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE-4]]:1: note: first non-comment line is here [FirstNonCommentLine]
-  // CHECK:STDERR: class C {
-  // CHECK:STDERR: ^~~~~
+  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+3]]:3-9: error: the `package` declaration must be the first non-comment line [PackageTooLate]
+  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE-2]]:1-5: note: first non-comment line is here [FirstNonCommentLine]
   // CHECK:STDERR:
   package P;
 }
 
 fn F() {
   // `package` here is an expression naming the package scope.
-  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+4]]:11: error: expected `.` after `package` expression [ExpectedPeriodAfterPackage]
-  // CHECK:STDERR:   package P;
-  // CHECK:STDERR:           ^
+  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+3]]:3-9: error: expected `.` after `package` expression [ExpectedPeriodAfterPackage]
+  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+2]]:3-9: note: expected `.` after this token [PackagePeriodGoesAfter]
   // CHECK:STDERR:
   package P;
 
@@ -36,24 +31,16 @@ fn F() {
 // impl.carbon
 
 class C {
-  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+7]]:3: error: the `package` declaration must be the first non-comment line [PackageTooLate]
-  // CHECK:STDERR:   impl package P;
-  // CHECK:STDERR:   ^~~~
-  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE-29]]:1: note: first non-comment line is here [FirstNonCommentLine]
-  // CHECK:STDERR: class C {
-  // CHECK:STDERR: ^~~~~
+  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+3]]:3-6: error: the `package` declaration must be the first non-comment line [PackageTooLate]
+  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE-22]]:1-5: note: first non-comment line is here [FirstNonCommentLine]
   // CHECK:STDERR:
   impl package P;
 }
 
 fn F() {
   // This reaches decl parsing because `impl` is a valid modifier or introducer.
-  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+7]]:3: error: the `package` declaration must be the first non-comment line [PackageTooLate]
-  // CHECK:STDERR:   impl package P;
-  // CHECK:STDERR:   ^~~~
-  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE-41]]:1: note: first non-comment line is here [FirstNonCommentLine]
-  // CHECK:STDERR: class C {
-  // CHECK:STDERR: ^~~~~
+  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE+3]]:3-6: error: the `package` declaration must be the first non-comment line [PackageTooLate]
+  // CHECK:STDERR: fail_in_nested_scope.carbon:[[@LINE-30]]:1-5: note: first non-comment line is here [FirstNonCommentLine]
   // CHECK:STDERR:
   impl package P;
 }

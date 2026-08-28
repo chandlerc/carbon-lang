@@ -90,8 +90,13 @@ static auto HandleStatementKeywordFinish(Context& context, NodeKind node_kind)
   if (!semi) {
     CARBON_DIAGNOSTIC(ExpectedStatementSemi, Error,
                       "`{0}` statements must end with a `;`", Lex::TokenKind);
-    context.emitter().Emit(*context.position(), ExpectedStatementSemi,
-                           context.tokens().GetKind(state.token));
+    CARBON_DIAGNOSTIC_LABEL(StatementSemiGoesAfter, Primary,
+                            "expected `;` after this token");
+    context.emitter()
+        .Build(*(context.position() - 1), ExpectedStatementSemi,
+               context.tokens().GetKind(state.token))
+        .Attach(*(context.position() - 1), StatementSemiGoesAfter)
+        .Emit();
     state.has_error = true;
     // Recover to the next semicolon if possible.
     semi = context.SkipPastLikelyEnd(state.token);
@@ -133,12 +138,22 @@ auto HandleStatementForHeaderIn(Context& context) -> void {
   } else if (context.PositionIs(Lex::TokenKind::Colon)) {
     CARBON_DIAGNOSTIC(ExpectedInNotColon, Error,
                       "`:` should be replaced by `in`");
-    context.emitter().Emit(*context.position(), ExpectedInNotColon);
+    context.emitter()
+        .Build(*context.position(), ExpectedInNotColon)
+        .Attach(*context.position())
+        .Emit();
     state.has_error = true;
     end_token = context.Consume();
   } else if (!state.has_error) {
     CARBON_DIAGNOSTIC(ExpectedIn, Error, "expected `in` after loop pattern");
-    context.emitter().Emit(*context.position(), ExpectedIn);
+    CARBON_DIAGNOSTIC_LABEL(InGoesAfter, Primary,
+                            "expected `in` after this token");
+    CARBON_DIAGNOSTIC_LABEL(InForHeader, Info, "in this `for` header");
+    context.emitter()
+        .Build(*(context.position() - 1), ExpectedIn)
+        .Attach(*(context.position() - 1), InGoesAfter)
+        .Attach(state.token, InForHeader)
+        .Emit();
     state.has_error = true;
   }
 

@@ -51,24 +51,27 @@ enum class EC { e1, e2, e3 };
 ''';
 
 fn TestEnumClass(a: Cpp.EC, b: Cpp.EC) {
-  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+4]]:19: error: cannot access member of interface `Core.BitAndWith(Cpp.EC)` in type `Cpp.EC` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: Cpp.EC = a & b;
-  // CHECK:STDERR:                   ^~~~~
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+5]]:21: error: type `Cpp.EC` does not implement interface `Core.BitAndWith(Cpp.EC)` [MissingImplForType]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+4]]:21: note: `&` requires an impl of `Core.BitAndWith` [OperatorInterface]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+3]]:19: note: left operand has type `Cpp.EC` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.EC` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: Cpp.EC = a & b;
-  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+4]]:19: error: cannot access member of interface `Core.BitOrWith(Cpp.EC)` in type `Cpp.EC` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: Cpp.EC = a | b;
-  // CHECK:STDERR:                   ^~~~~
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+5]]:21: error: type `Cpp.EC` does not implement interface `Core.BitOrWith(Cpp.EC)` [MissingImplForType]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+4]]:21: note: `|` requires an impl of `Core.BitOrWith` [OperatorInterface]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+3]]:19: note: left operand has type `Cpp.EC` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.EC` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: Cpp.EC = a | b;
-  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+4]]:19: error: cannot access member of interface `Core.BitXorWith(Cpp.EC)` in type `Cpp.EC` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: Cpp.EC = a ^ b;
-  // CHECK:STDERR:                   ^~~~~
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+5]]:21: error: type `Cpp.EC` does not implement interface `Core.BitXorWith(Cpp.EC)` [MissingImplForType]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+4]]:21: note: `^` requires an impl of `Core.BitXorWith` [OperatorInterface]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+3]]:19: note: left operand has type `Cpp.EC` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.EC` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: Cpp.EC = a ^ b;
-  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+4]]:19: error: cannot access member of interface `Core.BitComplement` in type `Cpp.EC` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: Cpp.EC = ^a;
-  // CHECK:STDERR:                   ^~
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+4]]:19: error: type `Cpp.EC` does not implement interface `Core.BitComplement` [MissingImplForType]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+3]]:19: note: `^` requires an impl of `Core.BitComplement` [OperatorInterface]
+  // CHECK:STDERR: fail_enum_class_bitwise_operators.carbon:[[@LINE+2]]:20: note: operand has type `Cpp.EC` [UnaryOperatorOperandType]
   // CHECK:STDERR:
   let _: Cpp.EC = ^a;
 }
@@ -145,163 +148,189 @@ struct ConvertibleToFloat {
 
 fn TestInteger(a: Cpp.ConvertibleToInt, b: Cpp.ConvertibleToInt) {
   // Test arithmetic.
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.AddWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a + b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.AddWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a + b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.SubWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a - b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.SubWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `-` requires an impl of `Core.SubWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a - b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.MulWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a * b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.MulWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `*` requires an impl of `Core.MulWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a * b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.DivWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a / b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.DivWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `/` requires an impl of `Core.DivWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a / b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.ModWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a % b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.ModWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `%` requires an impl of `Core.ModWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a % b;
 
   // Test bitwise.
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.BitAndWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a & b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.BitAndWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `&` requires an impl of `Core.BitAndWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a & b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.BitOrWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a | b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.BitOrWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `|` requires an impl of `Core.BitOrWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a | b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.BitXorWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a ^ b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.BitXorWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `^` requires an impl of `Core.BitXorWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a ^ b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.LeftShiftWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a << b;
-  // CHECK:STDERR:                ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18-19: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.LeftShiftWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18-19: note: `<<` requires an impl of `Core.LeftShiftWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:21: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a << b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.RightShiftWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = a >> b;
-  // CHECK:STDERR:                ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18-19: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.RightShiftWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18-19: note: `>>` requires an impl of `Core.RightShiftWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:21: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: i32 = a >> b;
 
   // Test comparison.
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.EqWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a == b);
-  // CHECK:STDERR:                  ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20-21: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.EqWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20-21: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a == b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.EqWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a != b);
-  // CHECK:STDERR:                  ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20-21: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.EqWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20-21: note: `!=` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a != b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.OrderedWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a < b);
-  // CHECK:STDERR:                  ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.OrderedWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20: note: `<` requires an impl of `Core.OrderedWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a < b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.OrderedWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a <= b);
-  // CHECK:STDERR:                  ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20-21: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.OrderedWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20-21: note: `<=` requires an impl of `Core.OrderedWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a <= b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.OrderedWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a > b);
-  // CHECK:STDERR:                  ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.OrderedWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20: note: `>` requires an impl of `Core.OrderedWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a > b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.OrderedWith(Cpp.ConvertibleToInt)` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a >= b);
-  // CHECK:STDERR:                  ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20-21: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.OrderedWith(Cpp.ConvertibleToInt)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20-21: note: `>=` requires an impl of `Core.OrderedWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToInt` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.ConvertibleToInt` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a >= b);
 
   // Test unary.
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.Negate` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = -a;
-  // CHECK:STDERR:                ^~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.Negate` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: `-` requires an impl of `Core.Negate` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:17: note: operand has type `Cpp.ConvertibleToInt` [UnaryOperatorOperandType]
   // CHECK:STDERR:
   let _: i32 = -a;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.BitComplement` in type `Cpp.ConvertibleToInt` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: i32 = ^a;
-  // CHECK:STDERR:                ^~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: type `Cpp.ConvertibleToInt` does not implement interface `Core.BitComplement` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: `^` requires an impl of `Core.BitComplement` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:17: note: operand has type `Cpp.ConvertibleToInt` [UnaryOperatorOperandType]
   // CHECK:STDERR:
   let _: i32 = ^a;
 }
 
 fn TestFloat(a: Cpp.ConvertibleToFloat, b: Cpp.ConvertibleToFloat) {
   // Test arithmetic.
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.AddWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: f32 = a + b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.AddWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: f32 = a + b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.SubWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: f32 = a - b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.SubWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `-` requires an impl of `Core.SubWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: f32 = a - b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.MulWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: f32 = a * b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.MulWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `*` requires an impl of `Core.MulWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: f32 = a * b;
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.DivWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: f32 = a / b;
-  // CHECK:STDERR:                ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:18: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.DivWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: note: `/` requires an impl of `Core.DivWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:20: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: f32 = a / b;
 
   // Test comparison.
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.EqWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a == b);
-  // CHECK:STDERR:                  ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20-21: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.EqWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20-21: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a == b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.EqWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a != b);
-  // CHECK:STDERR:                  ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20-21: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.EqWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20-21: note: `!=` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a != b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.OrderedWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a < b);
-  // CHECK:STDERR:                  ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.OrderedWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20: note: `<` requires an impl of `Core.OrderedWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a < b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.OrderedWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a <= b);
-  // CHECK:STDERR:                  ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20-21: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.OrderedWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20-21: note: `<=` requires an impl of `Core.OrderedWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a <= b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.OrderedWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a > b);
-  // CHECK:STDERR:                  ^~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.OrderedWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20: note: `>` requires an impl of `Core.OrderedWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a > b);
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.OrderedWith(Cpp.ConvertibleToFloat)` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: bool = (a >= b);
-  // CHECK:STDERR:                  ^~~~~~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+5]]:20-21: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.OrderedWith(Cpp.ConvertibleToFloat)` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:20-21: note: `>=` requires an impl of `Core.OrderedWith` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:23: note: right operand has type `Cpp.ConvertibleToFloat` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   let _: bool = (a >= b);
 
   // Test unary.
-  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: cannot access member of interface `Core.Negate` in type `Cpp.ConvertibleToFloat` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   let _: f32 = -a;
-  // CHECK:STDERR:                ^~
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+4]]:16: error: type `Cpp.ConvertibleToFloat` does not implement interface `Core.Negate` [MissingImplForType]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+3]]:16: note: `-` requires an impl of `Core.Negate` [OperatorInterface]
+  // CHECK:STDERR: fail_convert_all_operands.carbon:[[@LINE+2]]:17: note: operand has type `Cpp.ConvertibleToFloat` [UnaryOperatorOperandType]
   // CHECK:STDERR:
   let _: f32 = -a;
 }

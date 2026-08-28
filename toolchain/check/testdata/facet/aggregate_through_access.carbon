@@ -17,9 +17,8 @@ interface Z {
   let X: type;
 }
 
-// CHECK:STDERR: fail_todo_tuple_access_through_witness.carbon:[[@LINE+4]]:41: error: type `type` does not support tuple indexing; only tuples can be indexed that way [TupleIndexOnANonTupleType]
-// CHECK:STDERR: fn F(generic T: Z where .X = ({}, )) -> T.X.0 {
-// CHECK:STDERR:                                         ^~~~~
+// CHECK:STDERR: fail_todo_tuple_access_through_witness.carbon:[[@LINE+3]]:41-45: error: type `type` does not support tuple indexing; only tuples can be indexed that way [TupleIndexOnANonTupleType]
+// CHECK:STDERR: fail_todo_tuple_access_through_witness.carbon:[[@LINE+2]]:41-43: note: expression has type `type` [TupleIndexBaseHere]
 // CHECK:STDERR:
 fn F(generic T: Z where .X = ({}, )) -> T.X.0 {
   return {};
@@ -32,9 +31,7 @@ interface Z {
   let X: type;
 }
 
-// CHECK:STDERR: fail_todo_struct_access_through_witness.carbon:[[@LINE+4]]:43: error: type `type` does not support qualified expressions [QualifiedExprUnsupported]
-// CHECK:STDERR: fn F(generic T: Z where .X = {.t: ()}) -> T.X.t {
-// CHECK:STDERR:                                           ^~~~~
+// CHECK:STDERR: fail_todo_struct_access_through_witness.carbon:[[@LINE+2]]:43-47: error: type `type` does not support qualified expressions [QualifiedExprUnsupported]
 // CHECK:STDERR:
 fn F(generic T: Z where .X = {.t: ()}) -> T.X.t {
   return ();
@@ -47,9 +44,10 @@ interface Z {
   let X: type;
 }
 
-// CHECK:STDERR: fail_todo_array_access_through_witness.carbon:[[@LINE+4]]:47: error: cannot access member of interface `Core.IndexWith(Core.IntLiteral)` in type `type` that does not implement that interface [MissingImplInMemberAccess]
-// CHECK:STDERR: fn F(generic T: Z where .X = array({}, 1)) -> T.X[0] {
-// CHECK:STDERR:                                               ^~~~~~
+// CHECK:STDERR: fail_todo_array_access_through_witness.carbon:[[@LINE+5]]:51: error: type `type` does not implement interface `Core.IndexWith(Core.IntLiteral)` [MissingImplForType]
+// CHECK:STDERR: fail_todo_array_access_through_witness.carbon:[[@LINE+4]]:52: note: `[]` requires an impl of `Core.IndexWith` [OperatorInterface]
+// CHECK:STDERR: fail_todo_array_access_through_witness.carbon:[[@LINE+3]]:47-49: note: indexing an object with type `type` [IndexedObjectType]
+// CHECK:STDERR: fail_todo_array_access_through_witness.carbon:[[@LINE+2]]:51: note: indexing with type `Core.IntLiteral` [IndexWithType]
 // CHECK:STDERR:
 fn F(generic T: Z where .X = array({}, 1)) -> T.X[0] {
   return {};

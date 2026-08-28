@@ -113,8 +113,10 @@ auto HandleParseNode(Context& context, Parse::TuplePatternId node_id) -> bool {
     if (InNonStaticFieldDecl(context)) {
       CARBON_DIAGNOSTIC(FieldWithTuplePattern, Error,
                         "found tuple pattern in class `var` decl");
-      context.emitter().Emit(LocIdForDiagnostics::TokenOnly(node_id),
-                             FieldWithTuplePattern);
+      context.emitter()
+          .Build(LocIdForDiagnostics::TokenOnly(node_id), FieldWithTuplePattern)
+          .Attach(LocIdForDiagnostics::TokenOnly(node_id))
+          .Emit();
 
       return false;
     }

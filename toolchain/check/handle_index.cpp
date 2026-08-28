@@ -38,8 +38,26 @@ static auto PerformIndexWith(Context& context, Parse::NodeId node_id,
   Operator op{.interface_name = CoreIdentifier::IndexWith,
               .interface_args_ref = args,
               .op_name = CoreIdentifier::At};
-  return BuildBinaryOperator(context, node_id, op, operand_inst_id,
-                             index_inst_id);
+  // Indexing has an object and an index rather than a left and a right operand,
+  // and the index is what the object failed to accept, so the message points
+  // there rather than at the parse node, which names the closing bracket alone.
+  //
+  // TODO: Mark the brackets rather than the `]` the parse node names. The
+  // syntax the label names is `[]`, and neither bracket alone is that.
+  CARBON_DIAGNOSTIC_LABEL(IndexedObjectType, Primary,
+                          "indexing an object with type {0}", TypeOfInstId);
+  CARBON_DIAGNOSTIC_LABEL(IndexWithType, Primary, "indexing with type {0}",
+                          TypeOfInstId);
+  auto mark_operands = [&](DiagnosticBuilder& builder) {
+    AttachOperatorSyntax(builder, LocIdForDiagnostics::TokenOnly(node_id), "[]",
+                         op.interface_name);
+    AttachOperandType(context, builder, operand_inst_id, IndexedObjectType);
+    AttachOperandType(context, builder, index_inst_id, IndexWithType);
+  };
+  return BuildBinaryOperator(
+      context, node_id, op, operand_inst_id, index_inst_id, /*diagnose=*/true,
+      /*missing_impl_diagnostic_context=*/nullptr,
+      {.loc_id = SemIR::LocId(index_inst_id), .annotate = mark_operands});
 }
 
 auto HandleParseNode(Context& context, Parse::IndexExprId node_id) -> bool {

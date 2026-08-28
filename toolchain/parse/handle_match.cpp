@@ -15,7 +15,12 @@ static auto HandleMatchHandlerStart(Context& context, NodeKind label_kind)
     if (!state.has_error) {
       CARBON_DIAGNOSTIC(ExpectedMatchCaseArrow, Error,
                         "expected `=>` introducing statement block");
-      context.emitter().Emit(*context.position(), ExpectedMatchCaseArrow);
+      CARBON_DIAGNOSTIC_LABEL(MatchCaseArrowGoesAfter, Primary,
+                              "expected `=>` after this token");
+      context.emitter()
+          .Build(*(context.position() - 1), ExpectedMatchCaseArrow)
+          .Attach(*(context.position() - 1), MatchCaseArrowGoesAfter)
+          .Emit();
     }
 
     context.AddNode(label_kind, *context.position(), /*has_error=*/true);
@@ -33,7 +38,12 @@ static auto HandleMatchHandlerStart(Context& context, NodeKind label_kind)
     if (!state.has_error) {
       CARBON_DIAGNOSTIC(ExpectedMatchCaseBlock, Error,
                         "expected `{{` after `=>`");
-      context.emitter().Emit(*context.position(), ExpectedMatchCaseBlock);
+      CARBON_DIAGNOSTIC_LABEL(MatchCaseBlockGoesAfter, Primary,
+                              "expected `{{` after this token");
+      context.emitter()
+          .Build(*(context.position() - 1), ExpectedMatchCaseBlock)
+          .Attach(*(context.position() - 1), MatchCaseBlockGoesAfter)
+          .Emit();
     }
 
     context.AddNode(NodeKind::MatchHandlerStart, *context.position(),
@@ -54,8 +64,11 @@ static auto EmitUnexpectedTokenAndRecover(Context& context) -> void {
   CARBON_DIAGNOSTIC(UnexpectedTokenInMatchCasesBlock, Error,
                     "unexpected `{0}`; expected `case`, `default` or `}`",
                     Lex::TokenKind);
-  context.emitter().Emit(*context.position(), UnexpectedTokenInMatchCasesBlock,
-                         context.PositionKind());
+  context.emitter()
+      .Build(*context.position(), UnexpectedTokenInMatchCasesBlock,
+             context.PositionKind())
+      .Attach(*context.position())
+      .Emit();
   context.ReturnErrorOnState();
   context.SkipPastLikelyEnd(*context.position());
 }
@@ -77,7 +90,12 @@ auto HandleMatchConditionFinish(Context& context) -> void {
     if (!state.has_error) {
       CARBON_DIAGNOSTIC(ExpectedMatchCasesBlock, Error,
                         "expected `{{` starting block with cases");
-      context.emitter().Emit(*context.position(), ExpectedMatchCasesBlock);
+      CARBON_DIAGNOSTIC_LABEL(MatchCasesBlockGoesAfter, Primary,
+                              "expected `{{` after this token");
+      context.emitter()
+          .Build(*(context.position() - 1), ExpectedMatchCasesBlock)
+          .Attach(*(context.position() - 1), MatchCasesBlockGoesAfter)
+          .Emit();
     }
 
     context.AddNode(NodeKind::MatchStatementStart, *context.position(),
@@ -88,13 +106,22 @@ auto HandleMatchConditionFinish(Context& context) -> void {
     return;
   }
 
-  context.AddNode(NodeKind::MatchStatementStart, context.Consume(),
-                  state.has_error);
+  auto open_curly = context.Consume();
+  context.AddNode(NodeKind::MatchStatementStart, open_curly, state.has_error);
 
   state.has_error = false;
   if (context.PositionIs(Lex::TokenKind::CloseCurlyBrace)) {
     CARBON_DIAGNOSTIC(ExpectedMatchCases, Error, "expected cases");
-    context.emitter().Emit(*context.position(), ExpectedMatchCases);
+    // This is only reached on `match (...) { }`, where the position is the `}`
+    // -- the one place a case demonstrably is not. The block that needs one is
+    // what the reader has to add to, so that is what is marked.
+    CARBON_DIAGNOSTIC_LABEL(
+        EmptyCasesBlock, Primary,
+        "this block needs at least one `case` or `default`");
+    context.emitter()
+        .Build(*context.position(), ExpectedMatchCases)
+        .Attach(open_curly, EmptyCasesBlock)
+        .Emit();
     state.has_error = true;
   }
 
@@ -125,7 +152,10 @@ auto HandleMatchCaseLoopAfterDefault(Context& context) -> void {
     CARBON_DIAGNOSTIC(UnreachableMatchCase, Error,
                       "unreachable case; `{0}` occurs after the `default`",
                       Lex::TokenKind);
-    context.emitter().Emit(*context.position(), UnreachableMatchCase, kind);
+    context.emitter()
+        .Build(*context.position(), UnreachableMatchCase, kind)
+        .Attach(*context.position())
+        .Emit();
 
     context.ReturnErrorOnState();
     context.PushState(StateKind::MatchCaseLoopAfterDefault);
@@ -174,8 +204,12 @@ auto HandleMatchCaseAfterPattern(Context& context) -> void {
       if (!state.has_error) {
         CARBON_DIAGNOSTIC(ExpectedMatchCaseGuardOpenParen, Error,
                           "expected `(` after `if`");
-        context.emitter().Emit(*context.position(),
-                               ExpectedMatchCaseGuardOpenParen);
+        CARBON_DIAGNOSTIC_LABEL(MatchCaseGuardOpenParenGoesAfter, Primary,
+                                "expected `(` after this token");
+        context.emitter()
+            .Build(*(context.position() - 1), ExpectedMatchCaseGuardOpenParen)
+            .Attach(*(context.position() - 1), MatchCaseGuardOpenParenGoesAfter)
+            .Emit();
       }
 
       context.AddLeafNode(NodeKind::MatchCaseGuardStart, *context.position(),
@@ -207,8 +241,12 @@ auto HandleMatchCaseGuardFinish(Context& context) -> void {
     if (!state.has_error) {
       CARBON_DIAGNOSTIC(ExpectedMatchCaseGuardCloseParen, Error,
                         "expected `)`");
-      context.emitter().Emit(*context.position(),
-                             ExpectedMatchCaseGuardCloseParen);
+      CARBON_DIAGNOSTIC_LABEL(MatchCaseGuardCloseParenGoesAfter, Primary,
+                              "expected `)` after this token");
+      context.emitter()
+          .Build(*(context.position() - 1), ExpectedMatchCaseGuardCloseParen)
+          .Attach(*(context.position() - 1), MatchCaseGuardCloseParenGoesAfter)
+          .Emit();
     }
 
     context.AddNode(NodeKind::MatchCaseGuard, *context.position(),

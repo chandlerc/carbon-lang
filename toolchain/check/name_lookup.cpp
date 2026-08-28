@@ -150,7 +150,20 @@ auto LookupUnqualifiedName(Context& context, SemIR::LocId loc_id,
   if (lexical_result == SemIR::InstId::InitTombstone) {
     CARBON_DIAGNOSTIC(UsedBeforeInitialization, Error,
                       "`{0}` used before initialization", SemIR::NameId);
-    context.emitter().Emit(loc_id, UsedBeforeInitialization, name_id);
+    // The use is where the reader is looking; the declaration is what they have
+    // to reorder. The lexical result is an `InitTombstone` marker rather than
+    // the declaration, so the pattern being initialized is what names it.
+    CARBON_DIAGNOSTIC_LABEL(UsedBeforeInitializationDecl, Info,
+                            "`{0}` is being initialized here", SemIR::NameId);
+    auto builder =
+        context.emitter().Build(loc_id, UsedBeforeInitialization, name_id);
+    builder.Attach(loc_id);
+    if (auto pattern_id =
+            context.full_pattern_stack().GetPatternBeingInitialized();
+        pattern_id.has_value()) {
+      builder.Attach(pattern_id, UsedBeforeInitializationDecl, name_id);
+    }
+    builder.Emit();
     return {.specific_id = SemIR::SpecificId::None,
             .scope_result = SemIR::ScopeLookupResult::MakeError()};
   }
@@ -238,11 +251,11 @@ static auto DiagnoseInvalidQualifiedNameAccess(
       ClassInvalidMemberAccess, Error,
       "cannot access {0:private|protected} member `{1}` of type {2}",
       Diagnostics::BoolAsSelect, SemIR::NameId, SemIR::TypeId);
-  CARBON_DIAGNOSTIC(ClassMemberDeclaration, Note, "declared here");
+  CARBON_DIAGNOSTIC_LABEL(ClassMemberDeclaration, Info, "declared here");
   context.emitter()
       .Build(loc_id, ClassInvalidMemberAccess,
              access_kind == SemIR::AccessKind::Private, name_id, scope_type_id)
-      .Note(member_loc_id, ClassMemberDeclaration)
+      .Attach(member_loc_id, ClassMemberDeclaration)
       .Emit();
 }
 
@@ -365,11 +378,11 @@ auto AppendLookupScopesForConstant(Context& context, SemIR::LocId loc_id,
       RequireCompleteType(
           context, context.types().GetTypeIdForTypeConstantId(lookup_const_id),
           loc_id, [&](auto& builder) {
-            CARBON_DIAGNOSTIC(QualifiedExprInIncompleteClassScope, Context,
-                              "member access into incomplete class {0}",
-                              InstIdAsType);
-            builder.Context(loc_id, QualifiedExprInIncompleteClassScope,
-                            lookup_inst_id);
+            CARBON_DIAGNOSTIC_CONTEXT(QualifiedExprInIncompleteClassScope,
+                                      "member access into incomplete class {0}",
+                                      InstIdAsType);
+            builder.Attach(loc_id, QualifiedExprInIncompleteClassScope,
+                           lookup_inst_id);
           });
     }
     auto& class_info = context.classes().Get(class_ty->class_id);
@@ -387,12 +400,12 @@ auto AppendLookupScopesForConstant(Context& context, SemIR::LocId loc_id,
               context,
               context.types().GetTypeIdForTypeConstantId(lookup_const_id),
               loc_id, [&](auto& builder) {
-                CARBON_DIAGNOSTIC(
-                    QualifiedExprInIncompleteFacetTypeScope, Context,
+                CARBON_DIAGNOSTIC_CONTEXT(
+                    QualifiedExprInIncompleteFacetTypeScope,
                     "member access into incomplete facet type {0}",
                     InstIdAsType);
-                builder.Context(loc_id, QualifiedExprInIncompleteFacetTypeScope,
-                                lookup_inst_id);
+                builder.Attach(loc_id, QualifiedExprInIncompleteFacetTypeScope,
+                               lookup_inst_id);
               })) {
         // Lookup into this scope should fail without producing an error since
         // `RequireCompleteFacetType` has already issued a diagnostic.
@@ -465,8 +478,18 @@ static auto DiagnoseMemberNameNotFound(
       CARBON_DIAGNOSTIC(MemberNameNotFoundInSpecificScope, Error,
                         "member name `{0}` not found in {1}", SemIR::NameId,
                         SemIR::SpecificId);
-      context.emitter().Emit(loc_id, MemberNameNotFoundInSpecificScope, name_id,
-                             specific_id);
+      CARBON_DIAGNOSTIC_LABEL(MemberNameNotFoundSpecificScope, Info,
+                              "no member `{0}` in this scope", SemIR::NameId);
+      auto scope_inst_id = context.name_scopes()
+                               .Get(lookup_scopes.front().name_scope_id)
+                               .inst_id();
+      auto diag = context.emitter().Build(
+          loc_id, MemberNameNotFoundInSpecificScope, name_id, specific_id);
+      diag.Attach(loc_id);
+      if (context.insts().GetCanonicalLocId(scope_inst_id).has_value()) {
+        diag.Attach(scope_inst_id, MemberNameNotFoundSpecificScope, name_id);
+      }
+      diag.Emit();
     } else {
       auto scope_inst_id = context.name_scopes()
                                .Get(lookup_scopes.front().name_scope_id)
@@ -474,8 +497,28 @@ static auto DiagnoseMemberNameNotFound(
       CARBON_DIAGNOSTIC(MemberNameNotFoundInInstScope, Error,
                         "member name `{0}` not found in {1}", SemIR::NameId,
                         InstIdAsType);
-      context.emitter().Emit(loc_id, MemberNameNotFoundInInstScope, name_id,
-                             scope_inst_id);
+      // The message names the scope but the marked range is the access, and the
+      // two are usually nowhere near each other: the reader is being told to go
+      // look at a declaration, so it is marked.
+      CARBON_DIAGNOSTIC_LABEL(MemberNameNotFoundScope, Info,
+                              "no member `{0}` in {1} declared here",
+                              SemIR::NameId, InstIdAsType);
+      auto diag = context.emitter().Build(loc_id, MemberNameNotFoundInInstScope,
+                                          name_id, scope_inst_id);
+      diag.Attach(loc_id);
+      // A namespace that was never written -- the file's own package, or
+      // `Core` -- has no declaration to point at, and a label with no location
+      // of its own reads as pointing at nothing.
+      //
+      // TODO: A C++ namespace introduced by an alias still gets past this: it
+      // carries an `ImportIRInstId`, but one whose Clang location is invalid,
+      // so it resolves to a filename and no line. Telling those apart needs the
+      // converted location, which is not reachable here.
+      if (context.insts().GetCanonicalLocId(scope_inst_id).has_value()) {
+        diag.Attach(scope_inst_id, MemberNameNotFoundScope, name_id,
+                    scope_inst_id);
+      }
+      diag.Emit();
     }
     return;
   }
@@ -566,8 +609,18 @@ auto LookupQualifiedName(Context& context, SemIR::LocId loc_id,
           NameAmbiguousDueToExtend, Error,
           "ambiguous use of name `{0}` found in multiple extended scopes",
           SemIR::NameId);
-      context.emitter().Emit(loc_id, NameAmbiguousDueToExtend, name_id);
-      // TODO: Add notes pointing to the scopes.
+      // Saying a name is ambiguous without showing what it is ambiguous
+      // between leaves the reader nothing to choose from.
+      CARBON_DIAGNOSTIC_LABEL(NameAmbiguousCandidate, Info,
+                              "candidate `{0}` declared here", SemIR::NameId);
+      context.emitter()
+          .Build(loc_id, NameAmbiguousDueToExtend, name_id)
+          .Attach(loc_id)
+          .Attach(result.scope_result.target_inst_id(), NameAmbiguousCandidate,
+                  name_id)
+          .Attach(scope_result.target_inst_id(), NameAmbiguousCandidate,
+                  name_id)
+          .Emit();
       return {.specific_id = SemIR::SpecificId::None,
               .scope_result = SemIR::ScopeLookupResult::MakeError()};
     }
@@ -699,10 +752,11 @@ auto DiagnoseDuplicateName(Context& context, SemIR::NameId name_id,
   CARBON_DIAGNOSTIC(NameDeclDuplicate, Error,
                     "duplicate name `{0}` being declared in the same scope",
                     SemIR::NameId);
-  CARBON_DIAGNOSTIC(NameDeclPrevious, Note, "name is previously declared here");
+  CARBON_DIAGNOSTIC_LABEL(NameDeclPrevious, Info,
+                          "name is previously declared here");
   context.emitter()
       .Build(dup_def, NameDeclDuplicate, name_id)
-      .Note(prev_def, NameDeclPrevious)
+      .Attach(prev_def, NameDeclPrevious)
       .Emit();
 }
 
@@ -713,10 +767,10 @@ auto DiagnosePoisonedName(Context& context, SemIR::NameId name_id,
                "Trying to diagnose poisoned name with no poisoning location");
   CARBON_DIAGNOSTIC(NameUseBeforeDecl, Error,
                     "name `{0}` used before it was declared", SemIR::NameId);
-  CARBON_DIAGNOSTIC(NameUseBeforeDeclNote, Note, "declared here");
+  CARBON_DIAGNOSTIC_LABEL(NameUseBeforeDeclNote, Info, "declared here");
   context.emitter()
       .Build(poisoning_loc_id, NameUseBeforeDecl, name_id)
-      .Note(decl_name_loc_id, NameUseBeforeDeclNote)
+      .Attach(decl_name_loc_id, NameUseBeforeDeclNote)
       .Emit();
 }
 

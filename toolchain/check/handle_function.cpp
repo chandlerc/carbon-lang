@@ -411,7 +411,10 @@ static auto BuildFunctionDecl(Context& context,
         llvm::is_contained(explicit_params, self_param_id)) {
       CARBON_DIAGNOSTIC(SelfNotFirstParam, Error,
                         "`self` must be the first explicit parameter");
-      context.emitter().Emit(SemIR::LocId(self_param_id), SelfNotFirstParam);
+      context.emitter()
+          .Build(SemIR::LocId(self_param_id), SelfNotFirstParam)
+          .Attach(SemIR::LocId(self_param_id))
+          .Emit();
     }
   }
 
@@ -491,8 +494,10 @@ static auto BuildFunctionDecl(Context& context,
           SemIR::Function::VirtualModifier::Abstract) {
     CARBON_DIAGNOSTIC(DefinedAbstractFunction, Error,
                       "definition of `abstract` function");
-    context.emitter().Emit(LocIdForDiagnostics::TokenOnly(node_id),
-                           DefinedAbstractFunction);
+    context.emitter()
+        .Build(LocIdForDiagnostics::TokenOnly(node_id), DefinedAbstractFunction)
+        .Attach(LocIdForDiagnostics::TokenOnly(node_id))
+        .Emit();
   }
 
   // Add to name lookup if needed, now that the decl is built.
@@ -627,12 +632,28 @@ auto HandleParseNode(Context& context, Parse::FunctionDefinitionId node_id)
   // If the `}` of the function is reachable, reject if we need a return value
   // and otherwise add an implicit `return;`.
   if (IsCurrentPositionReachable(context)) {
-    if (context.functions().Get(function_id).return_form_inst_id.has_value()) {
+    const auto& function = context.functions().Get(function_id);
+    if (function.return_form_inst_id.has_value()) {
       CARBON_DIAGNOSTIC(
           MissingReturnStatement, Error,
           "missing `return` at end of function with declared return type");
-      context.emitter().Emit(LocIdForDiagnostics::TokenOnly(node_id),
-                             MissingReturnStatement);
+      // The type the function promised is what says a `return` is needed, and
+      // in a body of any length it is off the top of the screen from the `}`
+      // the message points at.
+      CARBON_DIAGNOSTIC_LABEL(MissingReturnStatementType, Info,
+                              "return type declared here");
+      auto builder = context.emitter().Build(
+          LocIdForDiagnostics::TokenOnly(node_id), MissingReturnStatement);
+      builder.Attach(LocIdForDiagnostics::TokenOnly(node_id));
+      // An imported declaration reaches here with a return type whose location
+      // is in another file's IR and resolves to no line of its own.
+      if (context.insts()
+              .GetCanonicalLocId(function.return_type_inst_id)
+              .has_value()) {
+        builder.Attach(function.return_type_inst_id,
+                       MissingReturnStatementType);
+      }
+      builder.Emit();
     } else {
       AddReturnInstWithCleanups(context, node_id);
     }

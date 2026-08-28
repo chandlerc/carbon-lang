@@ -154,15 +154,10 @@ interface X {
 
 impl A as X {
   //@dump-sem-ir-begin
-  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE+10]]:3: error: cannot copy value of type `A` [CopyOfUncopyableType]
-  // CHECK:STDERR:   fn F() -> B;
-  // CHECK:STDERR:   ^~~~~~~~~~~~
-  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE+7]]:3: note: type `A` does not implement interface `Core.Copy` [MissingImplInMemberAccessInContext]
-  // CHECK:STDERR:   fn F() -> B;
-  // CHECK:STDERR:   ^~~~~~~~~~~~
-  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE-11]]:3: note: while building thunk to match the signature of this function [ThunkSignature]
-  // CHECK:STDERR:   fn F() -> Self;
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE+5]]:3-14: error: cannot copy value of type `A` [CopyOfUncopyableType]
+  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE+4]]:3-14: note: type `A` does not implement interface `Core.Copy` [MissingImplForType]
+  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE-7]]:13-16: note: return type of function is `A` [ReturnTypeHereNote]
+  // CHECK:STDERR: fail_inheritance_value_conversion_copy_return.carbon:[[@LINE-8]]:3-17: note: while building thunk to match the signature of this function [ThunkSignature]
   // CHECK:STDERR:
   fn F() -> B;
   //@dump-sem-ir-end
@@ -170,7 +165,7 @@ impl A as X {
 
 // --- fail_param_type_mismatch.carbon
 // CHECK:STDERR: fail_param_type_mismatch.carbon: error: cannot implicitly convert expression of type `A` to `B` [ConversionFailure]
-// CHECK:STDERR: fail_param_type_mismatch.carbon: note: type `A` does not implement interface `Core.ImplicitAs(B)` [MissingImplInMemberAccessInContext]
+// CHECK:STDERR: fail_param_type_mismatch.carbon: note: type `A` does not implement interface `Core.ImplicitAs(B)` [MissingImplForType]
 
 library "[[@TEST_NAME]]";
 
@@ -182,12 +177,8 @@ class A {}
 class B {}
 
 impl A as I {
-  // CHECK:STDERR: fail_param_type_mismatch.carbon:[[@LINE+7]]:8: note: initializing function parameter [InCallToFunctionParam]
-  // CHECK:STDERR:   fn F(a: B);
-  // CHECK:STDERR:        ^~~~
-  // CHECK:STDERR: fail_param_type_mismatch.carbon:[[@LINE-10]]:3: note: while building thunk to match the signature of this function [ThunkSignature]
-  // CHECK:STDERR:   fn F(a: Self);
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_param_type_mismatch.carbon:[[@LINE+3]]:8-11: note: initializing function parameter [InCallToFunctionParam]
+  // CHECK:STDERR: fail_param_type_mismatch.carbon:[[@LINE-8]]:3-16: note: while building thunk to match the signature of this function [ThunkSignature]
   // CHECK:STDERR:
   fn F(a: B);
 }
@@ -204,15 +195,10 @@ class A {}
 class B {}
 
 impl A as I {
-  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE+10]]:3: error: cannot implicitly convert expression of type `B` to `A` [ConversionFailure]
-  // CHECK:STDERR:   fn F() -> B;
-  // CHECK:STDERR:   ^~~~~~~~~~~~
-  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE+7]]:3: note: type `B` does not implement interface `Core.ImplicitAs(A)` [MissingImplInMemberAccessInContext]
-  // CHECK:STDERR:   fn F() -> B;
-  // CHECK:STDERR:   ^~~~~~~~~~~~
-  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE-13]]:3: note: while building thunk to match the signature of this function [ThunkSignature]
-  // CHECK:STDERR:   fn F() -> Self;
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE+5]]:3-14: error: cannot implicitly convert expression of type `B` to `A` [ConversionFailure]
+  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE+4]]:3-14: note: type `B` does not implement interface `Core.ImplicitAs(A)` [MissingImplForType]
+  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE-9]]:13-16: note: return type of function is `A` [ReturnTypeHereNote]
+  // CHECK:STDERR: fail_return_mismatch.carbon:[[@LINE-10]]:3-17: note: while building thunk to match the signature of this function [ThunkSignature]
   // CHECK:STDERR:
   fn F() -> B;
 }
@@ -248,12 +234,8 @@ interface I {
 
 impl () as I {
   // TODO: The proposal says to reject this. But should we really do so?
-  // CHECK:STDERR: fail_return_empty_tuple_mismatch.carbon:[[@LINE+7]]:3: error: function redeclaration differs because return type is `()` [FunctionRedeclReturnTypeDiffers]
-  // CHECK:STDERR:   fn NoReturn() -> ();
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~~~~~~~
-  // CHECK:STDERR: fail_return_empty_tuple_mismatch.carbon:[[@LINE-8]]:3: note: previously declared with no return type [FunctionRedeclReturnTypePreviousNoReturn]
-  // CHECK:STDERR:   fn NoReturn();
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_return_empty_tuple_mismatch.carbon:[[@LINE+3]]:20-21: error: function redeclaration differs because return type is `()` [FunctionRedeclReturnTypeDiffers]
+  // CHECK:STDERR: fail_return_empty_tuple_mismatch.carbon:[[@LINE-6]]:3-16: note: previously declared with no return type [FunctionRedeclReturnTypePreviousNoReturn]
   // CHECK:STDERR:
   fn NoReturn() -> ();
 }
@@ -261,12 +243,8 @@ impl () as I {
 class C {}
 
 impl C as I {
-  // CHECK:STDERR: fail_return_empty_tuple_mismatch.carbon:[[@LINE+7]]:3: error: function redeclaration differs because return type is `C` [FunctionRedeclReturnTypeDiffers]
-  // CHECK:STDERR:   fn NoReturn() -> C;
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~~~~~~
-  // CHECK:STDERR: fail_return_empty_tuple_mismatch.carbon:[[@LINE-21]]:3: note: previously declared with no return type [FunctionRedeclReturnTypePreviousNoReturn]
-  // CHECK:STDERR:   fn NoReturn();
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_return_empty_tuple_mismatch.carbon:[[@LINE+3]]:20: error: function redeclaration differs because return type is `C` [FunctionRedeclReturnTypeDiffers]
+  // CHECK:STDERR: fail_return_empty_tuple_mismatch.carbon:[[@LINE-15]]:3-16: note: previously declared with no return type [FunctionRedeclReturnTypePreviousNoReturn]
   // CHECK:STDERR:
   fn NoReturn() -> C;
 }
@@ -280,25 +258,17 @@ interface I(T: type) {
   fn F(a: T);
 }
 
-// CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE+3]]:1: note: class was forward declared here [ClassForwardDeclaredHere]
-// CHECK:STDERR: class B;
-// CHECK:STDERR: ^~~~~~~~
+// CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE+1]]:1-8: note: class was forward declared here [ClassForwardDeclaredHere]
 class B;
 
 class C {
   impl as I(B) {
-    // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE+13]]:5: note: while building thunk calling this function [ThunkCallee]
-    // CHECK:STDERR:     fn F(c: C);
-    // CHECK:STDERR:     ^~~~~~~~~~~
+    // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE+7]]:5-15: note: while building thunk calling this function [ThunkCallee]
     // CHECK:STDERR:
     // CHECK:STDERR: fail_param_type_incomplete.carbon: error: cannot implicitly convert expression of type `B` to `C` [ConversionFailure]
-    // CHECK:STDERR: fail_param_type_incomplete.carbon: note: type `B` does not implement interface `Core.ImplicitAs(C)` [MissingImplInMemberAccessInContext]
-    // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE+7]]:10: note: initializing function parameter [InCallToFunctionParam]
-    // CHECK:STDERR:     fn F(c: C);
-    // CHECK:STDERR:          ^~~~
-    // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE-19]]:3: note: while building thunk to match the signature of this function [ThunkSignature]
-    // CHECK:STDERR:   fn F(a: T);
-    // CHECK:STDERR:   ^~~~~~~~~~~
+    // CHECK:STDERR: fail_param_type_incomplete.carbon: note: type `B` does not implement interface `Core.ImplicitAs(C)` [MissingImplForType]
+    // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE+3]]:10-13: note: initializing function parameter [InCallToFunctionParam]
+    // CHECK:STDERR: fail_param_type_incomplete.carbon:[[@LINE-13]]:3-13: note: while building thunk to match the signature of this function [ThunkSignature]
     // CHECK:STDERR:
     fn F(c: C);
   }
@@ -980,27 +950,27 @@ impl () as I({}) {
 // CHECK:STDOUT:   %pattern_type.e39: type = pattern_type %B [concrete]
 // CHECK:STDOUT:   %return.param_patt.934: %pattern_type.e39 = out_param_pattern [concrete]
 // CHECK:STDOUT:   %return.patt.911: %pattern_type.e39 = return_slot_pattern %return.param_patt.934, %B [concrete]
-// CHECK:STDOUT:   %A.as.X.impl.F.type.48cdab.1: type = fn_type @A.as.X.impl.F.loc23_14.1 [concrete]
+// CHECK:STDOUT:   %A.as.X.impl.F.type.48cdab.1: type = fn_type @A.as.X.impl.F.loc18_14.1 [concrete]
 // CHECK:STDOUT:   %A.as.X.impl.F.bd5be1.1: %A.as.X.impl.F.type.48cdab.1 = struct_value () [concrete]
 // CHECK:STDOUT:   %X.facet: %X.type = facet_value %A, (%X.impl_witness) [concrete]
-// CHECK:STDOUT:   %A.as.X.impl.F.type.48cdab.2: type = fn_type @A.as.X.impl.F.loc23_14.2 [concrete]
+// CHECK:STDOUT:   %A.as.X.impl.F.type.48cdab.2: type = fn_type @A.as.X.impl.F.loc18_14.2 [concrete]
 // CHECK:STDOUT:   %A.as.X.impl.F.bd5be1.2: %A.as.X.impl.F.type.48cdab.2 = struct_value () [concrete]
-// CHECK:STDOUT:   %Destroy.Op.type.1d8f74.2: type = fn_type @Destroy.Op.loc23_14.2 [concrete]
+// CHECK:STDOUT:   %Destroy.Op.type.1d8f74.2: type = fn_type @Destroy.Op.loc18_14.2 [concrete]
 // CHECK:STDOUT:   %Destroy.Op.1a2547.2: %Destroy.Op.type.1d8f74.2 = struct_value () [concrete]
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
 // CHECK:STDOUT: impl @A.as.X.impl: %A.ref as %X.ref {
-// CHECK:STDOUT:   %A.as.X.impl.F.decl.loc23_14.1: %A.as.X.impl.F.type.48cdab.1 = fn_decl @A.as.X.impl.F.loc23_14.1 [concrete = constants.%A.as.X.impl.F.bd5be1.1] {
+// CHECK:STDOUT:   %A.as.X.impl.F.decl.loc18_14.1: %A.as.X.impl.F.type.48cdab.1 = fn_decl @A.as.X.impl.F.loc18_14.1 [concrete = constants.%A.as.X.impl.F.bd5be1.1] {
 // CHECK:STDOUT:     %return.param_patt: %pattern_type.e39 = out_param_pattern [concrete = constants.%return.param_patt.934]
 // CHECK:STDOUT:     %return.patt: %pattern_type.e39 = return_slot_pattern %return.param_patt, %B.ref [concrete = constants.%return.patt.911]
 // CHECK:STDOUT:   } {
 // CHECK:STDOUT:     %B.ref: type = name_ref B, file.%B.decl [concrete = constants.%B]
-// CHECK:STDOUT:     %.loc23: Core.Form = init_form %B.ref [concrete = constants.%.d83]
+// CHECK:STDOUT:     %.loc18: Core.Form = init_form %B.ref [concrete = constants.%.d83]
 // CHECK:STDOUT:     %return.param: ref %B = out_param call_param0
 // CHECK:STDOUT:     %return: ref %B = return_slot %return.param
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   <elided>
-// CHECK:STDOUT:   %A.as.X.impl.F.decl.loc23_14.2: %A.as.X.impl.F.type.48cdab.2 = fn_decl @A.as.X.impl.F.loc23_14.2 [concrete = constants.%A.as.X.impl.F.bd5be1.2] {
+// CHECK:STDOUT:   %A.as.X.impl.F.decl.loc18_14.2: %A.as.X.impl.F.type.48cdab.2 = fn_decl @A.as.X.impl.F.loc18_14.2 [concrete = constants.%A.as.X.impl.F.bd5be1.2] {
 // CHECK:STDOUT:     <elided>
 // CHECK:STDOUT:   } {
 // CHECK:STDOUT:     <elided>
@@ -1009,31 +979,31 @@ impl () as I({}) {
 // CHECK:STDOUT:
 // CHECK:STDOUT: !members:
 // CHECK:STDOUT:   .B = <poisoned>
-// CHECK:STDOUT:   .F = %A.as.X.impl.F.decl.loc23_14.1
+// CHECK:STDOUT:   .F = %A.as.X.impl.F.decl.loc18_14.1
 // CHECK:STDOUT:   extend %X.ref
 // CHECK:STDOUT:   witness = %X.impl_witness
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
-// CHECK:STDOUT: fn @A.as.X.impl.F.loc23_14.1() -> out %return.param: %B;
+// CHECK:STDOUT: fn @A.as.X.impl.F.loc18_14.1() -> out %return.param: %B;
 // CHECK:STDOUT:
-// CHECK:STDOUT: fn @A.as.X.impl.F.loc23_14.2() -> out %return.param: %A [thunk @A.as.X.impl.%A.as.X.impl.F.decl.loc23_14.1 for @X.WithSelf.%X.WithSelf.F.decl, @X.WithSelf.F(constants.%X.facet)] {
+// CHECK:STDOUT: fn @A.as.X.impl.F.loc18_14.2() -> out %return.param: %A [thunk @A.as.X.impl.%A.as.X.impl.F.decl.loc18_14.1 for @X.WithSelf.%X.WithSelf.F.decl, @X.WithSelf.F(constants.%X.facet)] {
 // CHECK:STDOUT: !entry:
-// CHECK:STDOUT:   %F.ref: %A.as.X.impl.F.type.48cdab.1 = name_ref F, @A.as.X.impl.%A.as.X.impl.F.decl.loc23_14.1 [concrete = constants.%A.as.X.impl.F.bd5be1.1]
-// CHECK:STDOUT:   %.loc23_14.1: ref %B = temporary_storage
-// CHECK:STDOUT:   %A.as.X.impl.F.call: init %B to %.loc23_14.1 = call %F.ref()
-// CHECK:STDOUT:   %.loc23_14.2: init %A = as_compatible %A.as.X.impl.F.call
-// CHECK:STDOUT:   %.loc23_14.3: ref %A = temporary %.loc23_14.1, %.loc23_14.2
-// CHECK:STDOUT:   %.loc23_14.4: ref %A = class_element_access %.loc23_14.3, element0
-// CHECK:STDOUT:   %.loc23_14.5: ref %A = converted %A.as.X.impl.F.call, %.loc23_14.4
-// CHECK:STDOUT:   %.loc23_14.6: %A = acquire_value %.loc23_14.5
-// CHECK:STDOUT:   %Destroy.Op.bound: <bound method> = bound_method %.loc23_14.3, constants.%Destroy.Op.1a2547.2
-// CHECK:STDOUT:   %Destroy.Op.call: init %empty_tuple.type = call %Destroy.Op.bound(%.loc23_14.3)
+// CHECK:STDOUT:   %F.ref: %A.as.X.impl.F.type.48cdab.1 = name_ref F, @A.as.X.impl.%A.as.X.impl.F.decl.loc18_14.1 [concrete = constants.%A.as.X.impl.F.bd5be1.1]
+// CHECK:STDOUT:   %.loc18_14.1: ref %B = temporary_storage
+// CHECK:STDOUT:   %A.as.X.impl.F.call: init %B to %.loc18_14.1 = call %F.ref()
+// CHECK:STDOUT:   %.loc18_14.2: init %A = as_compatible %A.as.X.impl.F.call
+// CHECK:STDOUT:   %.loc18_14.3: ref %A = temporary %.loc18_14.1, %.loc18_14.2
+// CHECK:STDOUT:   %.loc18_14.4: ref %A = class_element_access %.loc18_14.3, element0
+// CHECK:STDOUT:   %.loc18_14.5: ref %A = converted %A.as.X.impl.F.call, %.loc18_14.4
+// CHECK:STDOUT:   %.loc18_14.6: %A = acquire_value %.loc18_14.5
+// CHECK:STDOUT:   %Destroy.Op.bound: <bound method> = bound_method %.loc18_14.3, constants.%Destroy.Op.1a2547.2
+// CHECK:STDOUT:   %Destroy.Op.call: init %empty_tuple.type = call %Destroy.Op.bound(%.loc18_14.3)
 // CHECK:STDOUT:   return <error> to %return.param
 // CHECK:STDOUT: }
 // CHECK:STDOUT:
-// CHECK:STDOUT: fn @Destroy.Op.loc23_14.1(%self.param: ref %empty_struct_type) = "no_op";
+// CHECK:STDOUT: fn @Destroy.Op.loc18_14.1(%self.param: ref %empty_struct_type) = "no_op";
 // CHECK:STDOUT:
-// CHECK:STDOUT: fn @Destroy.Op.loc23_14.2(%self.param: ref %A) {
+// CHECK:STDOUT: fn @Destroy.Op.loc18_14.2(%self.param: ref %A) {
 // CHECK:STDOUT: !entry:
 // CHECK:STDOUT:   return
 // CHECK:STDOUT: }

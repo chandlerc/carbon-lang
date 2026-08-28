@@ -93,7 +93,7 @@ auto NumericLiteral::Lex(llvm::StringRef source_text,
 // either diagnosing or extracting its meaning.
 class NumericLiteral::Parser {
  public:
-  Parser(Diagnostics::Emitter<const char*>& emitter, NumericLiteral literal);
+  Parser(Diagnostics::Emitter<SourceLoc>& emitter, NumericLiteral literal);
 
   auto IsInt() -> bool {
     return literal_.radix_point_ == static_cast<int>(literal_.text_.size());
@@ -129,7 +129,7 @@ class NumericLiteral::Parser {
   auto CheckFractionalPart() -> bool;
   auto CheckExponentPart() -> bool;
 
-  Diagnostics::Emitter<const char*>& emitter_;
+  Diagnostics::Emitter<SourceLoc>& emitter_;
   NumericLiteral literal_;
 
   // The radix of the literal: 2, 10, or 16, for a prefix of '0b', no prefix,
@@ -152,7 +152,7 @@ class NumericLiteral::Parser {
   bool exponent_is_negative_ = false;
 };
 
-NumericLiteral::Parser::Parser(Diagnostics::Emitter<const char*>& emitter,
+NumericLiteral::Parser::Parser(Diagnostics::Emitter<SourceLoc>& emitter,
                                NumericLiteral literal)
     : emitter_(emitter), literal_(literal) {
   int_part_ = literal.text_.substr(0, literal.radix_point_);
@@ -388,7 +388,9 @@ auto NumericLiteral::Parser::CheckDigitSequence(llvm::StringRef text,
           i + 1 == n) {
         CARBON_DIAGNOSTIC(InvalidDigitSeparator, Error,
                           "misplaced digit separator in numeric literal");
-        emitter_.Emit(text.begin() + i, InvalidDigitSeparator);
+        emitter_.Build(text.begin() + i, InvalidDigitSeparator)
+            .Attach(text.begin() + i)
+            .Emit();
       }
       ++num_digit_separators;
       continue;
@@ -399,14 +401,18 @@ auto NumericLiteral::Parser::CheckDigitSequence(llvm::StringRef text,
                       "{1:=2:binary|=8:octal|=10:decimal|=16:hexadecimal} "
                       "numeric literal",
                       char, Diagnostics::IntAsSelect);
-    emitter_.Emit(text.begin() + i, InvalidDigit, c, static_cast<int>(radix));
+    emitter_.Build(text.begin() + i, InvalidDigit, c, static_cast<int>(radix))
+        .Attach(text.begin() + i)
+        .Emit();
     return {.ok = false};
   }
 
   if (num_digit_separators == static_cast<int>(text.size())) {
     CARBON_DIAGNOSTIC(EmptyDigitSequence, Error,
                       "empty digit sequence in numeric literal");
-    emitter_.Emit(text.begin(), EmptyDigitSequence);
+    emitter_.Build(text.begin(), EmptyDigitSequence)
+        .Attach(SourceLoc(text))
+        .Emit();
     return {.ok = false};
   }
 
@@ -423,7 +429,9 @@ auto NumericLiteral::Parser::CheckLeadingZero() -> bool {
       int_part_ != "0") {
     CARBON_DIAGNOSTIC(UnknownBaseSpecifier, Error,
                       "unknown base specifier in numeric literal");
-    emitter_.Emit(int_part_.begin(), UnknownBaseSpecifier);
+    emitter_.Build(int_part_.begin(), UnknownBaseSpecifier)
+        .Attach(SourceLoc(int_part_))
+        .Emit();
     return false;
   }
   return true;
@@ -448,8 +456,11 @@ auto NumericLiteral::Parser::CheckFractionalPart() -> bool {
         InvalidRealLiteralRadix, Error,
         "{0:=2:binary|=8:octal} real number literals are not supported",
         Diagnostics::IntAsSelect);
-    emitter_.Emit(literal_.text_.begin() + literal_.radix_point_,
-                  InvalidRealLiteralRadix, static_cast<int>(radix_));
+    emitter_
+        .Build(literal_.text_.begin() + literal_.radix_point_,
+               InvalidRealLiteralRadix, static_cast<int>(radix_))
+        .Attach(SourceLoc(literal_.text()))
+        .Emit();
     // Carry on and parse the real literal anyway.
   }
 
@@ -471,8 +482,11 @@ auto NumericLiteral::Parser::CheckExponentPart() -> bool {
   if (literal_.text_[literal_.exponent_] != expected_exponent_kind) {
     CARBON_DIAGNOSTIC(WrongRealLiteralExponent, Error,
                       "expected '{0}' to introduce exponent", char);
-    emitter_.Emit(literal_.text_.begin() + literal_.exponent_,
-                  WrongRealLiteralExponent, expected_exponent_kind);
+    emitter_
+        .Build(literal_.text_.begin() + literal_.exponent_,
+               WrongRealLiteralExponent, expected_exponent_kind)
+        .Attach(literal_.text_.begin() + literal_.exponent_)
+        .Emit();
     return false;
   }
 
@@ -483,7 +497,7 @@ auto NumericLiteral::Parser::CheckExponentPart() -> bool {
 
 // Parse the token and compute its value.
 auto NumericLiteral::ComputeValue(
-    Diagnostics::Emitter<const char*>& emitter) const -> Value {
+    Diagnostics::Emitter<SourceLoc>& emitter) const -> Value {
   Parser parser(emitter, *this);
 
   if (!parser.Check()) {

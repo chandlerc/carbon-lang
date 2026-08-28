@@ -21,9 +21,8 @@ fn F() {
 // --- fail_relational.carbon
 
 fn G() {
-  // CHECK:STDERR: fail_relational.carbon:[[@LINE+4]]:9: error: `let` declarations must end with a `;` [ExpectedDeclSemi]
-  // CHECK:STDERR:   let a == b = c;
-  // CHECK:STDERR:         ^~
+  // CHECK:STDERR: fail_relational.carbon:[[@LINE+3]]:7: error: `let` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_relational.carbon:[[@LINE+2]]:7: note: expected `;` after this token [DeclSemiGoesAfter]
   // CHECK:STDERR:
   let a == b = c;
 }
@@ -31,9 +30,8 @@ fn G() {
 // --- fail_logical.carbon
 
 fn H() {
-  // CHECK:STDERR: fail_logical.carbon:[[@LINE+4]]:9: error: `let` declarations must end with a `;` [ExpectedDeclSemi]
-  // CHECK:STDERR:   let a and b = c;
-  // CHECK:STDERR:         ^~~
+  // CHECK:STDERR: fail_logical.carbon:[[@LINE+3]]:7: error: `let` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_logical.carbon:[[@LINE+2]]:7: note: expected `;` after this token [DeclSemiGoesAfter]
   // CHECK:STDERR:
   let a and b = c;
 }
@@ -41,9 +39,7 @@ fn H() {
 // --- fail_if.carbon
 
 fn I() {
-  // CHECK:STDERR: fail_if.carbon:[[@LINE+4]]:7: error: parentheses are required around this unary `if` operator [UnaryOperatorRequiresParentheses]
-  // CHECK:STDERR:   let if true then 1 else 2 = 3;
-  // CHECK:STDERR:       ^~
+  // CHECK:STDERR: fail_if.carbon:[[@LINE+2]]:7-8: error: parentheses are required around this unary `if` operator [UnaryOperatorRequiresParentheses]
   // CHECK:STDERR:
   let if true then 1 else 2 = 3;
 }

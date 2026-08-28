@@ -10,116 +10,85 @@
 
 // --- fail_no_comma.carbon
 
-// CHECK:STDERR: fail_no_comma.carbon:[[@LINE+8]]:17: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
-// CHECK:STDERR: var x: array(i32);
-// CHECK:STDERR:                 ^
+// CHECK:STDERR: fail_no_comma.carbon:[[@LINE+5]]:14-16: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
+// CHECK:STDERR: fail_no_comma.carbon:[[@LINE+4]]:14-16: note: expected `,` after this token [ArrayCommaGoesAfter]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_no_comma.carbon:[[@LINE+4]]:17: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: var x: array(i32);
-// CHECK:STDERR:                 ^
+// CHECK:STDERR: fail_no_comma.carbon:[[@LINE+2]]:17: error: expected expression [ExpectedExpr]
 // CHECK:STDERR:
 var x: array(i32);
 
 // --- fail_invalid_char.carbon
 
-// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+16]]:17: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: fn X() -> array(:);
-// CHECK:STDERR:                 ^
+// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+11]]:16: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
+// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+10]]:16: note: expected `,` after this token [ArrayCommaGoesAfter]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+12]]:17: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
-// CHECK:STDERR: fn X() -> array(:);
-// CHECK:STDERR:                 ^
+// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+8]]:16: error: unexpected tokens before `)` [ExpectedCloseSymbol]
+// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+7]]:16: note: expected `)` after this token [CloseSymbolGoesAfter]
+// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+6]]:16: note: to match this `(` [GroupOpenedHere]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+8]]:17: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: fn X() -> array(:);
-// CHECK:STDERR:                 ^
+// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+4]]:17: error: expected expression [ExpectedExpr]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+4]]:17: error: unexpected tokens before `)` [ExpectedCloseSymbol]
-// CHECK:STDERR: fn X() -> array(:);
-// CHECK:STDERR:                 ^
+// CHECK:STDERR: fail_invalid_char.carbon:[[@LINE+2]]:17: error: expected expression [ExpectedExpr]
 // CHECK:STDERR:
 fn X() -> array(:);
 
 // --- fail_unlexed_expr.carbon
 
-// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+12]]:14: error: encountered unrecognized characters while parsing [UnrecognizedCharacters]
-// CHECK:STDERR: var y: array(`);
-// CHECK:STDERR:              ^
+// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+9]]:13: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
+// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+8]]:13: note: expected `,` after this token [ArrayCommaGoesAfter]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+8]]:14: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
-// CHECK:STDERR: var y: array(`);
-// CHECK:STDERR:              ^
+// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+6]]:13: error: unexpected tokens before `)` [ExpectedCloseSymbol]
+// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+5]]:13: note: expected `)` after this token [CloseSymbolGoesAfter]
+// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+4]]:13: note: to match this `(` [GroupOpenedHere]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+4]]:14: error: unexpected tokens before `)` [ExpectedCloseSymbol]
-// CHECK:STDERR: var y: array(`);
-// CHECK:STDERR:              ^
+// CHECK:STDERR: fail_unlexed_expr.carbon:[[@LINE+2]]:14: error: encountered unrecognized characters while parsing [UnrecognizedCharacters]
 // CHECK:STDERR:
 var y: array(`);
 
 // --- fail_no_open_paren.carbon
 
-// CHECK:STDERR: fail_no_open_paren.carbon:[[@LINE+4]]:14: error: expected `(` after `array` [ExpectedParenAfter]
-// CHECK:STDERR: var x: array i32, 1;
-// CHECK:STDERR:              ^~~
+// CHECK:STDERR: fail_no_open_paren.carbon:[[@LINE+3]]:8-12: error: expected `(` after `array` [ExpectedParenAfter]
+// CHECK:STDERR: fail_no_open_paren.carbon:[[@LINE+2]]:8-12: note: expected `(` after this token [ParenGoesAfter]
 // CHECK:STDERR:
 var x: array i32, 1;
 
 // --- fail_no_close_paren.carbon
 
-// CHECK:STDERR: fail_no_close_paren.carbon:[[@LINE+11]]:13: error: opening symbol without a corresponding closing symbol [UnmatchedOpening]
-// CHECK:STDERR: var x: array(i32,;
-// CHECK:STDERR:             ^
-// CHECK:STDERR: fail_no_close_paren.carbon:[[@LINE+8]]:18: note: possibly missing `)` here [PossiblyMissingBracketHere]
-// CHECK:STDERR: var x: array(i32,;
-// CHECK:STDERR:                  ^
+// CHECK:STDERR: fail_no_close_paren.carbon:[[@LINE+5]]:13: error: opening symbol without a corresponding closing symbol [UnmatchedOpening]
+// CHECK:STDERR: fail_no_close_paren.carbon:[[@LINE+4]]:18: note: possibly missing `)` here [PossiblyMissingBracketHere]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_no_close_paren.carbon:[[@LINE+4]]:18: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: var x: array(i32,;
-// CHECK:STDERR:                  ^
+// CHECK:STDERR: fail_no_close_paren.carbon:[[@LINE+2]]:18: error: expected expression [ExpectedExpr]
 // CHECK:STDERR:
 var x: array(i32,;
 
 // --- fail_no_length.carbon
 
-// CHECK:STDERR: fail_no_length.carbon:[[@LINE+4]]:18: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: var x: array(i32,);
-// CHECK:STDERR:                  ^
+// CHECK:STDERR: fail_no_length.carbon:[[@LINE+2]]:18: error: expected expression [ExpectedExpr]
 // CHECK:STDERR:
 var x: array(i32,);
 
 // --- fail_no_params.carbon
 
-// CHECK:STDERR: fail_no_params.carbon:[[@LINE+12]]:14: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: var x: array();
-// CHECK:STDERR:              ^
-// CHECK:STDERR:
-// CHECK:STDERR: fail_no_params.carbon:[[@LINE+8]]:14: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
-// CHECK:STDERR: var x: array();
-// CHECK:STDERR:              ^
+// CHECK:STDERR: fail_no_params.carbon:[[@LINE+7]]:13: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
+// CHECK:STDERR: fail_no_params.carbon:[[@LINE+6]]:13: note: expected `,` after this token [ArrayCommaGoesAfter]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_no_params.carbon:[[@LINE+4]]:14: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: var x: array();
-// CHECK:STDERR:              ^
+// CHECK:STDERR:
+// CHECK:STDERR: fail_no_params.carbon:[[@LINE+2]]:14: error: expected expression [ExpectedExpr]
 // CHECK:STDERR:
 var x: array();
 
 // --- fail_keyword_alone.carbon
 
-// CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+16]]:13: error: expected `(` after `array` [ExpectedParenAfter]
-// CHECK:STDERR: var x: array;
-// CHECK:STDERR:             ^
+// CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+10]]:8-12: error: expected `(` after `array` [ExpectedParenAfter]
+// CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+9]]:8-12: note: expected `(` after this token [ParenGoesAfter]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+12]]:13: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: var x: array;
-// CHECK:STDERR:             ^
-// CHECK:STDERR:
-// CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+8]]:13: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
-// CHECK:STDERR: var x: array;
-// CHECK:STDERR:             ^
+// CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+7]]:8-12: error: expected `,` in `array(Type, Count)` [ExpectedArrayComma]
+// CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+6]]:8-12: note: expected `,` after this token [ArrayCommaGoesAfter]
 // CHECK:STDERR:
 // CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+4]]:13: error: expected expression [ExpectedExpr]
-// CHECK:STDERR: var x: array;
-// CHECK:STDERR:             ^
+// CHECK:STDERR:
+// CHECK:STDERR: fail_keyword_alone.carbon:[[@LINE+2]]:13: error: expected expression [ExpectedExpr]
 // CHECK:STDERR:
 var x: array;
 

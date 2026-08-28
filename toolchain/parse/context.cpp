@@ -61,8 +61,13 @@ auto Context::ConsumeAndAddOpenCurlyBrace(Lex::TokenIndex default_token,
   } else {
     CARBON_DIAGNOSTIC(ExpectedCurlyBraceAfter, Error,
                       "expected `{` after `{0}`", Lex::TokenKind);
-    emitter_.Emit(*position_, ExpectedCurlyBraceAfter,
-                  tokens().GetKind(default_token));
+    CARBON_DIAGNOSTIC_LABEL(CurlyBraceGoesAfter, Primary,
+                            "expected `{{` after this token");
+    emitter_
+        .Build(default_token, ExpectedCurlyBraceAfter,
+               tokens().GetKind(default_token))
+        .Attach(default_token, CurlyBraceGoesAfter)
+        .Emit();
     AddLeafNode(start_kind, default_token, /*has_error=*/true);
     return std::nullopt;
   }
@@ -77,8 +82,13 @@ auto Context::ConsumeAndAddOpenParen(Lex::TokenIndex default_token,
   } else {
     CARBON_DIAGNOSTIC(ExpectedParenAfter, Error, "expected `(` after `{0}`",
                       Lex::TokenKind);
-    emitter_.Emit(*position_, ExpectedParenAfter,
-                  tokens().GetKind(default_token));
+    CARBON_DIAGNOSTIC_LABEL(ParenGoesAfter, Primary,
+                            "expected `(` after this token");
+    emitter_
+        .Build(default_token, ExpectedParenAfter,
+               tokens().GetKind(default_token))
+        .Attach(default_token, ParenGoesAfter)
+        .Emit();
     AddLeafNode(start_kind, default_token, /*has_error=*/true);
     return std::nullopt;
   }
@@ -93,12 +103,19 @@ auto Context::ConsumeAndAddCloseSymbol(State state, NodeKind close_kind)
   } else if (auto close_token = ConsumeIf(open_token_kind.closing_symbol())) {
     AddNode(close_kind, *close_token, state.has_error);
   } else {
-    // TODO: Include the location of the matching opening delimiter in the
-    // diagnostic.
     CARBON_DIAGNOSTIC(ExpectedCloseSymbol, Error,
                       "unexpected tokens before `{0}`", Lex::TokenKind);
-    emitter_.Emit(*position_, ExpectedCloseSymbol,
-                  open_token_kind.closing_symbol());
+    CARBON_DIAGNOSTIC_LABEL(CloseSymbolGoesAfter, Primary,
+                            "expected `{0}` after this token", Lex::TokenKind);
+    CARBON_DIAGNOSTIC_LABEL(GroupOpenedHere, Info, "to match this `{0}`",
+                            Lex::TokenKind);
+    emitter_
+        .Build(*(position_ - 1), ExpectedCloseSymbol,
+               open_token_kind.closing_symbol())
+        .Attach(*(position_ - 1), CloseSymbolGoesAfter,
+                open_token_kind.closing_symbol())
+        .Attach(state.token, GroupOpenedHere, open_token_kind)
+        .Emit();
 
     SkipTo(tokens().GetMatchedClosingToken(state.token));
     AddNode(close_kind, Consume(), /*has_error=*/true);
@@ -306,7 +323,9 @@ auto Context::DiagnoseOperatorFixity(OperatorFixity fixity) -> void {
       } else if (tokens().HasTrailingWhitespace(*position_)) {
         pos.value = -1;
       }
-      emitter_.Emit(*position_, BinaryOperatorRequiresWhitespace, pos);
+      emitter_.Build(*position_, BinaryOperatorRequiresWhitespace, pos)
+          .Attach(*position_)
+          .Emit();
     }
   } else {
     bool prefix = fixity == OperatorFixity::Prefix;
@@ -319,14 +338,18 @@ auto Context::DiagnoseOperatorFixity(OperatorFixity fixity) -> void {
           UnaryOperatorHasWhitespace, Error,
           "whitespace is not allowed {0:after|before} this unary operator",
           Diagnostics::BoolAsSelect);
-      emitter_.Emit(*position_, UnaryOperatorHasWhitespace, prefix);
+      emitter_.Build(*position_, UnaryOperatorHasWhitespace, prefix)
+          .Attach(*position_)
+          .Emit();
     } else if (IsLexicallyValidInfixOperator()) {
       // Pre/postfix operators must not satisfy the infix operator rules.
       CARBON_DIAGNOSTIC(
           UnaryOperatorRequiresWhitespace, Error,
           "whitespace is required {0:before|after} this unary operator",
           Diagnostics::BoolAsSelect);
-      emitter_.Emit(*position_, UnaryOperatorRequiresWhitespace, prefix);
+      emitter_.Build(*position_, UnaryOperatorRequiresWhitespace, prefix)
+          .Attach(*position_)
+          .Emit();
     }
   }
 }
@@ -336,9 +359,18 @@ auto Context::ConsumeListToken(NodeKind comma_kind, Lex::TokenKind close_kind,
   if (!PositionIs(Lex::TokenKind::Comma) && !PositionIs(close_kind)) {
     // Don't error a second time on the same element.
     if (!already_has_error) {
+      // TODO: Mark the bracket the list was opened with too, which would say
+      // which list ran on. That needs the opening token, which the callers hold
+      // in `state.token` but don't pass down.
       CARBON_DIAGNOSTIC(UnexpectedTokenAfterListElement, Error,
                         "expected `,` or `{0}`", Lex::TokenKind);
-      emitter_.Emit(*position_, UnexpectedTokenAfterListElement, close_kind);
+      CARBON_DIAGNOSTIC_LABEL(ListSeparatorGoesAfter, Primary,
+                              "expected `,` or `{0}` after this token",
+                              Lex::TokenKind);
+      emitter_
+          .Build(*(position_ - 1), UnexpectedTokenAfterListElement, close_kind)
+          .Attach(*(position_ - 1), ListSeparatorGoesAfter, close_kind)
+          .Emit();
       ReturnErrorOnState();
     }
 
@@ -415,8 +447,13 @@ auto Context::ParseLibraryName(bool accept_default)
       "expected `default` or a string literal to specify the library name");
   CARBON_DIAGNOSTIC(ExpectedLibraryName, Error,
                     "expected a string literal to specify the library name");
-  emitter().Emit(*position(), accept_default ? ExpectedLibraryNameOrDefault
-                                             : ExpectedLibraryName);
+  CARBON_DIAGNOSTIC_LABEL(LibraryNameGoesAfter, Primary,
+                          "expected the library name after this token");
+  emitter()
+      .Build(*(position() - 1), accept_default ? ExpectedLibraryNameOrDefault
+                                               : ExpectedLibraryName)
+      .Attach(*(position() - 1), LibraryNameGoesAfter)
+      .Emit();
   return std::nullopt;
 }
 
@@ -434,7 +471,12 @@ auto Context::ParseLibrarySpecifier(bool accept_default)
 auto Context::DiagnoseExpectedDeclSemi(Lex::TokenKind expected_kind) -> void {
   CARBON_DIAGNOSTIC(ExpectedDeclSemi, Error,
                     "`{0}` declarations must end with a `;`", Lex::TokenKind);
-  emitter().Emit(*position(), ExpectedDeclSemi, expected_kind);
+  CARBON_DIAGNOSTIC_LABEL(DeclSemiGoesAfter, Primary,
+                          "expected `;` after this token");
+  emitter()
+      .Build(*(position() - 1), ExpectedDeclSemi, expected_kind)
+      .Attach(*(position() - 1), DeclSemiGoesAfter)
+      .Emit();
 }
 
 auto Context::DiagnoseExpectedDeclSemiOrDefinition(Lex::TokenKind expected_kind)
@@ -443,7 +485,12 @@ auto Context::DiagnoseExpectedDeclSemiOrDefinition(Lex::TokenKind expected_kind)
                     "`{0}` declarations must either end with a `;` or "
                     "have a `{{ ... }` block for a definition",
                     Lex::TokenKind);
-  emitter().Emit(*position(), ExpectedDeclSemiOrDefinition, expected_kind);
+  CARBON_DIAGNOSTIC_LABEL(DeclSemiOrBlockGoesAfter, Primary,
+                          "expected `;` or `{{` after this token");
+  emitter()
+      .Build(*(position() - 1), ExpectedDeclSemiOrDefinition, expected_kind)
+      .Attach(*(position() - 1), DeclSemiOrBlockGoesAfter)
+      .Emit();
 }
 
 // Returns whether we are currently parsing in a scope in which function

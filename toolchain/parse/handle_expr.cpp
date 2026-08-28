@@ -12,8 +12,11 @@ static auto DiagnoseStatementOperatorAsSubExpr(Context& context) -> void {
   CARBON_DIAGNOSTIC(StatementOperatorAsSubExpr, Error,
                     "operator `{0}` can only be used as a complete statement",
                     Lex::TokenKind);
-  context.emitter().Emit(*context.position(), StatementOperatorAsSubExpr,
-                         context.PositionKind());
+  context.emitter()
+      .Build(*context.position(), StatementOperatorAsSubExpr,
+             context.PositionKind())
+      .Attach(*context.position())
+      .Emit();
 }
 
 auto HandleExpr(Context& context) -> void {
@@ -34,9 +37,11 @@ auto HandleExpr(Context& context) -> void {
             UnaryOperatorRequiresParentheses, Error,
             "parentheses are required around this unary `{0}` operator",
             Lex::TokenKind);
-        context.emitter().Emit(*context.position(),
-                               UnaryOperatorRequiresParentheses,
-                               context.PositionKind());
+        context.emitter()
+            .Build(*context.position(), UnaryOperatorRequiresParentheses,
+                   context.PositionKind())
+            .Attach(*context.position())
+            .Emit();
       } else {
         // This operator wouldn't be allowed even if parenthesized.
         DiagnoseStatementOperatorAsSubExpr(context);
@@ -175,11 +180,17 @@ auto HandleExprInPostfix(Context& context) -> void {
       break;
     }
     case Lex::TokenKind::Package: {
-      context.AddLeafNode(NodeKind::PackageExpr, context.Consume());
+      auto package_token = context.Consume();
+      context.AddLeafNode(NodeKind::PackageExpr, package_token);
       if (context.PositionKind() != Lex::TokenKind::Period) {
         CARBON_DIAGNOSTIC(ExpectedPeriodAfterPackage, Error,
                           "expected `.` after `package` expression");
-        context.emitter().Emit(*context.position(), ExpectedPeriodAfterPackage);
+        CARBON_DIAGNOSTIC_LABEL(PackagePeriodGoesAfter, Primary,
+                                "expected `.` after this token");
+        context.emitter()
+            .Build(package_token, ExpectedPeriodAfterPackage)
+            .Attach(package_token, PackagePeriodGoesAfter)
+            .Emit();
         state.has_error = true;
       }
       context.PushState(state);
@@ -220,8 +231,13 @@ auto HandleExprInPostfix(Context& context) -> void {
       } else {
         CARBON_DIAGNOSTIC(ExpectedIdentifierOrSelfAfterPeriod, Error,
                           "expected identifier or `Self` after `.`");
-        context.emitter().Emit(*context.position(),
-                               ExpectedIdentifierOrSelfAfterPeriod);
+        CARBON_DIAGNOSTIC_LABEL(DesignatorNameGoesAfter, Primary,
+                                "expected identifier or `Self` after this "
+                                "token");
+        context.emitter()
+            .Build(period, ExpectedIdentifierOrSelfAfterPeriod)
+            .Attach(period, DesignatorNameGoesAfter)
+            .Emit();
         // Only consume if it is a number or word.
         if (context.PositionKind().is_keyword()) {
           context.AddLeafNode(NodeKind::IdentifierNameNotBeforeSignature,
@@ -371,9 +387,12 @@ auto HandleExprLoop(Context& context) -> void {
       CARBON_DIAGNOSTIC(ModifierNotAllowedOnOperator, Error,
                         "`{0}` not allowed on operator `{1}`", Lex::TokenKind,
                         Lex::TokenKind);
-      context.emitter().Emit(*context.position(), ModifierNotAllowedOnOperator,
-                             context.PositionKind(),
-                             context.PositionKind(Lookahead::NextToken));
+      context.emitter()
+          .Build(*context.position(), ModifierNotAllowedOnOperator,
+                 context.PositionKind(),
+                 context.PositionKind(Lookahead::NextToken))
+          .Attach(*context.position())
+          .Emit();
       context.Consume();
       state.has_error = true;
     }
@@ -498,7 +517,12 @@ auto HandleExprStatementFinish(Context& context) -> void {
   if (!state.has_error) {
     CARBON_DIAGNOSTIC(ExpectedExprSemi, Error,
                       "expected `;` after expression statement");
-    context.emitter().Emit(*context.position(), ExpectedExprSemi);
+    CARBON_DIAGNOSTIC_LABEL(ExprSemiGoesAfter, Primary,
+                            "expected `;` after this token");
+    context.emitter()
+        .Build(*(context.position() - 1), ExpectedExprSemi)
+        .Attach(*(context.position() - 1), ExprSemiGoesAfter)
+        .Emit();
   }
 
   context.AddNode(NodeKind::ExprStatement,

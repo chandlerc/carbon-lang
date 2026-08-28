@@ -94,8 +94,12 @@ auto HandleLambdaBody(Context& context) -> void {
   } else {
     CARBON_DIAGNOSTIC(ExpectedLambdaBodyAfterReturnType, Error,
                       "expected `=>` or `{{` after return type");
-    context.emitter().Emit(*context.position(),
-                           ExpectedLambdaBodyAfterReturnType);
+    CARBON_DIAGNOSTIC_LABEL(LambdaBodyGoesAfter, Primary,
+                            "expected `=>` or `{{` after this token");
+    context.emitter()
+        .Build(*(context.position() - 1), ExpectedLambdaBodyAfterReturnType)
+        .Attach(*(context.position() - 1), LambdaBodyGoesAfter)
+        .Emit();
 
     // Add a dummy node for the missing body without consuming the current
     // token.

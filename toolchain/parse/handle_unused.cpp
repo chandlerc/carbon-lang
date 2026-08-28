@@ -12,7 +12,10 @@ auto HandleUnusedPattern(Context& context) -> void {
   if (state.in_unused_pattern) {
     CARBON_DIAGNOSTIC(NestedUnused, Error,
                       "`unused` nested within another `unused`");
-    context.emitter().Emit(*context.position(), NestedUnused);
+    context.emitter()
+        .Build(*context.position(), NestedUnused)
+        .Attach(*context.position())
+        .Emit();
     state.has_error = true;
   }
   context.PushState(StateKind::FinishUnusedPattern);

@@ -62,9 +62,10 @@ impl C as Core.IndexWith(SubscriptType) where .ElementType = ElementType {
 }
 
 let c: C = {};
-// CHECK:STDERR: fail_invalid_subscript_type.carbon:[[@LINE+4]]:22: error: cannot access member of interface `Core.IndexWith(Core.IntLiteral)` in type `C` that does not implement that interface [MissingImplInMemberAccess]
-// CHECK:STDERR: let x: ElementType = c[0];
-// CHECK:STDERR:                      ^~~~
+// CHECK:STDERR: fail_invalid_subscript_type.carbon:[[@LINE+5]]:24: error: type `C` does not implement interface `Core.IndexWith(Core.IntLiteral)` [MissingImplForType]
+// CHECK:STDERR: fail_invalid_subscript_type.carbon:[[@LINE+4]]:25: note: `[]` requires an impl of `Core.IndexWith` [OperatorInterface]
+// CHECK:STDERR: fail_invalid_subscript_type.carbon:[[@LINE+3]]:22: note: indexing an object with type `C` [IndexedObjectType]
+// CHECK:STDERR: fail_invalid_subscript_type.carbon:[[@LINE+2]]:24: note: indexing with type `Core.IntLiteral` [IndexWithType]
 // CHECK:STDERR:
 let x: ElementType = c[0];
 
@@ -75,9 +76,10 @@ library "[[@TEST_NAME]]";
 class C { }
 
 let c: C = {};
-// CHECK:STDERR: fail_index_with_not_implemented.carbon:[[@LINE+4]]:14: error: cannot access member of interface `Core.IndexWith(Core.IntLiteral)` in type `C` that does not implement that interface [MissingImplInMemberAccess]
-// CHECK:STDERR: let x: i32 = c[0];
-// CHECK:STDERR:              ^~~~
+// CHECK:STDERR: fail_index_with_not_implemented.carbon:[[@LINE+5]]:16: error: type `C` does not implement interface `Core.IndexWith(Core.IntLiteral)` [MissingImplForType]
+// CHECK:STDERR: fail_index_with_not_implemented.carbon:[[@LINE+4]]:17: note: `[]` requires an impl of `Core.IndexWith` [OperatorInterface]
+// CHECK:STDERR: fail_index_with_not_implemented.carbon:[[@LINE+3]]:14: note: indexing an object with type `C` [IndexedObjectType]
+// CHECK:STDERR: fail_index_with_not_implemented.carbon:[[@LINE+2]]:16: note: indexing with type `Core.IntLiteral` [IndexWithType]
 // CHECK:STDERR:
 let x: i32 = c[0];
 

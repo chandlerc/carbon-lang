@@ -13,34 +13,25 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/check/testdata/pointer/fail_deref_not_pointer.carbon
 
 fn Deref(n: i32) {
-  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+4]]:3: error: cannot dereference operand of non-pointer type `i32` [DerefOfNonPointer]
-  // CHECK:STDERR:   *n;
-  // CHECK:STDERR:   ^
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+2]]:3: error: cannot dereference operand of non-pointer type `i32` [DerefOfNonPointer]
   // CHECK:STDERR:
   *n;
-  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+4]]:4: error: cannot apply `->` operator to non-pointer type `i32` [ArrowOperatorOfNonPointer]
-  // CHECK:STDERR:   n->foo;
-  // CHECK:STDERR:    ^~
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+3]]:4-5: error: cannot apply `->` operator to non-pointer type `i32` [ArrowOperatorOfNonPointer]
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+2]]:3: note: operand has non-pointer type `i32` [ArrowOperandHere]
   // CHECK:STDERR:
   n->foo;
-  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+4]]:3: error: cannot dereference operand of non-pointer type `()` [DerefOfNonPointer]
-  // CHECK:STDERR:   *();
-  // CHECK:STDERR:   ^
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+2]]:3: error: cannot dereference operand of non-pointer type `()` [DerefOfNonPointer]
   // CHECK:STDERR:
   *();
-  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+4]]:5: error: cannot apply `->` operator to non-pointer type `()` [ArrowOperatorOfNonPointer]
-  // CHECK:STDERR:   ()->foo;
-  // CHECK:STDERR:     ^~
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+3]]:5-6: error: cannot apply `->` operator to non-pointer type `()` [ArrowOperatorOfNonPointer]
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+2]]:3-4: note: operand has non-pointer type `()` [ArrowOperandHere]
   // CHECK:STDERR:
   ()->foo;
-  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+4]]:3: error: cannot dereference operand of non-pointer type `{}` [DerefOfNonPointer]
-  // CHECK:STDERR:   *{};
-  // CHECK:STDERR:   ^
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+2]]:3: error: cannot dereference operand of non-pointer type `{}` [DerefOfNonPointer]
   // CHECK:STDERR:
   *{};
-  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+4]]:5: error: cannot apply `->` operator to non-pointer type `{}` [ArrowOperatorOfNonPointer]
-  // CHECK:STDERR:   {}->foo;
-  // CHECK:STDERR:     ^~
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+3]]:5-6: error: cannot apply `->` operator to non-pointer type `{}` [ArrowOperatorOfNonPointer]
+  // CHECK:STDERR: fail_deref_not_pointer.carbon:[[@LINE+2]]:3-4: note: operand has non-pointer type `{}` [ArrowOperandHere]
   // CHECK:STDERR:
   {}->foo;
 }
@@ -90,29 +81,29 @@ fn Deref(n: i32) {
 // CHECK:STDOUT:
 // CHECK:STDOUT: fn @Deref(%n.param: %i32) {
 // CHECK:STDOUT: !entry:
-// CHECK:STDOUT:   %n.ref.loc20: %i32 = name_ref n, %n
-// CHECK:STDOUT:   %.loc20: ref <error> = deref %n.ref.loc20
-// CHECK:STDOUT:   %n.ref.loc25: %i32 = name_ref n, %n
-// CHECK:STDOUT:   %.loc25: ref <error> = deref %n.ref.loc25
-// CHECK:STDOUT:   %foo.ref.loc25: <error> = name_ref foo, <error> [concrete = <error>]
-// CHECK:STDOUT:   %.loc30_5.1: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
-// CHECK:STDOUT:   %empty_tuple.loc30: %empty_tuple.type = tuple_value () [concrete = constants.%empty_tuple]
-// CHECK:STDOUT:   %.loc30_5.2: %empty_tuple.type = converted %.loc30_5.1, %empty_tuple.loc30 [concrete = constants.%empty_tuple]
-// CHECK:STDOUT:   %.loc30_3: ref <error> = deref %.loc30_5.2 [concrete = <error>]
-// CHECK:STDOUT:   %.loc35_4.1: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
-// CHECK:STDOUT:   %empty_tuple.loc35: %empty_tuple.type = tuple_value () [concrete = constants.%empty_tuple]
-// CHECK:STDOUT:   %.loc35_4.2: %empty_tuple.type = converted %.loc35_4.1, %empty_tuple.loc35 [concrete = constants.%empty_tuple]
-// CHECK:STDOUT:   %.loc35_5: ref <error> = deref %.loc35_4.2 [concrete = <error>]
-// CHECK:STDOUT:   %foo.ref.loc35: <error> = name_ref foo, <error> [concrete = <error>]
-// CHECK:STDOUT:   %.loc40_5.1: %empty_struct_type = struct_literal () [concrete = constants.%empty_struct]
-// CHECK:STDOUT:   %empty_struct.loc40: %empty_struct_type = struct_value () [concrete = constants.%empty_struct]
-// CHECK:STDOUT:   %.loc40_5.2: %empty_struct_type = converted %.loc40_5.1, %empty_struct.loc40 [concrete = constants.%empty_struct]
-// CHECK:STDOUT:   %.loc40_3: ref <error> = deref %.loc40_5.2 [concrete = <error>]
-// CHECK:STDOUT:   %.loc45_4.1: %empty_struct_type = struct_literal () [concrete = constants.%empty_struct]
-// CHECK:STDOUT:   %empty_struct.loc45: %empty_struct_type = struct_value () [concrete = constants.%empty_struct]
-// CHECK:STDOUT:   %.loc45_4.2: %empty_struct_type = converted %.loc45_4.1, %empty_struct.loc45 [concrete = constants.%empty_struct]
-// CHECK:STDOUT:   %.loc45_5: ref <error> = deref %.loc45_4.2 [concrete = <error>]
-// CHECK:STDOUT:   %foo.ref.loc45: <error> = name_ref foo, <error> [concrete = <error>]
+// CHECK:STDOUT:   %n.ref.loc18: %i32 = name_ref n, %n
+// CHECK:STDOUT:   %.loc18: ref <error> = deref %n.ref.loc18
+// CHECK:STDOUT:   %n.ref.loc22: %i32 = name_ref n, %n
+// CHECK:STDOUT:   %.loc22: ref <error> = deref %n.ref.loc22
+// CHECK:STDOUT:   %foo.ref.loc22: <error> = name_ref foo, <error> [concrete = <error>]
+// CHECK:STDOUT:   %.loc25_5.1: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:   %empty_tuple.loc25: %empty_tuple.type = tuple_value () [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:   %.loc25_5.2: %empty_tuple.type = converted %.loc25_5.1, %empty_tuple.loc25 [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:   %.loc25_3: ref <error> = deref %.loc25_5.2 [concrete = <error>]
+// CHECK:STDOUT:   %.loc29_4.1: %empty_tuple.type = tuple_literal () [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:   %empty_tuple.loc29: %empty_tuple.type = tuple_value () [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:   %.loc29_4.2: %empty_tuple.type = converted %.loc29_4.1, %empty_tuple.loc29 [concrete = constants.%empty_tuple]
+// CHECK:STDOUT:   %.loc29_5: ref <error> = deref %.loc29_4.2 [concrete = <error>]
+// CHECK:STDOUT:   %foo.ref.loc29: <error> = name_ref foo, <error> [concrete = <error>]
+// CHECK:STDOUT:   %.loc32_5.1: %empty_struct_type = struct_literal () [concrete = constants.%empty_struct]
+// CHECK:STDOUT:   %empty_struct.loc32: %empty_struct_type = struct_value () [concrete = constants.%empty_struct]
+// CHECK:STDOUT:   %.loc32_5.2: %empty_struct_type = converted %.loc32_5.1, %empty_struct.loc32 [concrete = constants.%empty_struct]
+// CHECK:STDOUT:   %.loc32_3: ref <error> = deref %.loc32_5.2 [concrete = <error>]
+// CHECK:STDOUT:   %.loc36_4.1: %empty_struct_type = struct_literal () [concrete = constants.%empty_struct]
+// CHECK:STDOUT:   %empty_struct.loc36: %empty_struct_type = struct_value () [concrete = constants.%empty_struct]
+// CHECK:STDOUT:   %.loc36_4.2: %empty_struct_type = converted %.loc36_4.1, %empty_struct.loc36 [concrete = constants.%empty_struct]
+// CHECK:STDOUT:   %.loc36_5: ref <error> = deref %.loc36_4.2 [concrete = <error>]
+// CHECK:STDOUT:   %foo.ref.loc36: <error> = name_ref foo, <error> [concrete = <error>]
 // CHECK:STDOUT:   return
 // CHECK:STDOUT: }
 // CHECK:STDOUT:

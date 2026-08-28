@@ -8,15 +8,12 @@
 // TIP: To dump output, run:
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/var/fail_no_semi.carbon
 
+// CHECK:STDERR: fail_no_semi.carbon:[[@LINE+3]]:1-3: error: `var` declarations must end with a `;` [ExpectedDeclSemi]
+// CHECK:STDERR: fail_no_semi.carbon:[[@LINE+2]]:1-3: note: expected `;` after this token [DeclSemiGoesAfter]
+// CHECK:STDERR:
 var
 
-// CHECK:STDERR: fail_no_semi.carbon:[[@LINE+15]]:26: error: expected pattern [ExpectedPattern]
-// CHECK:STDERR: // CHECK:STDOUT:   (root)
-// CHECK:STDERR:                          ^
-// CHECK:STDERR:
-// CHECK:STDERR: fail_no_semi.carbon:[[@LINE+11]]:26: error: `var` declarations must end with a `;` [ExpectedDeclSemi]
-// CHECK:STDERR: // CHECK:STDOUT:   (root)
-// CHECK:STDERR:                          ^
+// CHECK:STDERR: fail_no_semi.carbon:[[@LINE+9]]:26: error: expected pattern [ExpectedPattern]
 // CHECK:STDERR:
 // CHECK:STDOUT: - filename: fail_no_semi.carbon
 // CHECK:STDOUT:   ╭─FileStart ''

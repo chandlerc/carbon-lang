@@ -21,8 +21,22 @@ namespace Carbon::Check {
 static auto HandleUnaryOperator(Context& context, Parse::AnyExprId expr_node_id,
                                 CoreIdentifier interface_name) -> bool {
   auto operand_id = context.node_stack().PopExpr();
+  CARBON_DIAGNOSTIC_LABEL(UnaryOperatorOperandType, Primary,
+                          "operand has type {0}", TypeOfInstId);
+  // The node names the operator token, so a diagnostic about the operation
+  // points there rather than spanning the whole expression -- what the operand
+  // is is said by the label marking it.
+  auto op_loc_id = LocIdForDiagnostics::TokenOnly(expr_node_id);
+  auto op_spelling = context.tokens().GetTokenText(
+      context.parse_tree().node_token(expr_node_id));
+  auto mark_operand = [&](DiagnosticBuilder& builder) {
+    AttachOperatorSyntax(builder, op_loc_id, op_spelling, interface_name);
+    AttachOperandType(context, builder, operand_id, UnaryOperatorOperandType);
+  };
   auto result_id = BuildUnaryOperator(
-      context, expr_node_id, {.interface_name = interface_name}, operand_id);
+      context, expr_node_id, {.interface_name = interface_name}, operand_id,
+      /*diagnose=*/true, /*missing_impl_diagnostic_context=*/nullptr,
+      {.loc_id = op_loc_id, .annotate = mark_operand});
   context.node_stack().Push(expr_node_id, result_id);
   return true;
 }
@@ -40,11 +54,29 @@ static auto HandleBinaryOperator(Context& context,
   // this function for it.
   SemIR::InstId args[] = {
       context.types().GetTypeInstId(context.insts().Get(rhs_id).type_id())};
-  auto result_id = BuildBinaryOperator(context, expr_node_id,
-                                       {.interface_name = interface_name,
-                                        .interface_args_ref = args,
-                                        .op_name = op_name},
-                                       lhs_id, rhs_id);
+  CARBON_DIAGNOSTIC_LABEL(BinaryOperatorLhsType, Primary,
+                          "left operand has type {0}", TypeOfInstId);
+  CARBON_DIAGNOSTIC_LABEL(BinaryOperatorRhsType, Primary,
+                          "right operand has type {0}", TypeOfInstId);
+  // The node names the operator token, which sits between the operands, so a
+  // diagnostic about the operation points there rather than spanning the whole
+  // expression -- what the operands are is said by the labels marking them.
+  auto op_loc_id = LocIdForDiagnostics::TokenOnly(expr_node_id);
+  auto op_spelling = context.tokens().GetTokenText(
+      context.parse_tree().node_token(expr_node_id));
+  auto mark_operands = [&](DiagnosticBuilder& builder) {
+    AttachOperatorSyntax(builder, op_loc_id, op_spelling, interface_name);
+    AttachOperandType(context, builder, lhs_id, BinaryOperatorLhsType);
+    AttachOperandType(context, builder, rhs_id, BinaryOperatorRhsType);
+  };
+  auto result_id =
+      BuildBinaryOperator(context, expr_node_id,
+                          {.interface_name = interface_name,
+                           .interface_args_ref = args,
+                           .op_name = op_name},
+                          lhs_id, rhs_id, /*diagnose=*/true,
+                          /*missing_impl_diagnostic_context=*/nullptr,
+                          {.loc_id = op_loc_id, .annotate = mark_operands});
   context.node_stack().Push(expr_node_id, result_id);
   return true;
 }
@@ -275,8 +307,10 @@ auto HandleParseNode(Context& context, Parse::PrefixOperatorAmpId node_id)
     default:
       CARBON_DIAGNOSTIC(AddrOfNonRef, Error,
                         "cannot take the address of non-reference expression");
-      context.emitter().Emit(LocIdForDiagnostics::TokenOnly(node_id),
-                             AddrOfNonRef);
+      context.emitter()
+          .Build(LocIdForDiagnostics::TokenOnly(node_id), AddrOfNonRef)
+          .Attach(LocIdForDiagnostics::TokenOnly(node_id))
+          .Emit();
       value_id = SemIR::ErrorInst::InstId;
       break;
   }
@@ -387,13 +421,14 @@ auto HandleParseNode(Context& context, Parse::PrefixOperatorStarId node_id)
         auto builder =
             context.emitter().Build(LocIdForDiagnostics::TokenOnly(node_id),
                                     DerefOfNonPointer, not_pointer_type_id);
+        builder.Attach(LocIdForDiagnostics::TokenOnly(node_id));
 
         // TODO: Check for any facet here, rather than only a type.
         if (not_pointer_type_id == SemIR::TypeType::TypeId) {
-          CARBON_DIAGNOSTIC(
-              DerefOfType, Note,
+          CARBON_DIAGNOSTIC_LABEL(
+              DerefOfType, Info,
               "to form a pointer type, write the `*` after the pointee type");
-          builder.Note(LocIdForDiagnostics::TokenOnly(node_id), DerefOfType);
+          builder.Attach(LocIdForDiagnostics::TokenOnly(node_id), DerefOfType);
         }
 
         builder.Emit();

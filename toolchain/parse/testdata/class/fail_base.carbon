@@ -9,39 +9,33 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/class/fail_base.carbon
 
 class A {
-  // CHECK:STDERR: fail_base.carbon:[[@LINE+4]]:7: error: `class` or `:` expected after `base` [ExpectedAfterBase]
-  // CHECK:STDERR:   base;
-  // CHECK:STDERR:       ^
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+3]]:3-6: error: `class` or `:` expected after `base` [ExpectedAfterBase]
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+2]]:3-6: note: expected `class` or `:` after this token [BaseColonGoesAfter]
   // CHECK:STDERR:
   base;
 
-  // CHECK:STDERR: fail_base.carbon:[[@LINE+4]]:8: error: `class` or `:` expected after `base` [ExpectedAfterBase]
-  // CHECK:STDERR:   base calss X {}
-  // CHECK:STDERR:        ^~~~~
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+3]]:3-6: error: `class` or `:` expected after `base` [ExpectedAfterBase]
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+2]]:3-6: note: expected `class` or `:` after this token [BaseColonGoesAfter]
   // CHECK:STDERR:
   base calss X {}
 
-  // CHECK:STDERR: fail_base.carbon:[[@LINE+4]]:9: error: expected expression [ExpectedExpr]
-  // CHECK:STDERR:   base: ;
-  // CHECK:STDERR:         ^
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+2]]:9: error: expected expression [ExpectedExpr]
   // CHECK:STDERR:
   base: ;
 
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+3]]:11: error: `base` declarations must end with a `;` [ExpectedDeclSemi]
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+2]]:11: note: expected `;` after this token [DeclSemiGoesAfter]
+  // CHECK:STDERR:
   base: { }
   // We should resume parsing here after the previous error.
-  // CHECK:STDERR: fail_base.carbon:[[@LINE+4]]:3: error: `base` declarations must end with a `;` [ExpectedDeclSemi]
-  // CHECK:STDERR:   var n: i32;
-  // CHECK:STDERR:   ^~~
-  // CHECK:STDERR:
   var n: i32;
 }
 
 base class Foo {}
 
 class B {
-  // CHECK:STDERR: fail_base.carbon:[[@LINE+4]]:15: error: `class` or `:` expected after `base` [ExpectedAfterBase]
-  // CHECK:STDERR:   extend base Foo;
-  // CHECK:STDERR:               ^~~
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+3]]:10-13: error: `class` or `:` expected after `base` [ExpectedAfterBase]
+  // CHECK:STDERR: fail_base.carbon:[[@LINE+2]]:10-13: note: expected `class` or `:` after this token [BaseColonGoesAfter]
   // CHECK:STDERR:
   extend base Foo;
 }

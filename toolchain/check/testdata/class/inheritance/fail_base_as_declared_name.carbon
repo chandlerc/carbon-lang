@@ -12,12 +12,9 @@
 
 namespace N;
 
-// CHECK:STDERR: fail_base_as_declared_name.carbon:[[@LINE+8]]:6: error: `.` should be followed by a name [ExpectedDeclNameAfterPeriod]
-// CHECK:STDERR: fn N.base() {}
-// CHECK:STDERR:      ^~~~
+// CHECK:STDERR: fail_base_as_declared_name.carbon:[[@LINE+5]]:5: error: `.` should be followed by a name [ExpectedDeclNameAfterPeriod]
+// CHECK:STDERR: fail_base_as_declared_name.carbon:[[@LINE+4]]:5: note: expected name after this token [DeclNameGoesAfter]
 // CHECK:STDERR:
-// CHECK:STDERR: fail_base_as_declared_name.carbon:[[@LINE+4]]:6: error: semantics TODO: `handle invalid parse trees in `check`` [SemanticsTodo]
-// CHECK:STDERR: fn N.base() {}
-// CHECK:STDERR:      ^~~~
+// CHECK:STDERR: fail_base_as_declared_name.carbon:[[@LINE+2]]:6-9: error: semantics TODO: `handle invalid parse trees in `check`` [SemanticsTodo]
 // CHECK:STDERR:
 fn N.base() {}

@@ -14,15 +14,13 @@
 
 var a: array(i32, 1) = (12,);
 
-// CHECK:STDERR: fail_array_large_index.carbon:[[@LINE+4]]:16: error: array index `1` is past the end of type `array(i32, 1)` [ArrayIndexOutOfBounds]
-// CHECK:STDERR: var b: i32 = a[1];
-// CHECK:STDERR:                ^
+// CHECK:STDERR: fail_array_large_index.carbon:[[@LINE+3]]:16: error: array index `1` is past the end of type `array(i32, 1)` [ArrayIndexOutOfBounds]
+// CHECK:STDERR: fail_array_large_index.carbon:[[@LINE+2]]:14: note: indexing this array of type `array(i32, 1)` [ArrayIndexedObjectHere]
 // CHECK:STDERR:
 var b: i32 = a[1];
 
-// CHECK:STDERR: fail_array_large_index.carbon:[[@LINE+4]]:16: error: array index `2147483647` is past the end of type `array(i32, 1)` [ArrayIndexOutOfBounds]
-// CHECK:STDERR: var c: i32 = a[0x7FFF_FFFF];
-// CHECK:STDERR:                ^~~~~~~~~~~
+// CHECK:STDERR: fail_array_large_index.carbon:[[@LINE+3]]:16-26: error: array index `2147483647` is past the end of type `array(i32, 1)` [ArrayIndexOutOfBounds]
+// CHECK:STDERR: fail_array_large_index.carbon:[[@LINE+2]]:14: note: indexing this array of type `array(i32, 1)` [ArrayIndexedObjectHere]
 // CHECK:STDERR:
 var c: i32 = a[0x7FFF_FFFF];
 
@@ -121,14 +119,14 @@ var c: i32 = a[0x7FFF_FFFF];
 // CHECK:STDOUT:     %a.var_patt: %pattern_type.97e = var_pattern %a.patt [concrete = constants.%a.var_patt]
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   %b.var: ref %i32 = var_storage %b.var_patt [concrete]
-// CHECK:STDOUT:   %i32.loc21: type = type_literal constants.%i32 [concrete = constants.%i32]
+// CHECK:STDOUT:   %i32.loc20: type = type_literal constants.%i32 [concrete = constants.%i32]
 // CHECK:STDOUT:   %b: ref %i32 = wrapper_binding b, %b.var [concrete = %b.var]
 // CHECK:STDOUT:   name_binding_decl {
 // CHECK:STDOUT:     %b.patt: %pattern_type.6b6 = ref_binding_pattern b [concrete = constants.%b.patt]
 // CHECK:STDOUT:     %b.var_patt: %pattern_type.6b6 = var_pattern %b.patt [concrete = constants.%b.var_patt]
 // CHECK:STDOUT:   }
 // CHECK:STDOUT:   %c.var: ref %i32 = var_storage %c.var_patt [concrete]
-// CHECK:STDOUT:   %i32.loc27: type = type_literal constants.%i32 [concrete = constants.%i32]
+// CHECK:STDOUT:   %i32.loc25: type = type_literal constants.%i32 [concrete = constants.%i32]
 // CHECK:STDOUT:   %c: ref %i32 = wrapper_binding c, %c.var [concrete = %c.var]
 // CHECK:STDOUT:   name_binding_decl {
 // CHECK:STDOUT:     %c.patt: %pattern_type.6b6 = ref_binding_pattern c [concrete = constants.%c.patt]
@@ -152,40 +150,40 @@ var c: i32 = a[0x7FFF_FFFF];
 // CHECK:STDOUT:   %.loc15_28.5: init %array_type to file.%a.var = array_init (%.loc15_28.4) [concrete = constants.%array]
 // CHECK:STDOUT:   %.loc15_1: init %array_type = converted %.loc15_28.1, %.loc15_28.5 [concrete = constants.%array]
 // CHECK:STDOUT:   assign file.%a.var, %.loc15_1
-// CHECK:STDOUT:   %a.ref.loc21: ref %array_type = name_ref a, file.%a [concrete = file.%a.var]
+// CHECK:STDOUT:   %a.ref.loc20: ref %array_type = name_ref a, file.%a [concrete = file.%a.var]
 // CHECK:STDOUT:   %int_1: Core.IntLiteral = int_value 1 [concrete = constants.%int_1.5b8]
-// CHECK:STDOUT:   %impl.elem0.loc21_16: %.b7a = impl_witness_access constants.%ImplicitAs.impl_witness.a2a, element0 [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.e39]
-// CHECK:STDOUT:   %bound_method.loc21_16.1: <bound method> = bound_method %int_1, %impl.elem0.loc21_16 [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.bound.094]
-// CHECK:STDOUT:   %specific_fn.loc21_16: <specific function> = specific_function %impl.elem0.loc21_16, @Core.IntLiteral.as.ImplicitAs.impl.Convert(constants.%int_32) [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.specific_fn]
-// CHECK:STDOUT:   %bound_method.loc21_16.2: <bound method> = bound_method %int_1, %specific_fn.loc21_16 [concrete = constants.%bound_method.953]
-// CHECK:STDOUT:   %Core.IntLiteral.as.ImplicitAs.impl.Convert.call.loc21: init %i32 = call %bound_method.loc21_16.2(%int_1) [concrete = constants.%int_1.0c6]
-// CHECK:STDOUT:   %.loc21_16.1: %i32 = value_of_initializer %Core.IntLiteral.as.ImplicitAs.impl.Convert.call.loc21 [concrete = constants.%int_1.0c6]
-// CHECK:STDOUT:   %.loc21_16.2: %i32 = converted %int_1, %.loc21_16.1 [concrete = constants.%int_1.0c6]
-// CHECK:STDOUT:   %.loc21_17.1: ref %i32 = array_index %a.ref.loc21, %.loc21_16.2 [concrete = <error>]
-// CHECK:STDOUT:   %.loc21_17.2: %i32 = acquire_value %.loc21_17.1 [concrete = <error>]
-// CHECK:STDOUT:   %impl.elem0.loc21_17: %.737 = impl_witness_access constants.%Copy.impl_witness.b51, element0 [concrete = constants.%Int.as.Copy.impl.Op.4f6]
-// CHECK:STDOUT:   %bound_method.loc21_17.1: <bound method> = bound_method %.loc21_17.2, %impl.elem0.loc21_17 [concrete = <error>]
-// CHECK:STDOUT:   %specific_fn.loc21_17: <specific function> = specific_function %impl.elem0.loc21_17, @Int.as.Copy.impl.Op(constants.%int_32) [concrete = constants.%Int.as.Copy.impl.Op.specific_fn]
-// CHECK:STDOUT:   %bound_method.loc21_17.2: <bound method> = bound_method %.loc21_17.2, %specific_fn.loc21_17 [concrete = <error>]
-// CHECK:STDOUT:   %Int.as.Copy.impl.Op.call.loc21: init %i32 = call %bound_method.loc21_17.2(%.loc21_17.2) [concrete = <error>]
-// CHECK:STDOUT:   assign file.%b.var, %Int.as.Copy.impl.Op.call.loc21
-// CHECK:STDOUT:   %a.ref.loc27: ref %array_type = name_ref a, file.%a [concrete = file.%a.var]
+// CHECK:STDOUT:   %impl.elem0.loc20_16: %.b7a = impl_witness_access constants.%ImplicitAs.impl_witness.a2a, element0 [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.e39]
+// CHECK:STDOUT:   %bound_method.loc20_16.1: <bound method> = bound_method %int_1, %impl.elem0.loc20_16 [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.bound.094]
+// CHECK:STDOUT:   %specific_fn.loc20_16: <specific function> = specific_function %impl.elem0.loc20_16, @Core.IntLiteral.as.ImplicitAs.impl.Convert(constants.%int_32) [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.specific_fn]
+// CHECK:STDOUT:   %bound_method.loc20_16.2: <bound method> = bound_method %int_1, %specific_fn.loc20_16 [concrete = constants.%bound_method.953]
+// CHECK:STDOUT:   %Core.IntLiteral.as.ImplicitAs.impl.Convert.call.loc20: init %i32 = call %bound_method.loc20_16.2(%int_1) [concrete = constants.%int_1.0c6]
+// CHECK:STDOUT:   %.loc20_16.1: %i32 = value_of_initializer %Core.IntLiteral.as.ImplicitAs.impl.Convert.call.loc20 [concrete = constants.%int_1.0c6]
+// CHECK:STDOUT:   %.loc20_16.2: %i32 = converted %int_1, %.loc20_16.1 [concrete = constants.%int_1.0c6]
+// CHECK:STDOUT:   %.loc20_17.1: ref %i32 = array_index %a.ref.loc20, %.loc20_16.2 [concrete = <error>]
+// CHECK:STDOUT:   %.loc20_17.2: %i32 = acquire_value %.loc20_17.1 [concrete = <error>]
+// CHECK:STDOUT:   %impl.elem0.loc20_17: %.737 = impl_witness_access constants.%Copy.impl_witness.b51, element0 [concrete = constants.%Int.as.Copy.impl.Op.4f6]
+// CHECK:STDOUT:   %bound_method.loc20_17.1: <bound method> = bound_method %.loc20_17.2, %impl.elem0.loc20_17 [concrete = <error>]
+// CHECK:STDOUT:   %specific_fn.loc20_17: <specific function> = specific_function %impl.elem0.loc20_17, @Int.as.Copy.impl.Op(constants.%int_32) [concrete = constants.%Int.as.Copy.impl.Op.specific_fn]
+// CHECK:STDOUT:   %bound_method.loc20_17.2: <bound method> = bound_method %.loc20_17.2, %specific_fn.loc20_17 [concrete = <error>]
+// CHECK:STDOUT:   %Int.as.Copy.impl.Op.call.loc20: init %i32 = call %bound_method.loc20_17.2(%.loc20_17.2) [concrete = <error>]
+// CHECK:STDOUT:   assign file.%b.var, %Int.as.Copy.impl.Op.call.loc20
+// CHECK:STDOUT:   %a.ref.loc25: ref %array_type = name_ref a, file.%a [concrete = file.%a.var]
 // CHECK:STDOUT:   %int_2147483647: Core.IntLiteral = int_value 2147483647 [concrete = constants.%int_2147483647.d89]
-// CHECK:STDOUT:   %impl.elem0.loc27_16: %.b7a = impl_witness_access constants.%ImplicitAs.impl_witness.a2a, element0 [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.e39]
-// CHECK:STDOUT:   %bound_method.loc27_16.1: <bound method> = bound_method %int_2147483647, %impl.elem0.loc27_16 [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.bound.91c]
-// CHECK:STDOUT:   %specific_fn.loc27_16: <specific function> = specific_function %impl.elem0.loc27_16, @Core.IntLiteral.as.ImplicitAs.impl.Convert(constants.%int_32) [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.specific_fn]
-// CHECK:STDOUT:   %bound_method.loc27_16.2: <bound method> = bound_method %int_2147483647, %specific_fn.loc27_16 [concrete = constants.%bound_method.777]
-// CHECK:STDOUT:   %Core.IntLiteral.as.ImplicitAs.impl.Convert.call.loc27: init %i32 = call %bound_method.loc27_16.2(%int_2147483647) [concrete = constants.%int_2147483647.a0e]
-// CHECK:STDOUT:   %.loc27_16.1: %i32 = value_of_initializer %Core.IntLiteral.as.ImplicitAs.impl.Convert.call.loc27 [concrete = constants.%int_2147483647.a0e]
-// CHECK:STDOUT:   %.loc27_16.2: %i32 = converted %int_2147483647, %.loc27_16.1 [concrete = constants.%int_2147483647.a0e]
-// CHECK:STDOUT:   %.loc27_27.1: ref %i32 = array_index %a.ref.loc27, %.loc27_16.2 [concrete = <error>]
-// CHECK:STDOUT:   %.loc27_27.2: %i32 = acquire_value %.loc27_27.1 [concrete = <error>]
-// CHECK:STDOUT:   %impl.elem0.loc27_27: %.737 = impl_witness_access constants.%Copy.impl_witness.b51, element0 [concrete = constants.%Int.as.Copy.impl.Op.4f6]
-// CHECK:STDOUT:   %bound_method.loc27_27.1: <bound method> = bound_method %.loc27_27.2, %impl.elem0.loc27_27 [concrete = <error>]
-// CHECK:STDOUT:   %specific_fn.loc27_27: <specific function> = specific_function %impl.elem0.loc27_27, @Int.as.Copy.impl.Op(constants.%int_32) [concrete = constants.%Int.as.Copy.impl.Op.specific_fn]
-// CHECK:STDOUT:   %bound_method.loc27_27.2: <bound method> = bound_method %.loc27_27.2, %specific_fn.loc27_27 [concrete = <error>]
-// CHECK:STDOUT:   %Int.as.Copy.impl.Op.call.loc27: init %i32 = call %bound_method.loc27_27.2(%.loc27_27.2) [concrete = <error>]
-// CHECK:STDOUT:   assign file.%c.var, %Int.as.Copy.impl.Op.call.loc27
+// CHECK:STDOUT:   %impl.elem0.loc25_16: %.b7a = impl_witness_access constants.%ImplicitAs.impl_witness.a2a, element0 [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.e39]
+// CHECK:STDOUT:   %bound_method.loc25_16.1: <bound method> = bound_method %int_2147483647, %impl.elem0.loc25_16 [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.bound.91c]
+// CHECK:STDOUT:   %specific_fn.loc25_16: <specific function> = specific_function %impl.elem0.loc25_16, @Core.IntLiteral.as.ImplicitAs.impl.Convert(constants.%int_32) [concrete = constants.%Core.IntLiteral.as.ImplicitAs.impl.Convert.specific_fn]
+// CHECK:STDOUT:   %bound_method.loc25_16.2: <bound method> = bound_method %int_2147483647, %specific_fn.loc25_16 [concrete = constants.%bound_method.777]
+// CHECK:STDOUT:   %Core.IntLiteral.as.ImplicitAs.impl.Convert.call.loc25: init %i32 = call %bound_method.loc25_16.2(%int_2147483647) [concrete = constants.%int_2147483647.a0e]
+// CHECK:STDOUT:   %.loc25_16.1: %i32 = value_of_initializer %Core.IntLiteral.as.ImplicitAs.impl.Convert.call.loc25 [concrete = constants.%int_2147483647.a0e]
+// CHECK:STDOUT:   %.loc25_16.2: %i32 = converted %int_2147483647, %.loc25_16.1 [concrete = constants.%int_2147483647.a0e]
+// CHECK:STDOUT:   %.loc25_27.1: ref %i32 = array_index %a.ref.loc25, %.loc25_16.2 [concrete = <error>]
+// CHECK:STDOUT:   %.loc25_27.2: %i32 = acquire_value %.loc25_27.1 [concrete = <error>]
+// CHECK:STDOUT:   %impl.elem0.loc25_27: %.737 = impl_witness_access constants.%Copy.impl_witness.b51, element0 [concrete = constants.%Int.as.Copy.impl.Op.4f6]
+// CHECK:STDOUT:   %bound_method.loc25_27.1: <bound method> = bound_method %.loc25_27.2, %impl.elem0.loc25_27 [concrete = <error>]
+// CHECK:STDOUT:   %specific_fn.loc25_27: <specific function> = specific_function %impl.elem0.loc25_27, @Int.as.Copy.impl.Op(constants.%int_32) [concrete = constants.%Int.as.Copy.impl.Op.specific_fn]
+// CHECK:STDOUT:   %bound_method.loc25_27.2: <bound method> = bound_method %.loc25_27.2, %specific_fn.loc25_27 [concrete = <error>]
+// CHECK:STDOUT:   %Int.as.Copy.impl.Op.call.loc25: init %i32 = call %bound_method.loc25_27.2(%.loc25_27.2) [concrete = <error>]
+// CHECK:STDOUT:   assign file.%c.var, %Int.as.Copy.impl.Op.call.loc25
 // CHECK:STDOUT:   return
 // CHECK:STDOUT: }
 // CHECK:STDOUT:

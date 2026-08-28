@@ -9,9 +9,8 @@
 // TIP:   bazel run //toolchain/testing:file_test -- --dump_output --file_tests=toolchain/parse/testdata/generics/interface/fail_self_param_syntax.carbon
 
 interface Foo {
-  // CHECK:STDERR: fail_self_param_syntax.carbon:[[@LINE+4]]:13: error: expected `,` or `]` [UnexpectedTokenAfterListElement]
-  // CHECK:STDERR:   fn Sub[me Self](b: Self) -> Self;
-  // CHECK:STDERR:             ^~~~
+  // CHECK:STDERR: fail_self_param_syntax.carbon:[[@LINE+3]]:10-11: error: expected `,` or `]` [UnexpectedTokenAfterListElement]
+  // CHECK:STDERR: fail_self_param_syntax.carbon:[[@LINE+2]]:10-11: note: expected `,` or `]` after this token [ListSeparatorGoesAfter]
   // CHECK:STDERR:
   fn Sub[me Self](b: Self) -> Self;
 

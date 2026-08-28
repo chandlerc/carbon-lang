@@ -25,12 +25,9 @@ class A(N: i32) {
 }
 
 fn F(a: A(0)*) {
-  // CHECK:STDERR: fail_derived_to_base.carbon:[[@LINE+7]]:22: error: unable to monomorphize specific `A(0)` [ResolvingSpecificHere]
-  // CHECK:STDERR:   let unused b: B* = a;
-  // CHECK:STDERR:                      ^
-  // CHECK:STDERR: fail_derived_to_base.carbon:[[@LINE-7]]:10: note: integer type width of 0 is not positive [IntWidthNotPositive]
-  // CHECK:STDERR:   var n: Int(N);
-  // CHECK:STDERR:          ^~~~~~
+  // CHECK:STDERR: fail_derived_to_base.carbon:[[@LINE+4]]:22: error: unable to monomorphize specific `A(0)` [ResolvingSpecificHere]
+  // CHECK:STDERR: fail_derived_to_base.carbon:[[@LINE-5]]:10-15: note: integer type width of 0 is not positive [IntWidthNotPositive]
+  // CHECK:STDERR: fail_derived_to_base.carbon:[[@LINE+2]]:14-18: note: initializing this binding [InBindingInit]
   // CHECK:STDERR:
   let unused b: B* = a;
 }
@@ -232,15 +229,15 @@ fn F(a: A(0)*) {
 // CHECK:STDOUT: fn @F(%a.param: %ptr.4dd) {
 // CHECK:STDOUT: !entry:
 // CHECK:STDOUT:   %a.ref: %ptr.4dd = name_ref a, %a
-// CHECK:STDOUT:   %.loc20_22.1: ref %A.32a = deref %a.ref
-// CHECK:STDOUT:   %.loc20_22.2: ref %B = class_element_access %.loc20_22.1, element0
-// CHECK:STDOUT:   %addr: %ptr.432 = addr_of %.loc20_22.2
-// CHECK:STDOUT:   %.loc20_22.3: %ptr.432 = converted %a.ref, %addr
-// CHECK:STDOUT:   %.loc20_18: type = splice_block %ptr.loc20 [concrete = constants.%ptr.432] {
+// CHECK:STDOUT:   %.loc17_22.1: ref %A.32a = deref %a.ref
+// CHECK:STDOUT:   %.loc17_22.2: ref %B = class_element_access %.loc17_22.1, element0
+// CHECK:STDOUT:   %addr: %ptr.432 = addr_of %.loc17_22.2
+// CHECK:STDOUT:   %.loc17_22.3: %ptr.432 = converted %a.ref, %addr
+// CHECK:STDOUT:   %.loc17_18: type = splice_block %ptr.loc17 [concrete = constants.%ptr.432] {
 // CHECK:STDOUT:     %B.ref: type = name_ref B, file.%B.decl [concrete = constants.%B]
-// CHECK:STDOUT:     %ptr.loc20: type = ptr_type %B.ref [concrete = constants.%ptr.432]
+// CHECK:STDOUT:     %ptr.loc17: type = ptr_type %B.ref [concrete = constants.%ptr.432]
 // CHECK:STDOUT:   }
-// CHECK:STDOUT:   %b: %ptr.432 = wrapper_binding b, %.loc20_22.3
+// CHECK:STDOUT:   %b: %ptr.432 = wrapper_binding b, %.loc17_22.3
 // CHECK:STDOUT:   name_binding_decl {
 // CHECK:STDOUT:     %b.patt: %pattern_type.3c8 = value_binding_pattern b [concrete = constants.%b.patt]
 // CHECK:STDOUT:   }

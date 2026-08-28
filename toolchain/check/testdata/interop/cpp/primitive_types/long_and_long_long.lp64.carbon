@@ -78,12 +78,9 @@ import Cpp;
 
 fn F() {
   let cpp_long_long: Cpp.long_long = 1;
-  // CHECK:STDERR: fail_implicit_conversion_long_long_to_i64.carbon:[[@LINE+7]]:32: error: cannot implicitly convert expression of type `Cpp.long_long` to `i64` [ConversionFailure]
-  // CHECK:STDERR:   let unused carbon_i64: i64 = cpp_long_long;
-  // CHECK:STDERR:                                ^~~~~~~~~~~~~
-  // CHECK:STDERR: fail_implicit_conversion_long_long_to_i64.carbon:[[@LINE+4]]:32: note: type `Cpp.long_long` does not implement interface `Core.ImplicitAs(i64)` [MissingImplInMemberAccessInContext]
-  // CHECK:STDERR:   let unused carbon_i64: i64 = cpp_long_long;
-  // CHECK:STDERR:                                ^~~~~~~~~~~~~
+  // CHECK:STDERR: fail_implicit_conversion_long_long_to_i64.carbon:[[@LINE+4]]:32-44: error: cannot implicitly convert expression of type `Cpp.long_long` to `i64` [ConversionFailure]
+  // CHECK:STDERR: fail_implicit_conversion_long_long_to_i64.carbon:[[@LINE+3]]:32-44: note: type `Cpp.long_long` does not implement interface `Core.ImplicitAs(i64)` [MissingImplForType]
+  // CHECK:STDERR: fail_implicit_conversion_long_long_to_i64.carbon:[[@LINE+2]]:14-28: note: initializing this binding [InBindingInit]
   // CHECK:STDERR:
   let unused carbon_i64: i64 = cpp_long_long;
 }
@@ -181,14 +178,16 @@ import Cpp;
 fn ComparisonsHeterogeneousLongLongAndI32() {
   let a: Cpp.long_long = 1;
   let b: i32 = 1;
-  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:3: error: cannot access member of interface `Core.EqWith(i32)` in type `Cpp.long_long` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   a == b;
-  // CHECK:STDERR:   ^~~~~~
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+5]]:5-6: error: type `Cpp.long_long` does not implement interface `Core.EqWith(i32)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:5-6: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+3]]:3: note: left operand has type `Cpp.long_long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+2]]:8: note: right operand has type `i32` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a == b;
-  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:3: error: cannot access member of interface `Core.EqWith(Cpp.long_long)` in type `i32` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   b == a;
-  // CHECK:STDERR:   ^~~~~~
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+5]]:5-6: error: type `i32` does not implement interface `Core.EqWith(Cpp.long_long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:5-6: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+3]]:3: note: left operand has type `i32` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i32.carbon:[[@LINE+2]]:8: note: right operand has type `Cpp.long_long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   b == a;
 }
@@ -215,14 +214,16 @@ import Cpp;
 fn ComparisonsHeterogeneousLongLongAndI256() {
   let a: Cpp.long_long = 1;
   let b: i256 = 1;
-  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+4]]:3: error: cannot access member of interface `Core.EqWith(i256)` in type `Cpp.long_long` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   a == b;
-  // CHECK:STDERR:   ^~~~~~
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+5]]:5-6: error: type `Cpp.long_long` does not implement interface `Core.EqWith(i256)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+4]]:5-6: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+3]]:3: note: left operand has type `Cpp.long_long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+2]]:8: note: right operand has type `i256` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a == b;
-  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+4]]:3: error: cannot access member of interface `Core.EqWith(Cpp.long_long)` in type `i256` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   b == a;
-  // CHECK:STDERR:   ^~~~~~
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+5]]:5-6: error: type `i256` does not implement interface `Core.EqWith(Cpp.long_long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+4]]:5-6: note: `==` requires an impl of `Core.EqWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+3]]:3: note: left operand has type `i256` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_comparisons_heterogeneous_long_long_and_i256.carbon:[[@LINE+2]]:8: note: right operand has type `Cpp.long_long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   b == a;
 }
@@ -307,15 +308,17 @@ fn AssertSameType[T: type](unused a: T, unused b: T) {}
 fn ArithmeticHeterogeneousLongLongAndI32() {
   let x: Cpp.long_long = 1;
   let y: i32 = 1;
-  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.AddWith(i32)` in type `Cpp.long_long` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   AssertSameType(x + y, x);
-  // CHECK:STDERR:                  ^~~~~
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+5]]:20: error: type `Cpp.long_long` does not implement interface `Core.AddWith(i32)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:20: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.long_long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+2]]:22: note: right operand has type `i32` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(x + y, x);
 
-  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.AddWith(Cpp.long_long)` in type `i32` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   AssertSameType(y + x, x);
-  // CHECK:STDERR:                  ^~~~~
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+5]]:20: error: type `i32` does not implement interface `Core.AddWith(Cpp.long_long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:20: note: `+` requires an impl of `Core.AddWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+3]]:18: note: left operand has type `i32` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_arithmetic_heterogeneous_long_long_and_i32.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.long_long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(y + x, x);
 }
@@ -417,14 +420,16 @@ fn BitWiseHeterogeneousLongLongAndI32() {
   let a: Cpp.long_long = 1;
   let b: i32 = 1;
 
-  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.BitAndWith(i32)` in type `Cpp.long_long` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   AssertSameType(a & b, a);
-  // CHECK:STDERR:                  ^~~~~
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+5]]:20: error: type `Cpp.long_long` does not implement interface `Core.BitAndWith(i32)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:20: note: `&` requires an impl of `Core.BitAndWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+3]]:18: note: left operand has type `Cpp.long_long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+2]]:22: note: right operand has type `i32` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(a & b, a);
-  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:18: error: cannot access member of interface `Core.BitAndWith(Cpp.long_long)` in type `i32` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   AssertSameType(b & a, a);
-  // CHECK:STDERR:                  ^~~~~
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+5]]:20: error: type `i32` does not implement interface `Core.BitAndWith(Cpp.long_long)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:20: note: `&` requires an impl of `Core.BitAndWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+3]]:18: note: left operand has type `i32` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_bitwise_heterogeneous_long_long_and_i32.carbon:[[@LINE+2]]:22: note: right operand has type `Cpp.long_long` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   AssertSameType(b & a, a);
 }
@@ -529,9 +534,10 @@ import Cpp;
 
 fn CompoundAssignmentHeterogeneousLongLongAndI32() {
   var a: Cpp.long_long = 1;
-  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:3: error: cannot access member of interface `Core.AddAssignWith(i32)` in type `Cpp.long_long` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   a += (1 as i32);
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_long_and_i32.carbon:[[@LINE+5]]:5-6: error: type `Cpp.long_long` does not implement interface `Core.AddAssignWith(i32)` [MissingImplForType]
+  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_long_and_i32.carbon:[[@LINE+4]]:5-6: note: `+=` requires an impl of `Core.AddAssignWith` [OperatorInterface]
+  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_long_and_i32.carbon:[[@LINE+3]]:3: note: left operand has type `Cpp.long_long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_todo_compound_assignment_heterogeneous_long_long_and_i32.carbon:[[@LINE+2]]:9-16: note: right operand has type `i32` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a += (1 as i32);
 }
@@ -544,9 +550,10 @@ import Cpp;
 
 fn CompoundAssignmentHeterogeneousLongLongAndI128() {
   var a: Cpp.long_long = 1;
-  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_long_and_i128.carbon:[[@LINE+4]]:3: error: cannot access member of interface `Core.AddAssignWith(i128)` in type `Cpp.long_long` that does not implement that interface [MissingImplInMemberAccess]
-  // CHECK:STDERR:   a += (1 as i128);
-  // CHECK:STDERR:   ^~~~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_long_and_i128.carbon:[[@LINE+5]]:5-6: error: type `Cpp.long_long` does not implement interface `Core.AddAssignWith(i128)` [MissingImplForType]
+  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_long_and_i128.carbon:[[@LINE+4]]:5-6: note: `+=` requires an impl of `Core.AddAssignWith` [OperatorInterface]
+  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_long_and_i128.carbon:[[@LINE+3]]:3: note: left operand has type `Cpp.long_long` [BinaryOperatorLhsType]
+  // CHECK:STDERR: fail_compound_assignment_heterogeneous_long_long_and_i128.carbon:[[@LINE+2]]:9-17: note: right operand has type `i128` [BinaryOperatorRhsType]
   // CHECK:STDERR:
   a += (1 as i128);
 }
@@ -604,16 +611,11 @@ fn F() {
 
   // For portability reasons, this is not allowed even though `unsigned long
   // long` happens to fit in `u64` on this target.
-  // CHECK:STDERR: fail_pass_ulonglong_to_u64.carbon:[[@LINE+11]]:25: error: cannot implicitly convert expression of type `Cpp.unsigned_long_long` to `u64` [ConversionFailure]
-  // CHECK:STDERR:   let carbon_u64: u64 = cpp_unsigned_long_long;
-  // CHECK:STDERR:                         ^~~~~~~~~~~~~~~~~~~~~~
-  // CHECK:STDERR: fail_pass_ulonglong_to_u64.carbon:[[@LINE+8]]:25: note: type `Cpp.unsigned_long_long` does not implement interface `Core.ImplicitAs(u64)` [MissingImplInMemberAccessInContext]
-  // CHECK:STDERR:   let carbon_u64: u64 = cpp_unsigned_long_long;
-  // CHECK:STDERR:                         ^~~~~~~~~~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_pass_ulonglong_to_u64.carbon:[[@LINE+6]]:25-46: error: cannot implicitly convert expression of type `Cpp.unsigned_long_long` to `u64` [ConversionFailure]
+  // CHECK:STDERR: fail_pass_ulonglong_to_u64.carbon:[[@LINE+5]]:25-46: note: type `Cpp.unsigned_long_long` does not implement interface `Core.ImplicitAs(u64)` [MissingImplForType]
+  // CHECK:STDERR: fail_pass_ulonglong_to_u64.carbon:[[@LINE+4]]:7-21: note: initializing this binding [InBindingInit]
   // CHECK:STDERR:
-  // CHECK:STDERR: fail_pass_ulonglong_to_u64.carbon:[[@LINE+4]]:7: warning: binding `carbon_u64` unused [UnusedBinding]
-  // CHECK:STDERR:   let carbon_u64: u64 = cpp_unsigned_long_long;
-  // CHECK:STDERR:       ^~~~~~~~~~~~~~~
+  // CHECK:STDERR: fail_pass_ulonglong_to_u64.carbon:[[@LINE+2]]:7-21: warning: binding `carbon_u64` unused [UnusedBinding]
   // CHECK:STDERR:
   let carbon_u64: u64 = cpp_unsigned_long_long;
 }

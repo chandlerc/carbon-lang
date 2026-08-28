@@ -78,8 +78,11 @@ auto HandleExprPattern(Context& context) -> void {
                         "unexpected expression before {0} in binding pattern",
                         Lex::TokenKind);
       // TODO: Underline the parsed expression.
-      context.emitter().Emit(*context.position(), ExpectedBindingName,
-                             context.PositionKind());
+      context.emitter()
+          .Build(*context.position(), ExpectedBindingName,
+                 context.PositionKind())
+          .Attach(*context.position())
+          .Emit();
       state.has_error = true;
     }
     context.Consume();

@@ -32,7 +32,12 @@ auto HandleArrayExprComma(Context& context) -> void {
     context.AddLeafNode(NodeKind::ArrayExprComma, *context.position(), true);
     CARBON_DIAGNOSTIC(ExpectedArrayComma, Error,
                       "expected `,` in `array(Type, Count)`");
-    context.emitter().Emit(*context.position(), ExpectedArrayComma);
+    CARBON_DIAGNOSTIC_LABEL(ArrayCommaGoesAfter, Primary,
+                            "expected `,` after this token");
+    context.emitter()
+        .Build(*(context.position() - 1), ExpectedArrayComma)
+        .Attach(*(context.position() - 1), ArrayCommaGoesAfter)
+        .Emit();
     state.has_error = true;
   }
   context.PushState(state, StateKind::ArrayExprFinish);
