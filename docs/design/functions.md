@@ -785,16 +785,15 @@ A generic parameter can be constrained to be a callable type using the `Call`
 interface:
 
 ```carbon
-interface Call(... each Arg: type) {
-  let Result: type;
-  fn Op(self, ... each arg: each Arg) -> Result;
-}
+interface Call(... each Arg: type)
+    fn (self, ... each arg: each Arg) -> (Result: type);
 ```
 
 A call expression that is not a direct call is an _indirect call_. It is
-translated into an invocation of `Call(Arg1, Arg2,` ... `ArgN).Op`, where
-`Arg1`, `Arg2`, ... `ArgN` are the types of the call's arguments in order. So
-`F(arg1, arg2)` is translated into `F.(Call(Arg1, Arg2).Op)(arg1, arg2)`.
+translated into an invocation of `Call(Arg1, Arg2,` ... `ArgN).Call` (or
+`Call(Arg1, Arg2,` ... `ArgN)`), where `Arg1`, `Arg2`, ... `ArgN` are the types
+of the call's arguments in order. So `F(arg1, arg2)` is translated into
+`F.(Call(Arg1, Arg2).Call)(arg1, arg2)` (or `F.(Call(Arg1, Arg2))(arg1, arg2)`).
 
 For example, given:
 
@@ -810,13 +809,13 @@ fn Sort[T: type, F: Call(T, T) where .Result = Ordering]
 The call `cmp(v[i], v[j])` is translated into:
 
 ```carbon
-  auto ord: auto = cmp.(Call(T, T).Op)(v[i], v[j]);
+  auto ord: auto = cmp.(Call(T, T))(v[i], v[j]);
 ```
 
 A function type or bound method type implements the `Call` interface for every
 set of runtime argument types that a direct call to the function or bound method
-would accept. The behavior of `Call.Op` is to call the function or bound method
-with the provided argument list.
+would accept. The behavior of `Call.Call` is to call the function or bound
+method with the provided argument list.
 
 Implicit conversions are permitted for parameters whose types do not involve
 deduced parameters. The intent is for the `impl` to support indirect calls in
@@ -842,8 +841,8 @@ call operator for a type.
 
 ```carbon
 class Func(Arg: type) {
-  impl as Call((Arg,)) where .Result = () {
-    fn Op(self, arg: (Arg,)) { Print("hello, world"); }
+  impl as Call(Arg) fn (self, arg: Arg) {
+    Print("hello, world");
   }
 }
 
@@ -860,10 +859,8 @@ implementing an interface.
 ```carbon
 class X { var n: i32; }
 
-impl {.a: X} as Call(()) where .Result = i32 {
-  fn Op(self, args: ()) -> i32 {
-    return self.a.n;
-  }
+impl {.a: X} as Call() fn (self) -> i32 {
+  return self.a.n;
 }
 fn Run() -> i32 {
   // Returns 1.

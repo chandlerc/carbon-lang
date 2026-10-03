@@ -36,6 +36,7 @@ SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 -   [Interface requiring other interfaces](#interface-requiring-other-interfaces)
     -   [Interface extension](#interface-extension)
         -   [`extend require` with named constraints](#extend-require-with-named-constraints)
+        -   [Extending interfaces with primary functions and anonymous aliases](#extending-interfaces-with-primary-functions-and-anonymous-aliases)
         -   [Diamond dependency issue](#diamond-dependency-issue)
     -   [Use case: detecting unreachable matches](#use-case-detecting-unreachable-matches)
 -   [Adapting types](#adapting-types)
@@ -47,6 +48,8 @@ SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
     -   [Use case: Accessing interface names](#use-case-accessing-interface-names)
 -   [Associated constants](#associated-constants)
     -   [Associated functions](#associated-functions)
+        -   [Primary interface functions](#primary-interface-functions)
+        -   [Abbreviated `interface` and `impl` declarations](#abbreviated-interface-and-impl-declarations)
 -   [Associated facets](#associated-facets)
 -   [Parameterized interfaces](#parameterized-interfaces)
     -   [Parameterized named constraints](#parameterized-named-constraints)
@@ -1694,6 +1697,55 @@ interface MovieCodec {
 }
 ```
 
+#### Extending interfaces with primary functions and anonymous aliases
+
+When an `interface` or `constraint` extends an interface `I` that has a
+[primary function](#primary-interface-functions):
+
+-   **`extend require impls I`**: The primary function of `I` is aliased into
+    the extending scope under its qualified name `I` (`alias I = I.I;`). It does
+    **not** become the primary function of the extending `interface` or
+    `constraint`. This allows a constraint or interface to extend multiple
+    interfaces with primary functions (for example, both `AddWith(Self)` and
+    `SubWith(Self)`) without their primary functions colliding.
+-   **`extend impl as I` (or `extend final impl as I`) in `interface J`**: The
+    anonymous primary function of `I` is copied into `J` as `J`'s anonymous
+    primary function (taking the qualified name `J`), and the generated blanket
+    `impl` of `I` forwards `I`'s primary function to `J`'s primary function:
+
+    ```carbon
+    interface I fn (self);
+
+    interface J {
+      extend impl as I;
+    }
+    // Equivalent to:
+    // interface J {
+    //   fn (self);
+    // }
+    // impl forall [U: J] U as I fn (self) = U.(J);
+    ```
+
+    If `J` uses `extend impl as` for multiple interfaces that have primary
+    functions, `J` does not automatically get a primary function unless
+    disambiguated with an anonymous `alias`.
+
+An `interface` or `constraint` may also declare at most one **anonymous
+`alias`** by omitting the alias name before `=`:
+
+```carbon
+constraint Add {
+  extend require impls AddWith(Self) where .Result = Self;
+  alias = AddWith(Self).AddWith;
+}
+```
+
+Like a [primary function](#primary-interface-functions), an anonymous `alias`
+implicitly takes the name of the enclosing `interface` or `constraint` for
+qualified member lookup only (such as `x.Add(y)` or `T.(Add.Add)(x, y)`), and
+can be accessed directly through the constraint in compound member access as
+`x.(Add)(y)`.
+
 #### Diamond dependency issue
 
 > **TODO:** Update this section to reflect the changes in
@@ -2370,6 +2422,110 @@ fn PrintWidgets(s: slice(Widget)) {
 
 Note that `Self` is in deducible position, but not directly the type of any
 argument.
+
+#### Primary interface functions
+
+An `interface` may contain at most one anonymous `fn` declaration—a function
+declaration that omits the function name between `fn` and its parameter list:
+
+```carbon
+interface AddWith(U: type) {
+  default let Result: type = Self;
+  fn (self, other: U) -> Result;
+}
+```
+
+This function is the **primary function** of the interface:
+
+-   It implicitly takes the name of the enclosing `interface` for **qualified
+    member lookup** (such as `x.AddWith(y)`, `Self.AddWith(y)`,
+    `T.(AddWith(U).AddWith)`, or `AddWith(U).AddWith(x, y)`).
+-   In
+    [compound member access](/docs/design/expressions/member_access.md#compound-member-access)
+    `x.(I)` and
+    [`impl` member access](/docs/design/expressions/member_access.md#impl-member-access)
+    `T.impl(I)`, when `I` is a facet type whose interface or named constraint
+    has a primary function (or anonymous `alias`), `I` implicitly designates the
+    primary function `I.I` (for example, `x.(AddWith(U))(y)` and
+    `MyType.impl(AddWith(U))`).
+-   It is **not** visible to **unqualified lookup** inside the `interface`, an
+    extending `interface` or `constraint`, or an `impl`. Within those scopes,
+    the unqualified name of the interface continues to refer to the interface
+    itself rather than the function. To call or reference the primary function
+    within the interface or an `impl`, use qualified lookup such as
+    `self.AddWith(other)` or `Self.AddWith`.
+
+In an `impl` of an interface with a primary function, at most one `fn`
+declaration may omit its name to implement the primary function, or it may
+explicitly write the interface's name (`fn AddWith(self, other: U) -> Self`).
+
+#### Abbreviated `interface` and `impl` declarations
+
+When an `interface` only declares a single primary function (and optionally an
+associated constant for its return type), the enclosing `{` ... `}` braces may
+be omitted:
+
+```carbon
+interface Inc fn (ref self);
+```
+
+If the return type of the primary function in an abbreviated `interface` is
+written as a parenthesized binding pattern `-> (Name: Type)`, it declares an
+associated constant on the interface and uses that constant as the function's
+return type:
+
+```carbon
+interface Deref fn (self) -> (Result: type);
+// Equivalent to:
+// interface Deref {
+//   let Result: type;
+//   fn (self) -> Result;
+// }
+```
+
+Specifying a `default` value for the return-type associated constant (such as
+`default let Result: type = Self;`) requires the braced `interface {` ... `}`
+form.
+
+Similarly, an `impl` declaration (including `extend impl` and `final impl`) may
+omit the `{` ... `}` braces and follow the facet type directly with an anonymous
+`fn` declaration or definition:
+
+```carbon
+class Point {
+  var x: i32;
+  var y: i32;
+
+  extend impl as AddWith(Point)
+      fn (self, other: Point) -> Point =>
+          {.x = self.x + other.x, .y = self.y + other.y};
+}
+```
+
+Abbreviated `impl` syntax is allowed for any interface with a primary function
+when all other requirements of the interface either have defaults or can be
+deduced from the primary function's signature, regardless of whether the
+`interface` itself was declared with abbreviated or braced syntax.
+
+In an abbreviated `impl` declaration, required (non-`default`, non-`final`)
+associated constants of the interface—as well as any associated constants named
+in the primary function's signature, such as `Result`—are **automatically
+deduced** by matching the `impl`'s `fn` signature against the interface's
+primary `fn` signature:
+
+-   In `impl Point as AddWith(Point) fn (self, other: Point) -> Point`, matching
+    `-> Point` against `-> Result` deduces `.Result = Point` without requiring
+    an explicit `where .Result = Point` clause.
+-   Because deduced associated constants belong to the `impl`, they cannot
+    depend on generic parameters of the `fn` itself (though they may depend on
+    `forall` parameters of the `impl` or enclosing generic parameters).
+-   An abbreviated `impl` forward declaration (ending in `;`) performs the same
+    associated constant deduction, making the deduced associated constants
+    available immediately at the forward declaration site.
+-   Associated constant deduction **only** occurs in the abbreviated
+    `impl ... fn ...` form. When `{` ... `}` braces are used on an `impl`,
+    associated constants must be specified with a `where` constraint (or use
+    their defaults).
 
 > **TODO:** Document rules on where associated function implementations can be
 > declared, as adopted in
@@ -5267,23 +5423,16 @@ call to a generic function, such as using an operator:
 
 ```carbon
 // Interface defining the behavior of the prefix-* operator
-interface Deref {
-  let Result: type;
-  fn Op(self) -> Result;
-}
+interface Deref fn (self) -> (Result: type);
 
 // Types implementing `Deref`
 class Ptr(T: type) {
   ...
-  impl as Deref where .Result = T {
-    fn Op(self) -> Result { ... }
-  }
+  impl as Deref fn (self) -> T { ... }
 }
 class Optional(T: type) {
   ...
-  impl as Deref where .Result = T {
-    fn Op(self) -> Result { ... }
-  }
+  impl as Deref fn (self) -> T { ... }
 }
 
 fn F[T: type](x: T) {
@@ -5293,7 +5442,7 @@ fn F[T: type](x: T) {
 
 The concern is the possibility of specializing `Optional(T) as Deref` or
 `Ptr(T) as Deref` for a more specific `T` means that the compiler can't assume
-anything about the return type of `Deref.Op` calls. This means `F` would in
+anything about the return type of `Deref.Deref` calls. This means `F` would in
 practice have to add a constraint, which is both verbose and exposes what should
 be implementation details:
 
@@ -5311,20 +5460,16 @@ To mark an impl as not able to be specialized, prefix it with the keyword
 class Ptr(T: type) {
   ...
   // Note: added `final`
-  final impl as Deref where .Result = T {
-    fn Op(self) -> Result { ... }
-  }
+  final impl as Deref fn (self) -> T { ... }
 }
 class Optional(T: type) {
   ...
   // Note: added `final`
-  final impl as Deref where .Result = T {
-    fn Op(self) -> Result { ... }
-  }
+  final impl as Deref fn (self) -> T { ... }
 }
 
-// ❌ Illegal: impl Ptr(i32) as Deref { ... }
-// ❌ Illegal: impl Optional(i32) as Deref { ... }
+// ❌ Illegal: impl Ptr(i32) as Deref fn (self) -> i32 { ... }
+// ❌ Illegal: impl Optional(i32) as Deref fn (self) -> i32 { ... }
 ```
 
 > **TODO:** Update the following passage to reflect the relaxed overlap rule
@@ -5683,6 +5828,48 @@ fn Class.(Self as Interface).F() {}
 // ✅︎ Rewritten to `Self as Interface`.
 fn Class.(as Interface).G() {}
 ```
+
+When an interface has a [primary function](#primary-interface-functions), its
+implementation can be defined out-of-line using either an abbreviated `impl`
+definition or a standalone `fn` definition:
+
+-   Using an out-of-line
+    [abbreviated `impl` definition](#abbreviated-interface-and-impl-declarations):
+
+    ```carbon
+    class MyType {
+      impl as AddWith(OtherType);
+    }
+
+    impl MyType.(as AddWith(OtherType))
+        fn (self, other: OtherType) -> MyType { ... }
+    ```
+
+-   Using a standalone `fn` definition on an `impl`, either naming
+    `.InterfaceName` explicitly or omitting `.InterfaceName` directly after the
+    parenthesized `impl` scope:
+
+    ```carbon
+    // Naming `.AddWith` explicitly:
+    fn (MyType as AddWith(OtherType)).AddWith(
+        self, other: OtherType) -> MyType { ... }
+    fn MyType.(as AddWith(OtherType)).AddWith(
+        self, other: OtherType) -> MyType { ... }
+
+    // Omitting `.AddWith` after the parenthesized `impl` scope:
+    fn (MyType as AddWith(OtherType))(
+        self, other: OtherType) -> MyType { ... }
+    fn MyType.(as AddWith(OtherType))(
+        self, other: OtherType) -> MyType { ... }
+    ```
+
+-   An out-of-line definition of an `interface`'s `default` primary function
+    must explicitly include `.InterfaceName` to separate the interface's
+    parameters from the function's parameters:
+
+    ```carbon
+    fn AddWith(U: type).AddWith(self, other: U) -> Result { ... }
+    ```
 
 > References:
 >
@@ -6468,12 +6655,13 @@ to overload the unary `-` operator:
 // Unary `-`.
 interface Negate {
   default let Result: type = Self;
-  fn Op(self) -> Result;
+  fn (self) -> Result;
 }
 ```
 
 Expressions using operators are rewritten into calls to these interface methods.
-For example, `-x` would be rewritten to `x.(Negate.Op)()`.
+For example, `-x` would be rewritten to `x.(Negate)()` (or
+`x.(Negate.Negate)()`).
 
 The interfaces and rewrites used for a given operator may be found in the
 [expressions design](/docs/design/expressions/README.md).
@@ -6507,7 +6695,7 @@ _type_ of the right-hand operand instead of its _value_. Consider
 // Binary `*`.
 interface MulWith(U: type) {
   default let Result: type = Self;
-  fn Op(self, other: U) -> Result;
+  fn (self, other: U) -> Result;
 }
 ```
 
@@ -6519,7 +6707,7 @@ var right: f64 = ...;
 var result: auto = left * right;
 // Equivalent to:
 var equivalent: left.(MulWith(f64).Result)
-    = left.(MulWith(f64).Op)(right);
+    = left.(MulWith(f64))(right);
 ```
 
 Note that if the types of the two operands are different, then swapping the
@@ -6608,10 +6796,8 @@ class Meters {
 }
 // "Implementation One"
 impl Meters as MulWith(f64)
-    where .Result = Meters {
-  fn Op(self, other: f64) -> Result {
-    return self.Scale(other);
-  }
+    fn (self, other: f64) -> Meters {
+  return self.Scale(other);
 }
 ```
 
@@ -6637,12 +6823,10 @@ conversion. The implementation is for types that implement the
 ```carbon
 // "Implementation Two"
 impl forall [T: ImplicitAs(f64)]
-    Meters as MulWith(T) where .Result = Meters {
-  fn Op(self, other: T) -> Result {
-    // Carbon will implicitly convert `other` from type
-    // `T` to `f64` to perform this call.
-    return self.((Meters as MulWith(f64)).Op)(other);
-  }
+    Meters as MulWith(T) fn (self, other: T) -> Meters {
+  // Carbon will implicitly convert `other` from type
+  // `T` to `f64` to perform this call.
+  return self.((Meters as MulWith(f64)))(other);
 }
 // ✅ Allowed: uses `Meters as MulWith(T)` impl
 //             with `T == f32` since `f32 impls ImplicitAs(f64)`.
@@ -6661,10 +6845,8 @@ a forward declaration or definition, in a place of a type.
 // Notice `f64` has been replaced by `like f64`
 // compared to "implementation one" above.
 impl Meters as MulWith(like f64)
-    where .Result = Meters {
-  fn Op(self, other: f64) -> Result {
-    return self.Scale(other);
-  }
+    fn (self, other: f64) -> Meters {
+  return self.Scale(other);
 }
 ```
 
@@ -6697,10 +6879,8 @@ In this example, there are two uses of `like`, producing three implementations
 
 ```carbon
 impl like Meters as MulWith(like f64)
-    where .Result = Meters {
-  fn Op(self, other: f64) -> Result {
-    return self.Scale(other);
-  }
+    fn (self, other: f64) -> Meters {
+  return self.Scale(other);
 }
 ```
 
@@ -6708,12 +6888,10 @@ is equivalent to "implementation one", "implementation two", and:
 
 ```carbon
 impl forall [T: ImplicitAs(Meters)]
-    T as MulWith(f64) where .Result = Meters {
-  fn Op(self, other: f64) -> Result {
-    // Will implicitly convert `self` to `Meters` in
-    // order to match the signature of this `Op` method.
-    return self.((Meters as MulWith(f64)).Op)(other);
-  }
+    T as MulWith(f64) fn (self, other: f64) -> Meters {
+  // Will implicitly convert `self` to `Meters` in
+  // order to match the signature of this `MulWith` method.
+  return self.((Meters as MulWith(f64)))(other);
 }
 ```
 
@@ -7172,3 +7350,4 @@ and
 -   [#7140: Orphan rule for scopes](https://github.com/carbon-language/carbon-lang/pull/7140)
 -   [Issue #7606: Should associated function names be callable?](https://github.com/carbon-language/carbon-lang/issues/7606)
 -   [#7697: Updates to member access](https://github.com/carbon-language/carbon-lang/pull/7697)
+-   [#7896: Abbreviated `interface` and `impl` syntax](https://github.com/carbon-language/carbon-lang/pull/7896)

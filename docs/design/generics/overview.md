@@ -21,6 +21,7 @@ pointers to other design documents that dive deeper into individual topics.
         -   [Contrast with templates](#contrast-with-templates)
     -   [Implementing interfaces](#implementing-interfaces)
         -   [Accessing members of interfaces](#accessing-members-of-interfaces)
+        -   [Primary interface functions and abbreviated syntax](#primary-interface-functions-and-abbreviated-syntax)
     -   [Facet types](#facet-types)
     -   [Generic functions](#generic-functions)
         -   [Deduced parameters](#deduced-parameters)
@@ -278,6 +279,39 @@ song.(Comparable.Less)(song);
 // access expression, using the compound member access
 // syntax with the qualified name `Printable.Print`:
 song.(Printable.Print)();
+```
+
+#### Primary interface functions and abbreviated syntax
+
+When an interface has a single "primary" function whose name would be the same
+as the interface's name, the function's name can be omitted in the `fn`
+declaration. The function implicitly takes the name of the enclosing `interface`
+for qualified member lookup, and the `{`...`}` braces around a single-function
+`interface` or `impl` can be omitted:
+
+```
+interface Print fn (self);
+
+class Song {
+  // ...
+
+  extend impl as Print fn (self) { ... }
+}
+
+var song: Song;
+song.Print();
+song.(Print)();
+```
+
+If an abbreviated `interface` function's return type is written as a
+parenthesized binding pattern `-> (Result: type)`, it declares an associated
+type on the interface, which is automatically deduced from the function
+signature in an abbreviated `impl`:
+
+```
+interface Negate fn (self) -> (Result: type);
+
+impl Song as Negate fn (self) -> Song { ... }
 ```
 
 ### Facet types
@@ -675,8 +709,8 @@ priority order in a prioritization block.
 
 To overload an operator, implement the corresponding interface from the standard
 library. For example, to define how the unary `-` operator behaves for a type,
-implement the `Negatable` interface for that type. The interfaces and rewrites
-used for a given operator may be found in the
+implement the `Negate` interface for that type. The interfaces and rewrites used
+for a given operator may be found in the
 [expressions design](/docs/design/expressions/README.md).
 
 As a convenience, there is a shortcut for defining an implementation that
@@ -686,7 +720,8 @@ supports any type implicitly convertible to a specified type, using `like`:
 // Support multiplying values of type `Distance` with
 // values of type `f64` or any type implicitly
 // convertible to `f64`.
-impl Distance as MultipliableWith(like f64) ...
+impl Distance as MulWith(like f64)
+    fn (self, factor: f64) -> Distance { ... }
 ```
 
 ## Future work

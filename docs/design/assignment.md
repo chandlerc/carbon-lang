@@ -173,126 +173,151 @@ provided for built-in types as necessary to give the semantics described above.
 
 ```
 // Simple `=`.
-interface AssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface AssignWith(U: type) fn (ref self, other: U);
+constraint Assign {
+  extend require impls AssignWith(Self);
+  alias = AssignWith(Self).AssignWith;
 }
-constraint Assign { extend AssignWith(Self); }
 ```
 
 Given `var x: T` and `y: U`:
 
--   The statement `x = y;` is rewritten to `x.(AssignWith(U).Op)(y);`.
+-   The statement `x = y;` is rewritten to `x.(AssignWith(U).AssignWith)(y);`
+    (or `x.(AssignWith(U))(y);`).
 
 ### Arithmetic
 
 ```
 // Compound `+=`.
-interface AddAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface AddAssignWith(U: type) fn (ref self, other: U);
+constraint AddAssign {
+  extend require impls AddAssignWith(Self);
+  alias = AddAssignWith(Self).AddAssignWith;
 }
-constraint AddAssign { extend AddAssignWith(Self); }
 ```
 
 ```
 // Compound `-=`.
-interface SubAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface SubAssignWith(U: type) fn (ref self, other: U);
+constraint SubAssign {
+  extend require impls SubAssignWith(Self);
+  alias = SubAssignWith(Self).SubAssignWith;
 }
-constraint SubAssign { extend SubAssignWith(Self); }
 ```
 
 ```
 // Compound `*=`.
-interface MulAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface MulAssignWith(U: type) fn (ref self, other: U);
+constraint MulAssign {
+  extend require impls MulAssignWith(Self);
+  alias = MulAssignWith(Self).MulAssignWith;
 }
-constraint MulAssign { extend MulAssignWith(Self); }
 ```
 
 ```
 // Compound `/=`.
-interface DivAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface DivAssignWith(U: type) fn (ref self, other: U);
+constraint DivAssign {
+  extend require impls DivAssignWith(Self);
+  alias = DivAssignWith(Self).DivAssignWith;
 }
-constraint DivAssign { extend DivAssignWith(Self); }
 ```
 
 ```
 // Compound `%=`.
-interface ModAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface ModAssignWith(U: type) fn (ref self, other: U);
+constraint ModAssign {
+  extend require impls ModAssignWith(Self);
+  alias = ModAssignWith(Self).ModAssignWith;
 }
-constraint ModAssign { extend ModAssignWith(Self); }
 ```
 
 ```
 // Increment `++`.
-interface Inc { fn Op(ref self); }
-// Decrement `++`.
-interface Dec { fn Op(ref self); }
+interface Inc fn (ref self);
+// Decrement `--`.
+interface Dec fn (ref self);
 ```
 
 Given `var x: T` and `y: U`:
 
--   The statement `x += y;` is rewritten to `x.(AddAssignWith(U).Op)(y);`.
--   The statement `x -= y;` is rewritten to `x.(SubAssignWith(U).Op)(y);`.
--   The statement `x *= y;` is rewritten to `x.(MulAssignWith(U).Op)(y);`.
--   The statement `x /= y;` is rewritten to `x.(DivAssignWith(U).Op)(y);`.
--   The statement `x %= y;` is rewritten to `x.(ModAssignWith(U).Op)(y);`.
--   The statement `++x;` is rewritten to `x.(Inc.Op)();`.
--   The statement `--x;` is rewritten to `x.(Dec.Op)();`.
+-   The statement `x += y;` is rewritten to
+    `x.(AddAssignWith(U).AddAssignWith)(y);` (or `x.(AddAssignWith(U))(y);`).
+-   The statement `x -= y;` is rewritten to
+    `x.(SubAssignWith(U).SubAssignWith)(y);` (or `x.(SubAssignWith(U))(y);`).
+-   The statement `x *= y;` is rewritten to
+    `x.(MulAssignWith(U).MulAssignWith)(y);` (or `x.(MulAssignWith(U))(y);`).
+-   The statement `x /= y;` is rewritten to
+    `x.(DivAssignWith(U).DivAssignWith)(y);` (or `x.(DivAssignWith(U))(y);`).
+-   The statement `x %= y;` is rewritten to
+    `x.(ModAssignWith(U).ModAssignWith)(y);` (or `x.(ModAssignWith(U))(y);`).
+-   The statement `++x;` is rewritten to `x.(Inc.Inc)();` (or `x.(Inc)();`).
+-   The statement `--x;` is rewritten to `x.(Dec.Dec)();` (or `x.(Dec)();`).
 
 ### Bitwise and bit-shift
 
 ```
 // Compound `&=`.
-interface BitAndAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface BitAndAssignWith(U: type) fn (ref self, other: U);
+constraint BitAndAssign {
+  extend require impls BitAndAssignWith(Self);
+  alias = BitAndAssignWith(Self).BitAndAssignWith;
 }
-constraint BitAndAssign { extend BitAndAssignWith(Self); }
 ```
 
 ```
 // Compound `|=`.
-interface BitOrAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface BitOrAssignWith(U: type) fn (ref self, other: U);
+constraint BitOrAssign {
+  extend require impls BitOrAssignWith(Self);
+  alias = BitOrAssignWith(Self).BitOrAssignWith;
 }
-constraint BitOrAssign { extend BitOrAssignWith(Self); }
 ```
 
 ```
 // Compound `^=`.
-interface BitXorAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface BitXorAssignWith(U: type) fn (ref self, other: U);
+constraint BitXorAssign {
+  extend require impls BitXorAssignWith(Self);
+  alias = BitXorAssignWith(Self).BitXorAssignWith;
 }
-constraint BitXorAssign { extend BitXorAssignWith(Self); }
 ```
 
 ```
 // Compound `<<=`.
-interface LeftShiftAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface LeftShiftAssignWith(U: type) fn (ref self, other: U);
+constraint LeftShiftAssign {
+  extend require impls LeftShiftAssignWith(Self);
+  alias = LeftShiftAssignWith(Self).LeftShiftAssignWith;
 }
-constraint LeftShiftAssign { extend LeftShiftAssignWith(Self); }
 ```
 
 ```
 // Compound `>>=`.
-interface RightShiftAssignWith(U: type) {
-  fn Op(ref self, other: U);
+interface RightShiftAssignWith(U: type) fn (ref self, other: U);
+constraint RightShiftAssign {
+  extend require impls RightShiftAssignWith(Self);
+  alias = RightShiftAssignWith(Self).RightShiftAssignWith;
 }
-constraint RightShiftAssign { extend RightShiftAssignWith(Self); }
 ```
 
 Given `var x: T` and `y: U`:
 
--   The statement `x &= y;` is rewritten to `x.(BitAndAssignWith(U).Op)(y);`.
--   The statement `x |= y;` is rewritten to `x.(BitOrAssignWith(U).Op)(y);`.
--   The statement `x ^= y;` is rewritten to `x.(BitXorAssignWith(U).Op)(y);`.
+-   The statement `x &= y;` is rewritten to
+    `x.(BitAndAssignWith(U).BitAndAssignWith)(y);` (or
+    `x.(BitAndAssignWith(U))(y);`).
+-   The statement `x |= y;` is rewritten to
+    `x.(BitOrAssignWith(U).BitOrAssignWith)(y);` (or
+    `x.(BitOrAssignWith(U))(y);`).
+-   The statement `x ^= y;` is rewritten to
+    `x.(BitXorAssignWith(U).BitXorAssignWith)(y);` (or
+    `x.(BitXorAssignWith(U))(y);`).
 -   The statement `x <<= y;` is rewritten to
-    `x.(LeftShiftAssignWith(U).Op)(y);`.
+    `x.(LeftShiftAssignWith(U).LeftShiftAssignWith)(y);` (or
+    `x.(LeftShiftAssignWith(U))(y);`).
 -   The statement `x >>= y;` is rewritten to
-    `x.(RightShiftAssignWith(U).Op)(y)`;.
+    `x.(RightShiftAssignWith(U).RightShiftAssignWith)(y);` (or
+    `x.(RightShiftAssignWith(U))(y);`).
 
 Implementations of these interfaces are provided for built-in types as necessary
 to give the semantics described above.
@@ -308,11 +333,9 @@ This defaulting is accomplished by a parameterized implementation of
 
 ```
 impl forall [U: type, T: OpWith(U) where .Self impls AssignWith(.Self.Result)]
-    T as OpAssignWith(U) {
-  fn Op(ref self, other: U) {
-    // Here, `$` is the operator described by `OpWith`.
-    *self = *self $ other;
-  }
+    T as OpAssignWith(U) fn (ref self, other: U) {
+  // Here, `$` is the operator described by `OpWith`.
+  *self = *self $ other;
 }
 ```
 
@@ -320,11 +343,13 @@ If a more efficient form of compound assignment is possible for a type, a more
 specific `impl` can be provided:
 
 ```
-impl like MyString as AddWith(like MyString) {
+impl like MyString as AddWith(like MyString)
+    fn (self, other: MyString) -> MyString {
   // Allocate new memory and perform addition.
 }
 
-impl MyString as AddAssignWith(like MyString) {
+impl MyString as AddAssignWith(like MyString)
+    fn (ref self, other: MyString) {
   // Reuse existing storage where possible.
 }
 ```
