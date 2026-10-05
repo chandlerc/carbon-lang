@@ -106,6 +106,16 @@ auto BuildSubcommand::Run(DriverEnv& driver_env) -> DriverResult {
   // compilation process.
   options_.link_options.codegen_options =
       options_.compile_options.codegen_options;
+  if (!options_.compile_options.clang_args.empty()) {
+    llvm::SmallVector<llvm::StringRef> combined_clang_args;
+    combined_clang_args.push_back("--start-no-unused-arguments");
+    combined_clang_args.append(options_.compile_options.clang_args.begin(),
+                               options_.compile_options.clang_args.end());
+    combined_clang_args.push_back("--end-no-unused-arguments");
+    combined_clang_args.append(options_.link_options.extra_clang_args.begin(),
+                               options_.link_options.extra_clang_args.end());
+    options_.link_options.extra_clang_args = std::move(combined_clang_args);
+  }
 
   llvm::SmallString<256> output_filename;
   if (options_.link_options.output_filename.empty()) {

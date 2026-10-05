@@ -26,6 +26,7 @@ cc_library(
         "clang_runtimes.h",
     ],
     deps = [
+        ":codegen_options",
         ":llvm_runner",
         ":runtimes_cache",
         ":tool_runner_base",
@@ -62,6 +63,7 @@ cc_test(
     data = ["//toolchain/install:install_data"],
     deps = [
         ":clang_runner",
+        ":codegen_options",
         ":llvm_runner",
         ":runtimes_cache",
         "//common:all_llvm_targets",
@@ -202,6 +204,7 @@ cc_library(
         "//toolchain/parse:tree",
         "//toolchain/sem_ir:typed_insts",
         "//toolchain/source:source_buffer",
+        "@llvm-project//clang:basic",
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:MC",
         "@llvm-project//llvm:Passes",
@@ -480,6 +483,7 @@ cc_test(
         "@googletest//:gtest",
         "@llvm-project//llvm:Object",
         "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:TargetParser",
     ],
 )
 

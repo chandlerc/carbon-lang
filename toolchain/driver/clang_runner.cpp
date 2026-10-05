@@ -17,6 +17,7 @@
 #include "clang/Basic/DiagnosticDriver.h"
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/TargetOptions.h"
 #include "clang/CodeGen/ObjectFilePCHContainerWriter.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
@@ -151,6 +152,31 @@ static auto IsNonLinkCommand(llvm::ArrayRef<llvm::StringRef> args) -> bool {
   });
 }
 
+auto ClangRunner::ComputeRuntimesFeatures(
+    llvm::StringRef target, llvm::ArrayRef<llvm::StringRef> target_args)
+    -> ErrorOr<Runtimes::Cache::Features> {
+  auto invocation =
+      BuildClangInvocation(fs_, *installation_, target, target_args);
+  if (!invocation) {
+    return Error(llvm::formatv("Unable to setup target `{0}`", target).str());
+  }
+
+  const auto& target_opts = invocation->getTargetOpts();
+  // When no explicit `-mtune=` is provided for a specific `-march=` / `-mcpu=`,
+  // Clang leaves `TuneCPU` empty because the backend defaults tuning to `CPU`.
+  // Canonicalize `tune_cpu` so that implicit and explicit matching tune CPUs
+  // share the same runtimes cache key.
+  std::string tune_cpu =
+      target_opts.TuneCPU.empty() ? target_opts.CPU : target_opts.TuneCPU;
+  return Runtimes::Cache::Features{
+      .target = target.str(),
+      .cpu = target_opts.CPU,
+      .tune_cpu = std::move(tune_cpu),
+      .target_features = llvm::SmallVector<std::string>(
+          target_opts.Features.begin(), target_opts.Features.end()),
+  };
+}
+
 auto ClangRunner::RunWithPrebuiltRuntimes(llvm::ArrayRef<llvm::StringRef> args,
                                           Runtimes& prebuilt_runtimes,
                                           bool enable_leaking)
@@ -198,8 +224,17 @@ auto ClangRunner::Run(llvm::ArrayRef<llvm::StringRef> args,
                        enable_leaking);
   }
 
-  Runtimes::Cache::Features features = {.target = target};
-  CARBON_ASSIGN_OR_RETURN(Runtimes runtimes, runtimes_cache.Lookup(features));
+  auto features = ComputeRuntimesFeatures(target, args);
+  if (!features.ok()) {
+    // If target setup failed (for example due to an invalid `--target` or
+    // `-march` flag), run the Clang driver without runtimes so it can diagnose
+    // the invalid arguments directly.
+    return RunInternal(args, target, /*target_resource_dir_path=*/std::nullopt,
+                       /*libunwind_path=*/std::nullopt,
+                       /*libcxx_path=*/std::nullopt, /*link_runtime_libs=*/true,
+                       enable_leaking);
+  }
+  CARBON_ASSIGN_OR_RETURN(Runtimes runtimes, runtimes_cache.Lookup(*features));
 
   // We need to build the Clang resource directory for these runtimes. This
   // requires a temporary directory as well as the destination directory for
@@ -207,13 +242,14 @@ auto ClangRunner::Run(llvm::ArrayRef<llvm::StringRef> args,
   // not once we are running Clang with the built runtime.
   CARBON_VLOG("Building target resource dir...\n");
   ClangResourceDirBuilder builder(this, &runtimes_build_thread_pool,
-                                  llvm::Triple(features.target), &runtimes);
+                                  llvm::Triple(features->target), &runtimes,
+                                  *features);
   ClangArchiveRuntimesBuilder<Runtimes::LibUnwind> lib_unwind_builder(
-      this, &runtimes_build_thread_pool, llvm::Triple(features.target),
-      &runtimes);
+      this, &runtimes_build_thread_pool, llvm::Triple(features->target),
+      &runtimes, *features);
   ClangArchiveRuntimesBuilder<Runtimes::Libcxx> libcxx_builder(
-      this, &runtimes_build_thread_pool, llvm::Triple(features.target),
-      &runtimes);
+      this, &runtimes_build_thread_pool, llvm::Triple(features->target),
+      &runtimes, *features);
   CARBON_ASSIGN_OR_RETURN(std::filesystem::path resource_dir_path,
                           std::move(builder).Wait());
   CARBON_ASSIGN_OR_RETURN(std::filesystem::path libunwind_path,

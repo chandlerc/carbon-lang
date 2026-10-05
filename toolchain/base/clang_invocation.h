@@ -46,6 +46,14 @@ auto BuildClangInvocation(Diagnostics::Consumer& consumer,
                           llvm::ArrayRef<llvm::StringRef> extra_args = {})
     -> std::unique_ptr<clang::CompilerInvocation>;
 
+// Non-diagnosing overload of `BuildClangInvocation` that ignores any Clang
+// driver diagnostics and returns `nullptr` if an invocation cannot be built.
+auto BuildClangInvocation(llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs,
+                          const InstallPaths& install_paths,
+                          llvm::StringRef target_str,
+                          llvm::ArrayRef<llvm::StringRef> extra_args = {})
+    -> std::unique_ptr<clang::CompilerInvocation>;
+
 // Appends the default Clang command line arguments used when building a
 // Carbon-compatible Clang invocation.
 //

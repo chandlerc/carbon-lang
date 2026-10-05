@@ -104,6 +104,13 @@ class ClangRunner : ToolRunnerBase {
   auto RunWithNoRuntimes(llvm::ArrayRef<llvm::StringRef> args,
                          bool enable_leaking = false) -> ErrorOr<bool>;
 
+  // Computes the canonicalized `Runtimes::Cache::Features` for `target` and
+  // any target-related Clang driver arguments (`-march=...`, `-mcpu=...`,
+  // `-mtune=...`).
+  auto ComputeRuntimesFeatures(llvm::StringRef target,
+                               llvm::ArrayRef<llvm::StringRef> target_args = {})
+      -> ErrorOr<Runtimes::Cache::Features>;
+
  private:
   friend class ClangRuntimesBuilderBase;
 

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <string>
 
+#include "clang/Basic/TargetInfo.h"
 #include "clang/Driver/CreateInvocationFromArgs.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/Utils.h"
@@ -50,17 +51,12 @@ auto ClangDriverDiagnosticConsumer::HandleDiagnostic(
   }
 }
 
-auto BuildClangInvocation(Diagnostics::Consumer& consumer,
-                          llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs,
-                          const InstallPaths& install_paths,
-                          llvm::StringRef target_str,
-                          llvm::ArrayRef<llvm::StringRef> extra_args)
+static auto BuildClangInvocationImpl(
+    clang::DiagnosticConsumer& diagnostics_consumer, bool allow_extra_inputs,
+    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs,
+    const InstallPaths& install_paths, llvm::StringRef target_str,
+    llvm::ArrayRef<llvm::StringRef> extra_args)
     -> std::unique_ptr<clang::CompilerInvocation> {
-  Diagnostics::ErrorTrackingConsumer error_tracker(consumer);
-  Diagnostics::NoLocEmitter emitter(&error_tracker);
-
-  ClangDriverDiagnosticConsumer diagnostics_consumer(&emitter);
-
   llvm::SmallVector<std::string> args;
   args.push_back("--start-no-unused-arguments");
   AppendDefaultClangArgs(install_paths, target_str, args);
@@ -91,25 +87,58 @@ auto BuildClangInvocation(Diagnostics::Consumer& consumer,
 
   // Ask the driver to process the arguments and build a corresponding clang
   // frontend invocation.
-  auto invocation =
-      clang::createInvocation(cstr_args, {.Diags = driver_diags, .VFS = fs});
+  auto invocation = clang::createInvocation(
+      cstr_args,
+      {.Diags = driver_diags, .VFS = fs, .RecoverOnError = allow_extra_inputs});
 
   // If Clang produced an error, throw away its invocation.
-  if (error_tracker.seen_error()) {
+  if (!invocation || driver_diags->hasErrorOccurred()) {
     return nullptr;
   }
 
-  if (invocation) {
-    // Track submodule visibility in the preprocessor and Sema.
-    invocation->getLangOpts().Modules = true;
-    invocation->getLangOpts().ModulesLocalVisibility = true;
-
-    // Do not emit Clang's name and version as the creator of the output file.
-    invocation->getCodeGenOpts().EmitVersionIdentMetadata = false;
-    invocation->getCodeGenOpts().DiscardValueNames = false;
+  // Validate the target options (such as `-march` / `-mcpu`) and compute the
+  // canonicalized target feature list in `invocation->getTargetOpts()`.
+  llvm::IntrusiveRefCntPtr<clang::TargetInfo> target_info(
+      clang::TargetInfo::CreateTargetInfo(*driver_diags,
+                                          invocation->getTargetOpts()));
+  if (!target_info || driver_diags->hasErrorOccurred()) {
+    return nullptr;
   }
 
+  // Track submodule visibility in the preprocessor and Sema.
+  invocation->getLangOpts().Modules = true;
+  invocation->getLangOpts().ModulesLocalVisibility = true;
+
+  // Do not emit Clang's name and version as the creator of the output file.
+  invocation->getCodeGenOpts().EmitVersionIdentMetadata = false;
+  invocation->getCodeGenOpts().DiscardValueNames = false;
+
   return invocation;
+}
+
+auto BuildClangInvocation(Diagnostics::Consumer& consumer,
+                          llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs,
+                          const InstallPaths& install_paths,
+                          llvm::StringRef target_str,
+                          llvm::ArrayRef<llvm::StringRef> extra_args)
+    -> std::unique_ptr<clang::CompilerInvocation> {
+  Diagnostics::ErrorTrackingConsumer error_tracker(consumer);
+  Diagnostics::NoLocEmitter emitter(&error_tracker);
+  ClangDriverDiagnosticConsumer diagnostics_consumer(&emitter);
+  return BuildClangInvocationImpl(diagnostics_consumer,
+                                  /*allow_extra_inputs=*/false, std::move(fs),
+                                  install_paths, target_str, extra_args);
+}
+
+auto BuildClangInvocation(llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs,
+                          const InstallPaths& install_paths,
+                          llvm::StringRef target_str,
+                          llvm::ArrayRef<llvm::StringRef> extra_args)
+    -> std::unique_ptr<clang::CompilerInvocation> {
+  clang::IgnoringDiagConsumer diagnostics_consumer;
+  return BuildClangInvocationImpl(diagnostics_consumer,
+                                  /*allow_extra_inputs=*/true, std::move(fs),
+                                  install_paths, target_str, extra_args);
 }
 
 auto AppendDefaultClangArgs(const InstallPaths& install_paths,
