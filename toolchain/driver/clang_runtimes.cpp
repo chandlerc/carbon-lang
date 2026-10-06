@@ -25,10 +25,15 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ArchiveWriter.h"
+#include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatAdapters.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -122,6 +127,181 @@ auto ClangRuntimesBuilderBase::ArchiveBuilder::Finish() -> ErrorOr<Success> {
   }
   // Close and return any errors, potentially from the writes above.
   CARBON_RETURN_IF_ERROR(std::move(archive_file).Close());
+
+  if (generate_syms_) {
+    CARBON_RETURN_IF_ERROR(WriteSymsFile(unwrapped_objs));
+  }
+  return Success();
+}
+
+auto ClangRuntimesBuilderBase::ArchiveBuilder::WriteSymsFile(
+    llvm::ArrayRef<llvm::NewArchiveMember> members) -> ErrorOr<Success> {
+  static constexpr llvm::StringLiteral NewDeleteSymbols[] = {
+      "_Znam",
+      "_ZnamRKSt9nothrow_t",
+      "_Znwm",
+      "_ZnwmRKSt9nothrow_t",
+      "_Znaj",
+      "_ZnajRKSt9nothrow_t",
+      "_Znwj",
+      "_ZnwjRKSt9nothrow_t",
+      "_ZnwmSt11align_val_t",
+      "_ZnwmSt11align_val_tRKSt9nothrow_t",
+      "_ZnwjSt11align_val_t",
+      "_ZnwjSt11align_val_tRKSt9nothrow_t",
+      "_ZnamSt11align_val_t",
+      "_ZnamSt11align_val_tRKSt9nothrow_t",
+      "_ZnajSt11align_val_t",
+      "_ZnajSt11align_val_tRKSt9nothrow_t",
+      "_ZdaPv",
+      "_ZdaPvRKSt9nothrow_t",
+      "_ZdlPv",
+      "_ZdlPvRKSt9nothrow_t",
+      "_ZdaPvm",
+      "_ZdlPvm",
+      "_ZdaPvj",
+      "_ZdlPvj",
+      "_ZdlPvSt11align_val_t",
+      "_ZdlPvSt11align_val_tRKSt9nothrow_t",
+      "_ZdaPvSt11align_val_t",
+      "_ZdaPvSt11align_val_tRKSt9nothrow_t",
+      "_ZdlPvmSt11align_val_t",
+      "_ZdaPvmSt11align_val_t",
+      "_ZdlPvjSt11align_val_t",
+      "_ZdaPvjSt11align_val_t",
+  };
+  static constexpr llvm::StringLiteral VersionedFunctions[] = {
+      "memcpy",
+      "pthread_attr_getaffinity_np",
+      "pthread_cond_broadcast",
+      "pthread_cond_destroy",
+      "pthread_cond_init",
+      "pthread_cond_signal",
+      "pthread_cond_timedwait",
+      "pthread_cond_wait",
+      "realpath",
+      "sched_getaffinity",
+  };
+
+  llvm::StringSet<> function_set;
+  for (const llvm::NewArchiveMember& member : members) {
+    auto obj_or_err = llvm::object::ObjectFile::createObjectFile(
+        member.Buf->getMemBufferRef());
+    if (!obj_or_err) {
+      return Error(llvm::toString(obj_or_err.takeError()));
+    }
+    const auto* elf_obj =
+        llvm::dyn_cast<llvm::object::ELFObjectFileBase>(obj_or_err->get());
+    if (!elf_obj) {
+      continue;
+    }
+
+    for (llvm::object::ELFSymbolRef sym : elf_obj->symbols()) {
+      auto flags_or_err = sym.getFlags();
+      if (!flags_or_err) {
+        return Error(llvm::toString(flags_or_err.takeError()));
+      }
+      uint32_t flags = *flags_or_err;
+      if (!(flags & llvm::object::BasicSymbolRef::SF_Global) ||
+          (flags & (llvm::object::BasicSymbolRef::SF_Undefined |
+                    llvm::object::BasicSymbolRef::SF_Common |
+                    llvm::object::BasicSymbolRef::SF_Absolute))) {
+        continue;
+      }
+      if (sym.getELFType() == llvm::ELF::STT_GNU_IFUNC) {
+        continue;
+      }
+
+      bool is_func_sym = false;
+      if (flags & llvm::object::BasicSymbolRef::SF_Weak) {
+        // Matches `llvm-nm` type 'W' (weak symbol other than STT_OBJECT).
+        is_func_sym = sym.getELFType() != llvm::ELF::STT_OBJECT;
+      } else if (sym.getBinding() == llvm::ELF::STB_GLOBAL) {
+        auto sec_or_err = sym.getSection();
+        if (!sec_or_err) {
+          return Error(llvm::toString(sec_or_err.takeError()));
+        }
+        if (*sec_or_err != elf_obj->section_end()) {
+          llvm::object::ELFSectionRef elf_sec(**sec_or_err);
+          uint64_t sec_flags = elf_sec.getFlags();
+          // Matches `llvm-nm` type 'T' (or 'D' on PowerPC).
+          if (sec_flags & llvm::ELF::SHF_EXECINSTR) {
+            is_func_sym = true;
+          } else if (builder_->target_triple_.isPPC() &&
+                     (sec_flags & llvm::ELF::SHF_ALLOC) &&
+                     (sec_flags & llvm::ELF::SHF_WRITE)) {
+            is_func_sym = true;
+          }
+        }
+      }
+      if (!is_func_sym) {
+        continue;
+      }
+
+      auto name_or_err = sym.getName();
+      if (!name_or_err) {
+        return Error(llvm::toString(name_or_err.takeError()));
+      }
+      if (!name_or_err->empty()) {
+        function_set.insert(*name_or_err);
+      }
+    }
+  }
+
+  llvm::StringSet<> exported;
+  for (const auto& entry : function_set) {
+    llvm::StringRef func = entry.getKey();
+    if (llvm::is_contained(NewDeleteSymbols, func)) {
+      exported.insert(func);
+      continue;
+    }
+    llvm::StringRef interceptor_rest = func;
+    if (interceptor_rest.consume_front("___interceptor_") ||
+        interceptor_rest.consume_front("__interceptor_")) {
+      exported.insert(func);
+      if (function_set.contains(interceptor_rest) &&
+          !llvm::is_contained(VersionedFunctions, interceptor_rest)) {
+        exported.insert(interceptor_rest);
+      }
+      continue;
+    }
+    if (func.starts_with("__sanitizer_")) {
+      exported.insert(func);
+    }
+  }
+
+  if (syms_extra_path_) {
+    CARBON_ASSIGN_OR_RETURN(
+        std::string extra_content,
+        Filesystem::Cwd().ReadFileToString(*syms_extra_path_));
+    llvm::SmallVector<llvm::StringRef> lines;
+    llvm::StringRef(extra_content).split(lines, '\n');
+    for (llvm::StringRef line : lines) {
+      line = line.rtrim();
+      if (!line.empty()) {
+        exported.insert(line);
+      }
+    }
+  }
+
+  llvm::SmallVector<llvm::StringRef> sorted_syms(exported.keys());
+  llvm::sort(sorted_syms);
+
+  std::filesystem::path syms_path = archive_path_;
+  syms_path += ".syms";
+  Filesystem::DirRef runtimes_dir = builder_->runtimes_builder_->dir();
+  CARBON_ASSIGN_OR_RETURN(
+      Filesystem::WriteFile syms_file,
+      runtimes_dir.OpenWriteOnly(syms_path, Filesystem::CreateAlways));
+  {
+    llvm::raw_fd_ostream syms_os = syms_file.WriteStream();
+    syms_os << "{\n";
+    for (llvm::StringRef sym : sorted_syms) {
+      syms_os << "  " << sym << ";\n";
+    }
+    syms_os << "};\n";
+  }
+  CARBON_RETURN_IF_ERROR(std::move(syms_file).Close());
   return Success();
 }
 
@@ -165,11 +345,12 @@ auto ClangRuntimesBuilderBase::ArchiveBuilder::CreateObjDir(
 auto ClangRuntimesBuilderBase::ArchiveBuilder::CompileMember(
     llvm::StringRef src_file) -> ErrorOr<llvm::NewArchiveMember> {
   // Create any obj subdirectories needed for this file.
-  CARBON_RETURN_IF_ERROR(CreateObjDir(src_file.str()));
+  std::filesystem::path rel_obj_path = objs_dir_ / std::string_view(src_file);
+  rel_obj_path += ".o";
+  CARBON_RETURN_IF_ERROR(CreateObjDir(rel_obj_path));
   std::filesystem::path src_path = srcs_root_ / std::string_view(src_file);
   std::filesystem::path obj_path =
-      builder_->runtimes_builder_->path() / std::string_view(src_file);
-  obj_path += ".o";
+      builder_->runtimes_builder_->path() / rel_obj_path;
   CARBON_VLOG("Building `{0}' from `{1}`...\n", obj_path, src_file);
 
   llvm::SmallVector<llvm::StringRef> args(cflags_);
@@ -350,6 +531,9 @@ auto ClangArchiveRuntimesBuilder<Component>::CollectCflags()
   for (const auto& include_path : include_paths_) {
     cflags.append({"-I", include_path.native()});
   }
+  if (asan_) {
+    cflags.push_back("-fsanitize=address");
+  }
   return cflags;
 }
 
@@ -451,6 +635,7 @@ ClangResourceDirBuilder::ClangResourceDirBuilder(
   llvm::SmallVector<llvm::StringRef> copts = {
       "-no-canonical-prefixes",
       "-w",
+      "-fno-sanitize=all",
   };
   llvm::append_range(copts, RuntimesBuildInfo::BuiltinsCopts);
   for (const auto& include_path : include_paths_) {
@@ -458,6 +643,61 @@ ClangResourceDirBuilder::ClangResourceDirBuilder(
   }
   archive_.emplace(this, lib_path_ / builtins_name, installation().root(),
                    CollectBuiltinsSrcFiles(), copts);
+
+  if (asan_) {
+    asan_include_path_ = installation().runtimes_root() / "compiler-rt/lib";
+
+    auto make_asan_copts = [&](llvm::ArrayRef<llvm::StringLiteral> base_copts) {
+      llvm::SmallVector<llvm::StringRef> asan_copts = {
+          "-no-canonical-prefixes",
+          "-w",
+          "-fno-sanitize=all",
+      };
+      llvm::append_range(asan_copts, base_copts);
+      if (target_triple_.isOSDarwin()) {
+        llvm::append_range(asan_copts, RuntimesBuildInfo::AsanDarwinCopts);
+      }
+      asan_copts.append({"-I", asan_include_path_.native()});
+      return asan_copts;
+    };
+
+    if (target_triple_.isOSDarwin()) {
+      llvm::SmallVector<llvm::StringRef> asan_cxx_srcs;
+      llvm::append_range(asan_cxx_srcs, RuntimesBuildInfo::AsanCxxSrcs);
+      llvm::append_range(asan_cxx_srcs, RuntimesBuildInfo::UbsanCxxSrcs);
+
+      asan_archive_.emplace(
+          this, lib_path_ / "libclang_rt.asan.a", installation().root(),
+          llvm::to_vector_of<llvm::StringRef>(RuntimesBuildInfo::AsanSrcs),
+          make_asan_copts(RuntimesBuildInfo::AsanCopts));
+      asan_cxx_archive_.emplace(
+          this, lib_path_ / "libclang_rt.asan_cxx.a", installation().root(),
+          std::move(asan_cxx_srcs),
+          make_asan_copts(RuntimesBuildInfo::AsanCxxCopts));
+    } else {
+      llvm::SmallVector<llvm::StringRef> asan_srcs;
+      llvm::append_range(asan_srcs, RuntimesBuildInfo::AsanPreinitSrcs);
+      llvm::append_range(asan_srcs, RuntimesBuildInfo::AsanSrcs);
+
+      asan_archive_.emplace(
+          this, lib_path_ / "libclang_rt.asan.a", installation().root(),
+          std::move(asan_srcs), make_asan_copts(RuntimesBuildInfo::AsanCopts),
+          /*generate_syms=*/true,
+          installation().root() /
+              std::string_view(RuntimesBuildInfo::AsanSymsExtra));
+      asan_cxx_archive_.emplace(
+          this, lib_path_ / "libclang_rt.asan_cxx.a", installation().root(),
+          llvm::to_vector_of<llvm::StringRef>(RuntimesBuildInfo::AsanCxxSrcs),
+          make_asan_copts(RuntimesBuildInfo::AsanCxxCopts),
+          /*generate_syms=*/true);
+      asan_static_archive_.emplace(
+          this, lib_path_ / "libclang_rt.asan_static.a", installation().root(),
+          llvm::to_vector_of<llvm::StringRef>(
+              RuntimesBuildInfo::AsanStaticSrcs),
+          make_asan_copts(RuntimesBuildInfo::AsanCopts));
+    }
+  }
+
   tasks_.async([this]() { Setup(); });
 }
 
@@ -494,11 +734,13 @@ auto ClangResourceDirBuilder::Setup() -> void {
   // Symlink the installation's `include` and `share` directories.
   std::filesystem::path install_resource_path =
       installation().clang_resource_path();
-  if (auto result = runtimes_builder_->dir().Symlink(
-          "include", install_resource_path / "include");
-      !result.ok()) {
-    result_ = std::move(result).error();
-    return;
+  for (const char* dir_name : {"include", "share"}) {
+    if (auto result = runtimes_builder_->dir().Symlink(
+            dir_name, install_resource_path / dir_name);
+        !result.ok()) {
+      result_ = std::move(result).error();
+      return;
+    }
   }
 
   // Create the target's `lib` directory.
@@ -523,14 +765,24 @@ auto ClangResourceDirBuilder::Setup() -> void {
     });
   }
 
+  if (asan_archive_) {
+    asan_archive_->Setup(latch_handle);
+    asan_cxx_archive_->Setup(latch_handle);
+    if (asan_static_archive_) {
+      asan_static_archive_->Setup(latch_handle);
+    }
+  }
   archive_->Setup(std::move(latch_handle));
 }
 
 auto ClangResourceDirBuilder::Finish() -> void {
   CARBON_VLOG("Finished building resource dir...\n");
-  if (!archive_->result().ok()) {
-    result_ = std::move(archive_->result()).error();
-    return;
+  for (std::optional<ArchiveBuilder>* archive :
+       {&archive_, &asan_archive_, &asan_cxx_archive_, &asan_static_archive_}) {
+    if (*archive && !(*archive)->result().ok()) {
+      result_ = std::move((*archive)->result()).error();
+      return;
+    }
   }
   if (target_triple_.isOSLinux()) {
     for (ErrorOr<Success>* result : {&crt_begin_result_, &crt_end_result_}) {
@@ -538,6 +790,12 @@ auto ClangResourceDirBuilder::Finish() -> void {
         result_ = std::move(*result).error();
         return;
       }
+    }
+  }
+  if (asan_ && target_triple_.isOSDarwin()) {
+    if (auto result = BuildDarwinAsanDylib(); !result.ok()) {
+      result_ = std::move(result).error();
+      return;
     }
   }
 
@@ -559,6 +817,7 @@ auto ClangResourceDirBuilder::BuildCrtFile(llvm::StringRef src_file)
   llvm::SmallVector<llvm::StringRef> copts = {
       "-no-canonical-prefixes",
       "-w",
+      "-fno-sanitize=all",
       target_flag_,
   };
   for (const std::string& target_arg : target_args_) {
@@ -578,6 +837,60 @@ auto ClangResourceDirBuilder::BuildCrtFile(llvm::StringRef src_file)
     return Success();
   }
   return Error(llvm::formatv("Failed to compile CRT file: {0}", src_file));
+}
+
+auto ClangResourceDirBuilder::BuildDarwinAsanDylib() -> ErrorOr<Success> {
+  llvm::StringRef os_suffix = GetDarwinOsSuffix(target_triple_);
+  std::string dylib_name =
+      llvm::formatv("libclang_rt.asan_{0}_dynamic.dylib", os_suffix).str();
+  std::filesystem::path lib_dir_path = runtimes_builder_->path() / lib_path_;
+  std::filesystem::path dylib_path = lib_dir_path / dylib_name;
+  std::filesystem::path asan_archive_path = lib_dir_path / "libclang_rt.asan.a";
+  std::filesystem::path asan_cxx_archive_path =
+      lib_dir_path / "libclang_rt.asan_cxx.a";
+  std::filesystem::path builtins_archive_path =
+      lib_dir_path / llvm::formatv("libclang_rt.{0}.a", os_suffix).str();
+  CARBON_VLOG("Linking `{0}'...\n", dylib_path);
+
+  std::string install_name_arg =
+      llvm::formatv("-Wl,-install_name,@rpath/{0}", dylib_name).str();
+  std::string force_load_asan_arg =
+      llvm::formatv("-Wl,-force_load,{0}", asan_archive_path.native()).str();
+  std::string force_load_asan_cxx_arg =
+      llvm::formatv("-Wl,-force_load,{0}", asan_cxx_archive_path.native())
+          .str();
+
+  llvm::SmallVector<llvm::StringRef> link_args = {
+      "-no-canonical-prefixes",
+      "-w",
+      "-shared",
+      "-fno-sanitize=all",
+      target_flag_,
+      install_name_arg,
+      force_load_asan_arg,
+      force_load_asan_cxx_arg,
+      builtins_archive_path.native(),
+  };
+  for (const std::string& target_arg : target_args_) {
+    link_args.push_back(target_arg);
+  }
+  llvm::append_range(link_args, RuntimesBuildInfo::AsanDarwinLinkopts);
+  link_args.append({
+      "-o",
+      dylib_path.native(),
+  });
+
+  CARBON_ASSIGN_OR_RETURN(bool success, clang_->RunWithNoRuntimes(link_args));
+  if (!success) {
+    return Error(
+        llvm::formatv("Failed to link Darwin ASan dylib: {0}", dylib_name));
+  }
+
+  for (const char* archive_name :
+       {"libclang_rt.asan.a", "libclang_rt.asan_cxx.a"}) {
+    CARBON_RETURN_IF_ERROR(lib_dir_.Unlink(archive_name));
+  }
+  return Success();
 }
 
 }  // namespace Carbon

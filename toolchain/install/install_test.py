@@ -30,6 +30,10 @@ class InstallTest(unittest.TestCase):
         self.prebuilt_runtimes = self.runfiles.Rlocation(
             "carbon/toolchain/install/carbon_stage1_runtimes_build"
         )
+        libcxx_a = Path(self.prebuilt_runtimes) / "libcxx/lib/libc++.a"
+        self.prebuilt_is_asan = (
+            b"__asan_version_mismatch_check" in libcxx_a.read_bytes()
+        )
 
     def get_link_cmd(self, clang: Path) -> list[str | Path]:
         return [
@@ -134,14 +138,17 @@ class InstallTest(unittest.TestCase):
 
         try:
             obj_file = self.tmpdir / f"{name}.o"
+            compile_cmd = [
+                carbon,
+                "compile",
+                "--no-include-carbon-core",
+                f"--output={obj_file}",
+            ]
+            if self.prebuilt_is_asan:
+                compile_cmd.append("--clang-arg=-fsanitize=address")
+            compile_cmd.append(src_file)
             subprocess.run(
-                [
-                    carbon,
-                    "compile",
-                    "--no-include-carbon-core",
-                    f"--output={obj_file}",
-                    src_file,
-                ],
+                compile_cmd,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -151,6 +158,8 @@ class InstallTest(unittest.TestCase):
             if use_prebuilt:
                 link_cmd.append(f"--prebuilt-runtimes={self.prebuilt_runtimes}")
             link_cmd.extend(["link", f"--output={output_bin}", obj_file])
+            if self.prebuilt_is_asan:
+                link_cmd.extend(["--", "-fsanitize=address"])
             subprocess.run(link_cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as err:
             self.fail(f"Subprocess failed: {err.stderr}")
@@ -177,6 +186,8 @@ class InstallTest(unittest.TestCase):
                 cmd.append(
                     f"-Xcarbon=--prebuilt-runtimes={self.prebuilt_runtimes}"
                 )
+            if self.prebuilt_is_asan:
+                cmd.append("-fsanitize=address")
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as err:
             self.fail(f"Subprocess failed: {err.stderr}")

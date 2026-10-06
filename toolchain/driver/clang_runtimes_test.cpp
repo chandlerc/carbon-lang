@@ -106,6 +106,22 @@ class ClangRuntimesTest : public ::testing::Test {
     return out;
   }
 
+  // Helper to get the `llvm-nm` listing of undefined symbols for an archive.
+  auto NmListUndefinedSymbols(const std::filesystem::path& archive)
+      -> std::string {
+    LLVMRunner llvm_runner(&install_paths_, &llvm::errs());
+    std::string out;
+    std::string err;
+    bool result = Testing::CallWithCapturedOutput(out, err, [&] {
+      return llvm_runner.Run(
+          LLVMTool::Nm, {"--format=just-symbols", "--undefined-only", "--quiet",
+                         archive.native()});
+    });
+    CARBON_CHECK(result, "Unable to run `llvm-nm`:\n{0}", err);
+
+    return out;
+  }
+
   // Helper to expect a specific symbol in the `llvm-nm` list.
   //
   // This handles platform-specific formatting of symbols.
@@ -139,7 +155,8 @@ class ClangRuntimesTest : public ::testing::Test {
     return result;
   }
 
-  auto TestResourceDir(std::filesystem::path resource_dir_path) -> void {
+  auto TestResourceDir(std::filesystem::path resource_dir_path,
+                       bool asan = false) -> void {
     // For Linux we can directly check the CRT begin/end object files.
     if (target_triple_.isOSLinux()) {
       std::filesystem::path crt_begin_path =
@@ -200,6 +217,10 @@ class ClangRuntimesTest : public ::testing::Test {
     // provided by Compiler-RT.
     ExpectSymbol(builtins_symbols, "__mulodi4");
 
+    // Compiler-RT builtins should never be instrumented with ASan.
+    EXPECT_THAT(NmListUndefinedSymbols(builtins_path),
+                Not(HasSubstr("__asan_version_mismatch_check")));
+
     // Check that we don't include the `chkstk` builtins outside of Windows.
     if (!target_triple_.isOSWindows()) {
       EXPECT_THAT(builtins_symbols, Not(HasSubstr("chkstk")));
@@ -209,9 +230,112 @@ class ClangRuntimesTest : public ::testing::Test {
     // canonical format produced by `ar`.
     auto member_names = ListArchiveMemberNames(builtins_path);
     EXPECT_THAT(member_names, Each(IsBasename()));
+
+    EXPECT_TRUE(std::filesystem::is_regular_file(resource_dir_path /
+                                                 "share/asan_ignorelist.txt"));
+
+    if (target_triple_.isOSDarwin()) {
+      std::filesystem::path asan_dylib_path =
+          resource_dir_path / lib_path /
+          llvm::formatv("libclang_rt.asan_{0}_dynamic.dylib",
+                        ClangResourceDirBuilderTestPeer::GetDarwinOsSuffix(
+                            target_triple_))
+              .str();
+      if (asan) {
+        ASSERT_TRUE(std::filesystem::is_regular_file(asan_dylib_path));
+
+        std::string asan_symbols = NmListDefinedSymbols(asan_dylib_path);
+        ExpectSymbol(asan_symbols, "__asan_init");
+        ExpectSymbol(asan_symbols, "__asan_report_load1");
+        ExpectSymbol(asan_symbols, "__ubsan_handle_type_mismatch_v1");
+        ExpectSymbol(asan_symbols, "__ubsan_handle_dynamic_type_cache_miss");
+        ExpectSymbol(asan_symbols, "wrap__Znwm");
+        ExpectSymbol(asan_symbols, "wrap__ZdlPv");
+
+        // Sanitizer runtimes themselves must never be instrumented with ASan.
+        EXPECT_THAT(NmListUndefinedSymbols(asan_dylib_path),
+                    Not(HasSubstr("__asan_version_mismatch_check")));
+
+        // Temporary static archives must not be left in the Darwin resource
+        // directory.
+        EXPECT_FALSE(std::filesystem::exists(resource_dir_path / lib_path /
+                                             "libclang_rt.asan.a"));
+        EXPECT_FALSE(std::filesystem::exists(resource_dir_path / lib_path /
+                                             "libclang_rt.asan_cxx.a"));
+      } else {
+        EXPECT_FALSE(std::filesystem::exists(asan_dylib_path));
+      }
+    } else {
+      std::filesystem::path asan_path =
+          resource_dir_path / lib_path / "libclang_rt.asan.a";
+      std::filesystem::path asan_syms_path =
+          resource_dir_path / lib_path / "libclang_rt.asan.a.syms";
+      std::filesystem::path asan_cxx_path =
+          resource_dir_path / lib_path / "libclang_rt.asan_cxx.a";
+      std::filesystem::path asan_cxx_syms_path =
+          resource_dir_path / lib_path / "libclang_rt.asan_cxx.a.syms";
+      std::filesystem::path asan_static_path =
+          resource_dir_path / lib_path / "libclang_rt.asan_static.a";
+
+      if (asan) {
+        ASSERT_TRUE(std::filesystem::is_regular_file(asan_path));
+        ASSERT_TRUE(std::filesystem::is_regular_file(asan_syms_path));
+        ASSERT_TRUE(std::filesystem::is_regular_file(asan_cxx_path));
+        ASSERT_TRUE(std::filesystem::is_regular_file(asan_cxx_syms_path));
+        ASSERT_TRUE(std::filesystem::is_regular_file(asan_static_path));
+
+        std::string asan_symbols = NmListDefinedSymbols(asan_path);
+        ExpectSymbol(asan_symbols, "__asan_init");
+        ExpectSymbol(asan_symbols, "__asan_report_load1");
+        ExpectSymbol(asan_symbols, "__ubsan_handle_type_mismatch_v1");
+
+        auto asan_syms_content =
+            Filesystem::Cwd().ReadFileToString(asan_syms_path);
+        ASSERT_TRUE(asan_syms_content.ok()) << asan_syms_content.error();
+        EXPECT_THAT(*asan_syms_content, HasSubstr("\n  __asan_*;\n"));
+        EXPECT_THAT(*asan_syms_content,
+                    HasSubstr("\n  __interceptor_malloc;\n"));
+        EXPECT_THAT(*asan_syms_content, HasSubstr("\n  malloc;\n"));
+        EXPECT_THAT(*asan_syms_content,
+                    HasSubstr("\n  __interceptor_memcpy;\n"));
+        // Versioned functions like `memcpy` must not be directly exported in
+        // `.syms`.
+        EXPECT_THAT(*asan_syms_content, Not(HasSubstr("\n  memcpy;\n")));
+
+        std::string asan_cxx_symbols = NmListDefinedSymbols(asan_cxx_path);
+        ExpectSymbol(asan_cxx_symbols, "_Znwm");
+        ExpectSymbol(asan_cxx_symbols, "_ZdlPv");
+
+        auto asan_cxx_syms_content =
+            Filesystem::Cwd().ReadFileToString(asan_cxx_syms_path);
+        ASSERT_TRUE(asan_cxx_syms_content.ok())
+            << asan_cxx_syms_content.error();
+        EXPECT_THAT(*asan_cxx_syms_content, HasSubstr("\n  _Znwm;\n"));
+        EXPECT_THAT(*asan_cxx_syms_content, HasSubstr("\n  _ZdlPv;\n"));
+
+        std::string asan_static_symbols =
+            NmListDefinedSymbols(asan_static_path);
+        ExpectSymbol(asan_static_symbols, "__asan_report_load1_asm");
+
+        // Sanitizer runtimes themselves must never be instrumented with ASan.
+        for (const auto& archive_path :
+             {asan_path, asan_cxx_path, asan_static_path}) {
+          EXPECT_THAT(NmListUndefinedSymbols(archive_path),
+                      Not(HasSubstr("__asan_version_mismatch_check")));
+          EXPECT_THAT(ListArchiveMemberNames(archive_path), Each(IsBasename()));
+        }
+      } else {
+        EXPECT_FALSE(std::filesystem::exists(asan_path));
+        EXPECT_FALSE(std::filesystem::exists(asan_syms_path));
+        EXPECT_FALSE(std::filesystem::exists(asan_cxx_path));
+        EXPECT_FALSE(std::filesystem::exists(asan_cxx_syms_path));
+        EXPECT_FALSE(std::filesystem::exists(asan_static_path));
+      }
+    }
   }
 
-  auto TestLibunwind(std::filesystem::path libunwind_path) -> void {
+  auto TestLibunwind(std::filesystem::path libunwind_path, bool asan = false)
+      -> void {
     std::string libunwind_symbols = NmListDefinedSymbols(libunwind_path);
 
     // Check a few of the main exported symbols here. The set here is somewhat
@@ -222,21 +346,40 @@ class ClangRuntimesTest : public ::testing::Test {
     ExpectSymbol(libunwind_symbols, "__unw_getcontext");
     ExpectSymbol(libunwind_symbols, "__unw_get_proc_info");
 
+    std::string undef_symbols = NmListUndefinedSymbols(libunwind_path);
+    if (asan) {
+      EXPECT_THAT(undef_symbols, HasSubstr("__asan_version_mismatch_check"));
+    } else {
+      EXPECT_THAT(undef_symbols,
+                  Not(HasSubstr("__asan_version_mismatch_check")));
+    }
+
     // Check that member names don't contain full paths, as that is the
     // canonical format produced by `ar`.
     auto member_names = ListArchiveMemberNames(libunwind_path);
     EXPECT_THAT(member_names, Each(IsBasename()));
   }
 
-  auto TestLibcxx(std::filesystem::path libcxx_path) -> void {
+  auto TestLibcxx(std::filesystem::path libcxx_path, bool asan = false)
+      -> void {
     std::string libcxx_symbols = NmListDefinedSymbols(libcxx_path);
 
     // First check a few fundamental symbols from libc++.a, including symbols
     // both within the ABI namespace and outside of it.
     ExpectSymbol(libcxx_symbols, "_ZNKSt12bad_any_cast4whatEv");
-    ExpectSymbol(libcxx_symbols, "_ZNSt2_C8to_charsEPcS0_d");
     ExpectSymbol(libcxx_symbols, "_ZSt17current_exceptionv");
-    ExpectSymbol(libcxx_symbols, "_ZNKSt2_C10filesystem4path10__filenameEv");
+    if (asan) {
+      ExpectSymbol(libcxx_symbols, "_ZNSt6__asan8to_charsEPcS0_d");
+      ExpectSymbol(libcxx_symbols,
+                   "_ZNKSt6__asan10filesystem4path10__filenameEv");
+      EXPECT_THAT(NmListUndefinedSymbols(libcxx_path),
+                  HasSubstr("__asan_version_mismatch_check"));
+    } else {
+      ExpectSymbol(libcxx_symbols, "_ZNSt2_C8to_charsEPcS0_d");
+      ExpectSymbol(libcxx_symbols, "_ZNKSt2_C10filesystem4path10__filenameEv");
+      EXPECT_THAT(NmListUndefinedSymbols(libcxx_path),
+                  Not(HasSubstr("__asan_version_mismatch_check")));
+    }
 
     // Check that several of the libc++abi object files are also included in the
     // archive.
@@ -251,6 +394,12 @@ class ClangRuntimesTest : public ::testing::Test {
     auto member_names = ListArchiveMemberNames(libcxx_path);
     EXPECT_THAT(member_names, Each(IsBasename()));
   }
+
+#if __has_feature(address_sanitizer)
+  static constexpr bool PrebuiltAsan = true;
+#else
+  static constexpr bool PrebuiltAsan = false;
+#endif
 
   std::string exe_path_ = Testing::GetExePath().str();
   std::unique_ptr<Runfiles> test_runfiles_;
@@ -272,6 +421,8 @@ class ClangRuntimesTest : public ::testing::Test {
       *Runtimes::Cache::MakeSystem(install_paths_);
   Runtimes::Cache::Features features = {.target = target_};
   Runtimes runtimes_ = *runtimes_cache_.Lookup(features);
+  Runtimes::Cache::Features asan_features_ = {.target = target_, .asan = true};
+  Runtimes asan_runtimes_ = *runtimes_cache_.Lookup(asan_features_);
 
   // Note that for debugging it may be useful to replace this with a
   // single-threaded thread pool. However the test will be _much_ slower.
@@ -279,20 +430,55 @@ class ClangRuntimesTest : public ::testing::Test {
 };
 
 TEST_F(ClangRuntimesTest, ResourceDir) {
-  ClangResourceDirBuilder resource_dir_builder(&runner_, &threads_,
-                                               target_triple_, &runtimes_);
+  ClangResourceDirBuilder resource_dir_builder(
+      &runner_, &threads_, target_triple_, &runtimes_, features);
   auto build_result = std::move(resource_dir_builder).Wait();
   ASSERT_TRUE(build_result.ok()) << build_result.error();
-  TestResourceDir(std::move(*build_result));
+  TestResourceDir(std::move(*build_result), /*asan=*/false);
+}
+
+TEST_F(ClangRuntimesTest, ResourceDirAsan) {
+  ClangResourceDirBuilder resource_dir_builder(
+      &runner_, &threads_, target_triple_, &asan_runtimes_, asan_features_);
+  auto build_result = std::move(resource_dir_builder).Wait();
+  ASSERT_TRUE(build_result.ok()) << build_result.error();
+  TestResourceDir(*build_result, /*asan=*/true);
+
+  if (!target_triple_.isOSDarwin()) {
+    std::filesystem::path prebuilt_lib_path =
+        std::filesystem::path(test_runfiles_->Rlocation(
+            "carbon/toolchain/install/carbon_stage1_runtimes_build")) /
+        "clang_resource_dir/lib" / target_;
+    std::filesystem::path built_lib_path = *build_result / "lib" / target_;
+    for (const char* syms_name :
+         {"libclang_rt.asan.a.syms", "libclang_rt.asan_cxx.a.syms"}) {
+      auto built_syms =
+          Filesystem::Cwd().ReadFileToString(built_lib_path / syms_name);
+      auto prebuilt_syms =
+          Filesystem::Cwd().ReadFileToString(prebuilt_lib_path / syms_name);
+      ASSERT_TRUE(built_syms.ok()) << built_syms.error();
+      ASSERT_TRUE(prebuilt_syms.ok()) << prebuilt_syms.error();
+      EXPECT_THAT(*built_syms, Eq(*prebuilt_syms));
+    }
+  }
 }
 
 TEST_F(ClangRuntimesTest, Libunwind) {
   LibunwindBuilder libunwind_builder(&runner_, &threads_, target_triple_,
-                                     &runtimes_);
+                                     &runtimes_, features);
   auto build_result = std::move(libunwind_builder).Wait();
   ASSERT_TRUE(build_result.ok()) << build_result.error();
   std::filesystem::path runtimes_path = std::move(*build_result);
-  TestLibunwind(runtimes_path / "lib/libunwind.a");
+  TestLibunwind(runtimes_path / "lib/libunwind.a", /*asan=*/false);
+}
+
+TEST_F(ClangRuntimesTest, LibunwindAsan) {
+  LibunwindBuilder libunwind_builder(&runner_, &threads_, target_triple_,
+                                     &asan_runtimes_, asan_features_);
+  auto build_result = std::move(libunwind_builder).Wait();
+  ASSERT_TRUE(build_result.ok()) << build_result.error();
+  std::filesystem::path runtimes_path = std::move(*build_result);
+  TestLibunwind(runtimes_path / "lib/libunwind.a", /*asan=*/true);
 }
 
 // ASan causes Clang and LLVM to be _egregiously_ inefficient at compiling
@@ -303,29 +489,40 @@ TEST_F(ClangRuntimesTest, Libunwind) {
 // sustainable way. Given that, we disable this test by default but include it
 // for debugging purposes.
 TEST_F(ClangRuntimesTest, DISABLED_Libcxx) {
-  LibcxxBuilder libcxx_builder(&runner_, &threads_, target_triple_, &runtimes_);
+  LibcxxBuilder libcxx_builder(&runner_, &threads_, target_triple_, &runtimes_,
+                               features);
   auto build_result = std::move(libcxx_builder).Wait();
   ASSERT_TRUE(build_result.ok()) << build_result.error();
   std::filesystem::path runtimes_path = std::move(*build_result);
-  TestLibcxx(runtimes_path / "lib/libc++.a");
+  TestLibcxx(runtimes_path / "lib/libc++.a", /*asan=*/false);
+}
+
+TEST_F(ClangRuntimesTest, DISABLED_LibcxxAsan) {
+  LibcxxBuilder libcxx_builder(&runner_, &threads_, target_triple_,
+                               &asan_runtimes_, asan_features_);
+  auto build_result = std::move(libcxx_builder).Wait();
+  ASSERT_TRUE(build_result.ok()) << build_result.error();
+  std::filesystem::path runtimes_path = std::move(*build_result);
+  TestLibcxx(runtimes_path / "lib/libc++.a", /*asan=*/true);
 }
 
 TEST_F(ClangRuntimesTest, PrebuiltResourceDir) {
   std::filesystem::path prebuilt_runtimes_path = test_runfiles_->Rlocation(
       "carbon/toolchain/install/carbon_stage1_runtimes_build");
-  TestResourceDir(prebuilt_runtimes_path / "clang_resource_dir");
+  TestResourceDir(prebuilt_runtimes_path / "clang_resource_dir", /*asan=*/true);
 }
 
 TEST_F(ClangRuntimesTest, PrebuiltLibunwind) {
   std::filesystem::path prebuilt_runtimes_path = test_runfiles_->Rlocation(
       "carbon/toolchain/install/carbon_stage1_runtimes_build");
-  TestLibunwind(prebuilt_runtimes_path / "libunwind/lib/libunwind.a");
+  TestLibunwind(prebuilt_runtimes_path / "libunwind/lib/libunwind.a",
+                PrebuiltAsan);
 }
 
 TEST_F(ClangRuntimesTest, PrebuiltLibcxx) {
   std::filesystem::path prebuilt_runtimes_path = test_runfiles_->Rlocation(
       "carbon/toolchain/install/carbon_stage1_runtimes_build");
-  TestLibcxx(prebuilt_runtimes_path / "libcxx/lib/libc++.a");
+  TestLibcxx(prebuilt_runtimes_path / "libcxx/lib/libc++.a", PrebuiltAsan);
 }
 
 }  // namespace

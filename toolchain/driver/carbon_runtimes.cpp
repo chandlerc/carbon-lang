@@ -34,6 +34,9 @@ CarbonRuntimesBuilderBase::CarbonRuntimesBuilderBase(
     clang_args_storage_.append(
         {"-Xclang", "-target-feature", "-Xclang", feature});
   }
+  if (features.asan) {
+    clang_args_storage_.push_back("-fsanitize=address");
+  }
   compile_options_.clang_args.reserve(clang_args_storage_.size());
   for (const std::string& arg : clang_args_storage_) {
     compile_options_.clang_args.push_back(arg);

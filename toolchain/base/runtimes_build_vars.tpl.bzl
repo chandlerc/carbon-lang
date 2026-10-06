@@ -26,6 +26,21 @@ builtins_i386_textual_srcs = [BUILTINS_I386_TEXTUAL_SRCS]
 
 builtins_copts = [BUILTINS_COPTS]
 
+asan_hdrs = [ASAN_HDRS]
+asan_textual_srcs = [ASAN_TEXTUAL_SRCS]
+asan_preinit_srcs = [ASAN_PREINIT_SRCS]
+asan_srcs = [ASAN_SRCS]
+asan_cxx_srcs = [ASAN_CXX_SRCS]
+ubsan_cxx_srcs = [UBSAN_CXX_SRCS]
+asan_static_srcs = [ASAN_STATIC_SRCS]
+asan_syms_extra = ASAN_SYMS_EXTRA
+gen_dynamic_list = GEN_DYNAMIC_LIST
+
+asan_copts = [ASAN_COPTS]
+asan_cxx_copts = [ASAN_CXX_COPTS]
+asan_darwin_copts = [ASAN_DARWIN_COPTS]
+asan_darwin_linkopts = [ASAN_DARWIN_LINKOPTS]
+
 libcxx_hdrs = [LIBCXX_HDRS]
 libcxx_linux_srcs = [LIBCXX_LINUX_SRCS]
 libcxx_macos_srcs = [LIBCXX_MACOS_SRCS]

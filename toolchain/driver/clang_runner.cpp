@@ -174,6 +174,8 @@ auto ClangRunner::ComputeRuntimesFeatures(
       .tune_cpu = std::move(tune_cpu),
       .target_features = llvm::SmallVector<std::string>(
           target_opts.Features.begin(), target_opts.Features.end()),
+      .asan =
+          invocation->getLangOpts().Sanitize.has(clang::SanitizerKind::Address),
   };
 }
 
@@ -340,6 +342,24 @@ auto ClangRunner::RunInternal(
     if (libcxx_path) {
       prefix_args.push_back(
           llvm::formatv("-L{0}/lib", std::move(libcxx_path)).str());
+    }
+    if (target_resource_dir_path && llvm::Triple(target).isOSDarwin()) {
+      // On Darwin, sanitizer runtimes are linked dynamically using
+      // `@rpath/libclang_rt.asan_*_dynamic.dylib`. Resolve the canonical path
+      // of the dylib file (following leaf symlinks out of any temporary action
+      // sandbox such as Bazel's `darwin-sandbox`) so the embedded `LC_RPATH`
+      // remains valid at runtime.
+      std::error_code ec;
+      std::filesystem::path canonical_dylib = std::filesystem::canonical(
+          std::filesystem::path(std::string_view(*target_resource_dir_path)) /
+              "lib/darwin/libclang_rt.asan_osx_dynamic.dylib",
+          ec);
+      if (!ec) {
+        prefix_args.push_back(
+            llvm::formatv("-Wl,-rpath,{0}",
+                          canonical_dylib.parent_path().native())
+                .str());
+      }
     }
   } else {
     // If we are suppressing the linking of default libs, ensure we didn't get a

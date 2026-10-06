@@ -266,6 +266,7 @@ auto Runtimes::Cache::Lookup(const Features& features) -> ErrorOr<Runtimes> {
   for (llvm::StringRef feature : features.target_features) {
     update_with_separator(feature);
   }
+  update_with_separator(features.asan ? "asan" : "");
 
   std::array<uint8_t, 32> entry_digest = entry_hasher.final();
   std::filesystem::path entry_path =

@@ -49,6 +49,7 @@ cc_library(
         "@llvm-project//clang:frontend",
         "@llvm-project//clang:frontend_tool",
         "@llvm-project//clang:serialization",
+        "@llvm-project//llvm:BinaryFormat",
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:Object",
         "@llvm-project//llvm:Support",

@@ -28,6 +28,10 @@ load(
 )
 load(
     "@llvm-project//compiler-rt:compiler-rt.bzl",
+    "asan_copts",
+    "asan_cxx_copts",
+    "asan_darwin_copts",
+    "asan_darwin_linkopts",
     "builtins_copts",
     "crt_copts",
 )
@@ -181,9 +185,17 @@ toolchain_files(
     remove_prefix = "include/",
 )
 
+toolchain_files(
+    name = "asan_ignorelist",
+    srcs = ["@llvm-project//compiler-rt:asan_ignorelist"],
+    prefix = "llvm/lib/clang/{0}/share/".format(LLVM_VERSION_MAJOR),
+    remove_prefix = "lib/sanitizer_ignorelists/",
+)
+
 filegroup(
     name = "clang_hdrs",
     srcs = [
+        ":asan_ignorelist",
         ":clang_builtin_hdrs",
         ":fuzzer_runtime_hdrs",
         ":profile_runtime_hdrs",
@@ -205,6 +217,69 @@ filtered_toolchain_files(
         "@llvm-project//compiler-rt:builtins_x86_64_srcs",
         "@llvm-project//compiler-rt:builtins_x86_64_textual_srcs",
     ],
+)
+
+toolchain_files(
+    name = "asan_hdrs",
+    srcs = ["@llvm-project//compiler-rt:asan_hdrs"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
+)
+
+toolchain_files(
+    name = "asan_textual_srcs",
+    srcs = ["@llvm-project//compiler-rt:asan_textual_srcs"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
+)
+
+toolchain_files(
+    name = "asan_preinit_srcs",
+    srcs = ["@llvm-project//compiler-rt:asan_preinit_srcs"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
+)
+
+toolchain_files(
+    name = "asan_srcs",
+    srcs = ["@llvm-project//compiler-rt:asan_srcs"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
+)
+
+toolchain_files(
+    name = "asan_cxx_srcs",
+    srcs = ["@llvm-project//compiler-rt:asan_cxx_srcs"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
+)
+
+toolchain_files(
+    name = "ubsan_cxx_srcs",
+    srcs = ["@llvm-project//compiler-rt:ubsan_cxx_srcs"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
+)
+
+toolchain_files(
+    name = "asan_static_srcs",
+    srcs = ["@llvm-project//compiler-rt:asan_static_srcs"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
+)
+
+toolchain_files(
+    name = "asan_syms_extra",
+    srcs = ["@llvm-project//compiler-rt:asan_syms_extra"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
+)
+
+toolchain_files(
+    name = "gen_dynamic_list",
+    srcs = ["@llvm-project//compiler-rt:gen_dynamic_list"],
+    prefix = "runtimes/compiler-rt/lib/",
+    remove_prefix = "lib/",
 )
 
 toolchain_files(
@@ -369,10 +444,18 @@ filegroup(
 filegroup(
     name = "all_data_files",
     srcs = [
+        ":asan_cxx_srcs",
+        ":asan_hdrs",
+        ":asan_preinit_srcs",
+        ":asan_srcs",
+        ":asan_static_srcs",
+        ":asan_syms_extra",
+        ":asan_textual_srcs",
         ":builtins_all_srcs",
         ":clang_hdrs",
         ":core",
         ":core_library",
+        ":gen_dynamic_list",
         ":install_marker",
         ":installed_bazel_files",
         ":libc_internal_libcxx_hdrs",
@@ -383,6 +466,7 @@ filegroup(
         ":libcxxabi_textual_srcs",
         ":libunwind_hdrs",
         ":libunwind_srcs",
+        ":ubsan_cxx_srcs",
     ],
 )
 
@@ -472,7 +556,7 @@ cc_library(
     copts = builtins_copts + make_include_copts([
         "runtimes/builtins",
     ]) + [
-        # TODO: Remove this once we are building sanitizer runtime libraries.
+        # Disable all sanitizers for builtins.
         "-fno-sanitize=all",
     ],
     hdrs_check = "strict",
@@ -486,6 +570,99 @@ cc_library(
 filegroup(
     name = "builtins_archive",
     srcs = [":builtins"],
+    output_group = "archive",
+)
+
+cc_library(
+    name = "asan_internal",
+    hdrs = [":asan_hdrs"],
+    hdrs_check = "strict",
+    includes = ["runtimes/compiler-rt/lib"],
+    target_compatible_with = select({
+        ":is_runtimes_build": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    textual_hdrs = [":asan_textual_srcs"],
+)
+
+cc_library(
+    name = "asan",
+    srcs = select({
+        "@platforms//os:macos": [],
+        "//conditions:default": [":asan_preinit_srcs"],
+    }) + [":asan_srcs"],
+    copts = asan_copts + select({
+        "@platforms//os:macos": asan_darwin_copts,
+        "//conditions:default": [],
+    }) + [
+        "-w",
+        # Disable all sanitizers for ASan runtime libraries.
+        "-fno-sanitize=all",
+    ],
+    hdrs_check = "strict",
+    linkstatic = 1,
+    target_compatible_with = select({
+        ":is_runtimes_build": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [":asan_internal"],
+)
+
+filegroup(
+    name = "asan_archive",
+    srcs = [":asan"],
+    output_group = "archive",
+)
+
+cc_library(
+    name = "asan_cxx",
+    srcs = [":asan_cxx_srcs"] + select({
+        "@platforms//os:macos": [":ubsan_cxx_srcs"],
+        "//conditions:default": [],
+    }),
+    copts = asan_cxx_copts + select({
+        "@platforms//os:macos": asan_darwin_copts,
+        "//conditions:default": [],
+    }) + [
+        "-w",
+        # Disable all sanitizers for ASan runtime libraries.
+        "-fno-sanitize=all",
+    ],
+    hdrs_check = "strict",
+    linkstatic = 1,
+    target_compatible_with = select({
+        ":is_runtimes_build": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [":asan_internal"],
+)
+
+filegroup(
+    name = "asan_cxx_archive",
+    srcs = [":asan_cxx"],
+    output_group = "archive",
+)
+
+cc_library(
+    name = "asan_static",
+    srcs = [":asan_static_srcs"],
+    copts = asan_copts + [
+        "-w",
+        # Disable all sanitizers for ASan runtime libraries.
+        "-fno-sanitize=all",
+    ],
+    hdrs_check = "strict",
+    linkstatic = 1,
+    target_compatible_with = select({
+        ":is_runtimes_build": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [":asan_internal"],
+)
+
+filegroup(
+    name = "asan_static_archive",
+    srcs = [":asan_static"],
     output_group = "archive",
 )
 
@@ -506,9 +683,6 @@ cc_library(
         # We disable all warnings as upstream isn't clean with the common
         # warning flags Carbon uses by default.
         "-w",
-
-        # TODO: Remove this once we are building sanitizer runtime libraries.
-        "-fno-sanitize=all",
     ],
     hdrs_check = "strict",
     includes = ["runtimes/libunwind/include"],
@@ -564,9 +738,6 @@ cc_library(
         # warning flags Carbon uses by default.
         "-w",
 
-        # TODO: Remove this once we are building sanitizer runtime libraries.
-        "-fno-sanitize=all",
-
         # While the toolchain is built without exceptions, libc++ internally
         # must be built with them enabled. It's explicitly allowed to build the
         # libc++ and libc++abi library implementations with different flags
@@ -600,9 +771,31 @@ filegroup(
 
 carbon_runtimes_config(
     name = "runtimes_cfg",
+    asan_archive = select({
+        "@platforms//os:freebsd": ":asan_archive",
+        "@platforms//os:linux": ":asan_archive",
+        "@platforms//os:macos": ":asan_archive",
+        "//conditions:default": None,
+    }),
+    asan_cxx_archive = select({
+        "@platforms//os:freebsd": ":asan_cxx_archive",
+        "@platforms//os:linux": ":asan_cxx_archive",
+        "@platforms//os:macos": ":asan_cxx_archive",
+        "//conditions:default": None,
+    }),
+    asan_darwin_linkopts = select({
+        "@platforms//os:macos": asan_darwin_linkopts,
+        "//conditions:default": [],
+    }),
+    asan_static_archive = select({
+        "@platforms//os:freebsd": ":asan_static_archive",
+        "@platforms//os:linux": ":asan_static_archive",
+        "//conditions:default": None,
+    }),
+    asan_syms_extra = ":asan_syms_extra",
     builtins_archive = ":builtins_archive",
     carbon_prelude_prebuilt = ":carbon_prelude",
-    clang_hdrs_prefix = "llvm/lib/clang/{0}/include/".format(LLVM_VERSION_MAJOR),
+    clang_hdrs_prefix = "llvm/lib/clang/{0}/".format(LLVM_VERSION_MAJOR),
     crt_copts = crt_copts + [
         # Disable all sanitizers for CRT objects.
         "-fno-sanitize=all",
@@ -622,6 +815,7 @@ carbon_runtimes_config(
         ":is_macos_x86_64": "osx",
         "//conditions:default": None,
     }),
+    gen_dynamic_list = ":gen_dynamic_list",
     libcxx_archive = ":libcxx_archive",
     libunwind_archive = ":libunwind_archive",
     target_triple = select({

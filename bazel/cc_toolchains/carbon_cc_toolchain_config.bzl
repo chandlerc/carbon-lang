@@ -189,8 +189,11 @@ def _carbon_cc_toolchain_config_impl(ctx):
             "runtimes/libunwind/include",
             "runtimes/libcxx/include",
             "runtimes/libcxxabi/include",
+            "llvm/lib/clang",
             "{}/include".format(clang_resource_dir),
+            "{}/share".format(clang_resource_dir),
             "runtimes/clang_resource_dir/include",
+            "runtimes/clang_resource_dir/share",
         ] + _compute_clang_system_include_dirs() + sysroot_include_search + sdk_settings,
         builtin_sysroot = builtin_sysroot,
 

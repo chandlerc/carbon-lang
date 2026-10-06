@@ -31,6 +31,18 @@ inline constexpr llvm::StringLiteral BuiltinsI386Srcs[] = {BUILTINS_I386_SRCS};
 
 inline constexpr llvm::StringLiteral BuiltinsCopts[] = {BUILTINS_COPTS};
 
+inline constexpr llvm::StringLiteral AsanPreinitSrcs[] = {ASAN_PREINIT_SRCS};
+inline constexpr llvm::StringLiteral AsanSrcs[] = {ASAN_SRCS};
+inline constexpr llvm::StringLiteral AsanCxxSrcs[] = {ASAN_CXX_SRCS};
+inline constexpr llvm::StringLiteral UbsanCxxSrcs[] = {UBSAN_CXX_SRCS};
+inline constexpr llvm::StringLiteral AsanStaticSrcs[] = {ASAN_STATIC_SRCS};
+inline constexpr llvm::StringLiteral AsanSymsExtra = ASAN_SYMS_EXTRA;
+inline constexpr llvm::StringLiteral AsanCopts[] = {ASAN_COPTS};
+inline constexpr llvm::StringLiteral AsanCxxCopts[] = {ASAN_CXX_COPTS};
+inline constexpr llvm::StringLiteral AsanDarwinCopts[] = {ASAN_DARWIN_COPTS};
+inline constexpr llvm::StringLiteral AsanDarwinLinkopts[] = {
+    ASAN_DARWIN_LINKOPTS};
+
 inline constexpr llvm::StringLiteral LibcxxLinuxSrcs[] = {LIBCXX_LINUX_SRCS};
 inline constexpr llvm::StringLiteral LibcxxMacosSrcs[] = {LIBCXX_MACOS_SRCS};
 inline constexpr llvm::StringLiteral LibcxxWin32Srcs[] = {LIBCXX_WIN32_SRCS};

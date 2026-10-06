@@ -35,6 +35,7 @@ py_binary(
 bazel_example_files = [
     "bazel/BUILD",
     "bazel/MODULE.bazel",
+    "bazel/asan_crash.cpp",
     "bazel/example_lib.h",
     "bazel/example_lib.cpp",
     "bazel/example.cpp",

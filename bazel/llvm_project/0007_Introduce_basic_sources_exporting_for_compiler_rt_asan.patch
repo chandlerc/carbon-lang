@@ -1,0 +1,220 @@
+Introduce basic sources exporting for compiler-rt ASan
+
+This exports the source files, headers, textual sources, and compile flags for
+building the AddressSanitizer runtime libraries on demand or via Bazel.
+---
+diff --git a/utils/bazel/llvm-project-overlay/compiler-rt/BUILD.bazel b/utils/bazel/llvm-project-overlay/compiler-rt/BUILD.bazel
+--- a/utils/bazel/llvm-project-overlay/compiler-rt/BUILD.bazel
++++ b/utils/bazel/llvm-project-overlay/compiler-rt/BUILD.bazel
+@@ -744,3 +744,109 @@
+     name = "builtins_i386_srcs",
+     srcs = [":builtins_unfiltered_i386_srcs"],
+ )
++
++filegroup(
++    name = "asan_ignorelist",
++    srcs = ["lib/sanitizer_ignorelists/asan_ignorelist.txt"],
++)
++
++filegroup(
++    name = "asan_hdrs",
++    srcs = glob(
++        [
++            "lib/asan/*.h",
++            "lib/interception/*.h",
++            "lib/lsan/*.h",
++            "lib/sanitizer_common/*.h",
++            "lib/ubsan/*.h",
++        ],
++        exclude = [
++            "lib/sanitizer_common/sanitizer_offload*.h",
++            "lib/ubsan/ubsan_offload*.h",
++        ],
++    ),
++)
++
++filegroup(
++    name = "asan_textual_srcs",
++    srcs = glob(
++        [
++            "lib/asan/*.inc",
++            "lib/lsan/*.inc",
++            "lib/sanitizer_common/*.inc",
++            "lib/sanitizer_common/*.inc.S",
++            "lib/ubsan/*.inc",
++        ],
++        exclude = [
++            "lib/ubsan/ubsan_offload*.inc",
++        ],
++    ),
++)
++
++filegroup(
++    name = "asan_preinit_srcs",
++    srcs = ["lib/asan/asan_preinit.cpp"],
++)
++
++filegroup(
++    name = "asan_srcs",
++    srcs = [
++        "lib/asan/asan_interceptors_vfork.S",
++        "lib/ubsan/ubsan_diag.cpp",
++        "lib/ubsan/ubsan_flags.cpp",
++        "lib/ubsan/ubsan_handlers.cpp",
++        "lib/ubsan/ubsan_init.cpp",
++        "lib/ubsan/ubsan_monitor.cpp",
++        "lib/ubsan/ubsan_value.cpp",
++    ] + glob(
++        [
++            "lib/asan/*.cpp",
++            "lib/interception/*.cpp",
++            "lib/lsan/lsan_common*.cpp",
++            "lib/sanitizer_common/*.cpp",
++        ],
++        exclude = [
++            "lib/asan/asan_*_thunk.cpp",
++            "lib/asan/asan_new_delete.cpp",
++            "lib/asan/asan_preinit.cpp",
++            "lib/asan/asan_rtl_static.cpp",
++            "lib/sanitizer_common/sanitizer_common_nolibc.cpp",
++            "lib/sanitizer_common/sanitizer_coverage_win_runtime_thunk.cpp",
++            "lib/sanitizer_common/sanitizer_offload*.cpp",
++            "lib/sanitizer_common/sanitizer_win_thunk_interception.cpp",
++        ],
++    ),
++)
++
++filegroup(
++    name = "asan_cxx_srcs",
++    srcs = ["lib/asan/asan_new_delete.cpp"],
++)
++
++filegroup(
++    name = "ubsan_cxx_srcs",
++    srcs = [
++        "lib/ubsan/ubsan_handlers_cxx.cpp",
++        "lib/ubsan/ubsan_type_hash.cpp",
++        "lib/ubsan/ubsan_type_hash_itanium.cpp",
++        "lib/ubsan/ubsan_type_hash_win.cpp",
++    ],
++)
++
++filegroup(
++    name = "asan_static_srcs",
++    srcs = [
++        "lib/asan/asan_rtl_static.cpp",
++        "lib/asan/asan_rtl_x86_64.S",
++    ],
++)
++
++filegroup(
++    name = "asan_syms_extra",
++    srcs = ["lib/asan/asan.syms.extra"],
++)
++
++filegroup(
++    name = "gen_dynamic_list",
++    srcs = ["lib/sanitizer_common/scripts/gen_dynamic_list.py"],
++)
+diff --git a/utils/bazel/llvm-project-overlay/compiler-rt/compiler-rt.bzl b/utils/bazel/llvm-project-overlay/compiler-rt/compiler-rt.bzl
+--- a/utils/bazel/llvm-project-overlay/compiler-rt/compiler-rt.bzl
++++ b/utils/bazel/llvm-project-overlay/compiler-rt/compiler-rt.bzl
+@@ -34,6 +34,98 @@
+     "-Wno-unused-parameter",
+ ]
+ 
++_sanitizer_common_copts = [
++    "-DHAVE_RPC_XDR_H=0",
++    "-O3",
++    "-fPIC",
++    "-fno-builtin",
++    "-fno-lto",
++    "-fno-sanitize=safe-stack",
++    "-fno-stack-protector",
++    "-fomit-frame-pointer",
++    "-ftrivial-auto-var-init=pattern",
++    "-funwind-tables",
++    "-fvisibility=hidden",
++    "-gline-tables-only",
++    "-nostdinc++",
++    "-Wno-c99-extensions",
++    "-Wno-format",
++    "-Wno-gnu",
++    "-Wno-variadic-macros",
++]
++
++asan_copts = _sanitizer_common_copts + [
++    "-fno-exceptions",
++    "-fno-rtti",
++]
++
++asan_cxx_copts = _sanitizer_common_copts + [
++    "-fexceptions",
++    "-frtti",
++]
++
++asan_darwin_copts = [
++    "-DASAN_DYNAMIC=1",
++    "-DCOMPILER_RT_SHARED_LIB",
++    "-fno-omit-frame-pointer",
++    "-ftls-model=initial-exec",
++]
++
++_asan_darwin_weak_symbols = [
++    "___asan_default_options",
++    "___asan_default_suppressions",
++    "___asan_on_error",
++    "___asan_set_shadow_00",
++    "___asan_set_shadow_01",
++    "___asan_set_shadow_02",
++    "___asan_set_shadow_03",
++    "___asan_set_shadow_04",
++    "___asan_set_shadow_05",
++    "___asan_set_shadow_06",
++    "___asan_set_shadow_07",
++    "___asan_set_shadow_f1",
++    "___asan_set_shadow_f2",
++    "___asan_set_shadow_f3",
++    "___asan_set_shadow_f4",
++    "___asan_set_shadow_f5",
++    "___asan_set_shadow_f6",
++    "___asan_set_shadow_f7",
++    "___asan_set_shadow_f8",
++    "___lsan_default_options",
++    "___lsan_default_suppressions",
++    "___lsan_is_turned_off",
++    "___sanitizer_free_hook",
++    "___sanitizer_get_dtls_size",
++    "___sanitizer_malloc_hook",
++    "___sanitizer_report_error_summary",
++    "___sanitizer_sandbox_on_notify",
++    "___sanitizer_symbolize_code",
++    "___sanitizer_symbolize_data",
++    "___sanitizer_symbolize_demangle",
++    "___sanitizer_symbolize_flush",
++    "___sanitizer_symbolize_frame",
++    "___sanitizer_symbolize_set_demangle",
++    "___sanitizer_symbolize_set_inline_frames",
++    "___start_xray_fn_idx",
++    "___start_xray_instr_map",
++    "___stop_xray_fn_idx",
++    "___stop_xray_instr_map",
++    "___ubsan_default_options",
++    "___ubsan_default_suppressions",
++    "___xray_default_options",
++    "__dyld_get_dyld_header",
++]
++
++asan_darwin_linkopts = [
++    "-fapplication-extension",
++    "-lc++",
++    "-lc++abi",
++    "-lSystem",
++] + [
++    "-Wl,-U," + sym
++    for sym in _asan_darwin_weak_symbols
++]
++
+ def _get_rel_path(path_str):
+     rel_path = path_str.rpartition("/lib/builtins/")[2]
+     if rel_path == path_str:

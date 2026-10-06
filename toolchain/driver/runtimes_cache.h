@@ -250,6 +250,9 @@ class Runtimes::Cache {
     // The canonical sorted target features (`+<feature>` / `-<feature>` from
     // `clang::TargetOptions::Features`).
     llvm::SmallVector<std::string> target_features = {};
+
+    // Whether AddressSanitizer (ASan) is enabled.
+    bool asan = false;
   };
 
   Cache() = default;

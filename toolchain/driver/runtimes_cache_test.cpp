@@ -578,6 +578,12 @@ TEST_F(RuntimesCacheTest, LookupTargetCpuFeatures) {
   EXPECT_THAT(cache_.Lookup(diff_features)->base_path(),
               Ne(base_runtimes.base_path()));
 
+  // Enabling `asan` should produce a distinct cache directory.
+  auto diff_asan = base_features;
+  diff_asan.asan = true;
+  EXPECT_THAT(cache_.Lookup(diff_asan)->base_path(),
+              Ne(base_runtimes.base_path()));
+
   // Shifting characters across field boundaries should not collide.
   auto boundary1 = *cache_.Lookup({
       .target = "x86_64-unknown-linux-gnu",

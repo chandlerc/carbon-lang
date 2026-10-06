@@ -13,14 +13,23 @@ how they are built:
   needed by Clang.
 - Libc++ and libc++abi: The C++ standard library and its ABI components.
 - Libunwind: The unwinding library.
+- Sanitizers: Compiler-RT sanitizer runtime libraries (currently ASan).
 
 Future runtimes we plan to add support for but not yet included:
-- Sanitizers
+- Additional sanitizers
 - Profiling runtimes
 """
 
 load("@llvm-project//:vars.bzl", "LLVM_VERSION_MAJOR")
-load("@llvm-project//compiler-rt:compiler-rt.bzl", "builtins_copts", "crt_copts")
+load(
+    "@llvm-project//compiler-rt:compiler-rt.bzl",
+    "asan_copts",
+    "asan_cxx_copts",
+    "asan_darwin_copts",
+    "asan_darwin_linkopts",
+    "builtins_copts",
+    "crt_copts",
+)
 load("@llvm-project//libcxx:libcxx_library.bzl", "libcxx_and_abi_copts")
 load("@llvm-project//libunwind:libunwind_library.bzl", "libunwind_copts")
 load("//bazel/cc_rules:defs.bzl", "cc_library")
@@ -32,6 +41,11 @@ CARBON_CORE_SRCS_FILEGROUPS = [
 CRT_FILES = {
     "crtbegin_src": "@llvm-project//compiler-rt:builtins_crtbegin_src",
     "crtend_src": "@llvm-project//compiler-rt:builtins_crtend_src",
+}
+
+ASAN_FILES = {
+    "asan_syms_extra": "@llvm-project//compiler-rt:asan_syms_extra",
+    "gen_dynamic_list": "@llvm-project//compiler-rt:gen_dynamic_list",
 }
 
 BUILTINS_SRCS_FILEGROUPS = [
@@ -47,6 +61,7 @@ BUILTINS_TEXTUAL_SRCS_FILEGROUPS = [
 ]
 
 RUNTIMES_HDRS_FILEGROUPS = [
+    "@llvm-project//compiler-rt:asan_hdrs",
     "@llvm-project//libc:libcxx_shared_headers_hdrs",
     "@llvm-project//libcxx:libcxx_hdrs",
     "@llvm-project//libcxxabi:libcxxabi_hdrs",
@@ -54,6 +69,11 @@ RUNTIMES_HDRS_FILEGROUPS = [
 ]
 
 RUNTIMES_SRCS_FILEGROUPS = [
+    "@llvm-project//compiler-rt:asan_cxx_srcs",
+    "@llvm-project//compiler-rt:asan_preinit_srcs",
+    "@llvm-project//compiler-rt:asan_srcs",
+    "@llvm-project//compiler-rt:asan_static_srcs",
+    "@llvm-project//compiler-rt:ubsan_cxx_srcs",
     "@llvm-project//libcxx:libcxx_linux_srcs",
     "@llvm-project//libcxx:libcxx_macos_srcs",
     "@llvm-project//libcxx:libcxx_win32_srcs",
@@ -62,10 +82,19 @@ RUNTIMES_SRCS_FILEGROUPS = [
 ]
 
 RUNTIMES_TEXTUAL_SRCS_FILEGROUPS = [
+    "@llvm-project//compiler-rt:asan_textual_srcs",
     "@llvm-project//libcxxabi:libcxxabi_textual_srcs",
 ]
 
 RUNTIMES_PREFIXES = {
+    "asan_cxx_srcs": "runtimes/compiler-rt/",
+    "asan_hdrs": "runtimes/compiler-rt/",
+    "asan_preinit_srcs": "runtimes/compiler-rt/",
+    "asan_srcs": "runtimes/compiler-rt/",
+    "asan_static_srcs": "runtimes/compiler-rt/",
+    "asan_syms_extra": "runtimes/compiler-rt/",
+    "asan_textual_srcs": "runtimes/compiler-rt/",
+    "gen_dynamic_list": "runtimes/compiler-rt/",
     "libcxx_hdrs": "runtimes/libcxx/",
     "libcxx_linux_srcs": "runtimes/libcxx/",
     "libcxx_macos_srcs": "runtimes/libcxx/",
@@ -77,6 +106,7 @@ RUNTIMES_PREFIXES = {
     "libunwind_hdrs": "runtimes/libunwind/",
     "libunwind_srcs": "runtimes/libunwind/",
     "prelude_files": "core/",
+    "ubsan_cxx_srcs": "runtimes/compiler-rt/",
 }
 
 def _get_name(target):
@@ -105,12 +135,12 @@ def _runtimes_path(file):
     """Returns the install path for a file in a normal runtimes library."""
     return file.owner.name
 
-def _get_path(file_attr, to_path_fn):
+def _get_path(file_attr, to_path_fn, prefix = ""):
     files = file_attr[DefaultInfo].files.to_list()
     if len(files) > 1:
         fail("Expected a single file and got {0} files.".format(len(files)))
 
-    return '"{0}"'.format(to_path_fn(files[0]))
+    return '"{0}{1}"'.format(prefix, to_path_fn(files[0]))
 
 def _get_paths(files_attr, to_path_fn, prefix = ""):
     files = []
@@ -126,6 +156,10 @@ def _get_paths(files_attr, to_path_fn, prefix = ""):
 def _get_substitutions(ctx):
     key_attr = lambda k: getattr(ctx.attr, "_" + k)
     return {
+        "ASAN_COPTS": _format_one_per_line(asan_copts),
+        "ASAN_CXX_COPTS": _format_one_per_line(asan_cxx_copts),
+        "ASAN_DARWIN_COPTS": _format_one_per_line(asan_darwin_copts),
+        "ASAN_DARWIN_LINKOPTS": _format_one_per_line(asan_darwin_linkopts),
         "BUILTINS_COPTS": _format_one_per_line(builtins_copts),
         "CRT_COPTS": _format_one_per_line(crt_copts),
         "LIBCXX_AND_ABI_COPTS": _format_one_per_line(libcxx_and_abi_copts),
@@ -134,6 +168,9 @@ def _get_substitutions(ctx):
     } | {
         k.upper(): _get_path(key_attr(k), _builtins_path)
         for k in CRT_FILES.keys()
+    } | {
+        k.upper(): _get_path(key_attr(k), _runtimes_path, RUNTIMES_PREFIXES[k])
+        for k in ASAN_FILES.keys()
     } | {
         name.upper(): _get_paths(key_attr(name), _builtins_path)
         for name in [_get_name(g) for g in (
@@ -156,7 +193,7 @@ def _get_substitutions(ctx):
 
 _common_runtimes_rule_attrs = {
     "_" + k: attr.label(default = v, allow_single_file = True)
-    for k, v in CRT_FILES.items()
+    for k, v in (CRT_FILES | ASAN_FILES).items()
 } | {
     "_" + _get_name(g): attr.label_list(default = [g], allow_files = True)
     for g in (

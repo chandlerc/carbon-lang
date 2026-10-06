@@ -28,3 +28,9 @@ cc_binary(
     srcs = ["example.cpp"],
     deps = [":example_lib"],
 )
+
+cc_binary(
+    name = "asan_crash",
+    srcs = ["asan_crash.cpp"],
+    deps = [":example_lib"],
+)

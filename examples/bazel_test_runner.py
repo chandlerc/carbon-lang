@@ -71,6 +71,7 @@ class BazelExampleTest(test_base.TestBase):
         # TODO: Can remove this in favor of always running `test_run` if we can
         # make linking a binary sufficiently efficient.
         self._run_bazel(["build", "//:example_lib"])
+        self._run_bazel(["build", "--features=asan", "//:example_lib"])
 
     @unittest.skipUnless(
         "CARBON_BAZEL_TEST_FULL" in os.environ,
@@ -79,6 +80,23 @@ class BazelExampleTest(test_base.TestBase):
     def test_run(self) -> None:
         stdout = self._run_bazel(["run", "//:example"])
         self.assertEqual(stdout, ["Hello World!"])
+
+    @unittest.skipUnless(
+        "CARBON_BAZEL_TEST_FULL" in os.environ,
+        "Skipping expensive test step for minimal testing",
+    )
+    def test_run_asan_crash(self) -> None:
+        self._run_bazel(["build", "--features=asan", "//:asan_crash"])
+        exit_code, stdout, stderr = self.RunBazel(
+            self.startup_flags
+            + ["run", "--features=asan", "//:asan_crash"]
+            + self.flags
+        )
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(stdout, ["Hello World!"])
+        self.assertRegex(
+            "\n".join(stderr), r"ERROR: AddressSanitizer: heap-use-after-free"
+        )
 
 
 if __name__ == "__main__":

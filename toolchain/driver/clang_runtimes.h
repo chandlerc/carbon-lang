@@ -61,6 +61,7 @@ class ClangRuntimesBuilderBase {
         tasks_(*threads),
         target_triple_(std::move(target_triple)),
         target_flag_(llvm::formatv("--target={0}", target_triple_.str())),
+        asan_(features.asan),
         result_(Error("Did not finish building the runtime!")) {
     if (!features.cpu.empty() || !features.tune_cpu.empty() ||
         !features.target_features.empty()) {
@@ -100,6 +101,7 @@ class ClangRuntimesBuilderBase {
   llvm::Triple target_triple_;
   std::string target_flag_;
   llvm::SmallVector<std::string> target_args_;
+  bool asan_ = false;
 
   ErrorOr<std::filesystem::path> result_;
 
@@ -132,17 +134,21 @@ class ClangRuntimesBuilderBase::ArchiveBuilder {
   //   archive.
   // - `cflags` are the compile flags that should be used for all the compiles
   //   in this archive.
-  ArchiveBuilder(ClangRuntimesBuilderBase* builder,
-                 std::filesystem::path archive_path,
-                 std::filesystem::path srcs_root,
-                 llvm::SmallVector<llvm::StringRef> src_files,
-                 llvm::SmallVector<llvm::StringRef> cflags)
+  ArchiveBuilder(
+      ClangRuntimesBuilderBase* builder, std::filesystem::path archive_path,
+      std::filesystem::path srcs_root,
+      llvm::SmallVector<llvm::StringRef> src_files,
+      llvm::SmallVector<llvm::StringRef> cflags, bool generate_syms = false,
+      std::optional<std::filesystem::path> syms_extra_path = std::nullopt)
       : builder_(builder),
         vlog_stream_(builder_->vlog_stream_),
         archive_path_(std::move(archive_path)),
+        objs_dir_(archive_path_.filename().native() + ".objs"),
         srcs_root_(std::move(srcs_root)),
         src_files_(std::move(src_files)),
-        cflags_(std::move(cflags)) {}
+        cflags_(std::move(cflags)),
+        generate_syms_(generate_syms),
+        syms_extra_path_(std::move(syms_extra_path)) {}
 
   // Start building the archive, with a latch handle to signal its completion.
   //
@@ -172,6 +178,11 @@ class ClangRuntimesBuilderBase::ArchiveBuilder {
   // result of forming the archive file from those members.
   auto Finish() -> ErrorOr<Success>;
 
+  // Writes a `.syms` dynamic symbol list alongside the archive, matching LLVM's
+  // `gen_dynamic_list.py` script.
+  auto WriteSymsFile(llvm::ArrayRef<llvm::NewArchiveMember> members)
+      -> ErrorOr<Success>;
+
   // Given a specific `src_path` relative to our `srcs_path`, create any
   // necessary directories relative to the build's runtimes root to allow the
   // object file for this source file to be written there.
@@ -199,11 +210,14 @@ class ClangRuntimesBuilderBase::ArchiveBuilder {
   llvm::raw_ostream* vlog_stream_;
 
   std::filesystem::path archive_path_;
+  std::filesystem::path objs_dir_;
 
   std::filesystem::path srcs_root_;
   llvm::SmallVector<llvm::StringRef> src_files_;
 
   llvm::SmallVector<llvm::StringRef> cflags_;
+  bool generate_syms_ = false;
+  std::optional<std::filesystem::path> syms_extra_path_;
 
   // A latch used to synchronize building the archive once all members have been
   // compiled.
@@ -326,6 +340,9 @@ class ClangResourceDirBuilder : public ClangRuntimesBuilderBase {
   // Helper to compile a single file of the CRT runtimes.
   auto BuildCrtFile(llvm::StringRef src_file) -> ErrorOr<Success>;
 
+  // Helper to link the dynamic ASan runtime library on Darwin.
+  auto BuildDarwinAsanDylib() -> ErrorOr<Success>;
+
   // The `lib` path and subdirectory of the being-built runtimes.
   std::filesystem::path lib_path_;
   Filesystem::Dir lib_dir_;
@@ -334,11 +351,15 @@ class ClangResourceDirBuilder : public ClangRuntimesBuilderBase {
   ErrorOr<Success> crt_begin_result_;
   ErrorOr<Success> crt_end_result_;
 
-  // The include paths used during the compilation of the builtins.
+  // The include paths used during the compilation of the builtins and ASan.
   llvm::SmallVector<std::filesystem::path> include_paths_;
+  std::filesystem::path asan_include_path_;
 
-  // The archive builder for the builtins archive in the resource directory.
+  // The archive builders for the archives in the resource directory.
   std::optional<ArchiveBuilder> archive_;
+  std::optional<ArchiveBuilder> asan_archive_;
+  std::optional<ArchiveBuilder> asan_cxx_archive_;
+  std::optional<ArchiveBuilder> asan_static_archive_;
 };
 
 }  // namespace Carbon

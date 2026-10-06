@@ -25,6 +25,8 @@ def _carbon_binary_impl(ctx):
 
     # Pass any C++ flags from our dependencies onto Carbon.
     dep_flags = []
+    if "asan" in ctx.features:
+        dep_flags.append("--clang-arg=-fsanitize=address")
     dep_hdrs = []
     dep_api_files = []
     dep_link_inputs = []
@@ -108,10 +110,7 @@ def _carbon_binary_impl(ctx):
         feature_configuration = feature_configuration,
         cc_toolchain = cc_toolchain,
         is_using_linker = True,
-        user_link_flags = link_flags + [
-            # TODO: Remove once the sanitizer runtimes are available.
-            "-fno-sanitize=all",
-        ],
+        user_link_flags = link_flags,
         output_file = bin.path,
     )
     full_link_flags = cc_common.get_memory_inefficient_command_line(
@@ -151,6 +150,8 @@ def _carbon_library_impl(ctx):
 
     # Pass any C++ flags from our dependencies onto Carbon.
     dep_flags = []
+    if "asan" in ctx.features:
+        dep_flags.append("--clang-arg=-fsanitize=address")
     dep_hdrs = []
     dep_api_srcs = []
     for dep in ctx.attr.deps:

@@ -312,6 +312,10 @@ def main() -> None:
         # Skip rules building runtimes as the rules that provide their sources
         # are not analyzed by this script.
         if rule_name in [
+            "//toolchain/install:asan",
+            "//toolchain/install:asan_cxx",
+            "//toolchain/install:asan_internal",
+            "//toolchain/install:asan_static",
             "//toolchain/install:builtins",
             "//toolchain/install:builtins_internal",
             "//toolchain/install:libc_internal_libcxx",

@@ -295,6 +295,24 @@ TEST_F(ClangRunnerTest, ComputeRuntimesFeatures) {
   ASSERT_THAT(x86_default, IsSuccess(_));
   EXPECT_THAT(x86_default->cpu, StrEq("x86-64"));
   EXPECT_THAT(x86_default->tune_cpu, StrEq("generic"));
+  EXPECT_FALSE(x86_default->asan);
+
+  auto x86_asan = runner.ComputeRuntimesFeatures(
+      "x86_64-unknown-linux-gnu", {"-fsanitize=address,undefined"});
+  ASSERT_THAT(x86_asan, IsSuccess(_));
+  EXPECT_TRUE(x86_asan->asan);
+
+  auto x86_no_asan = runner.ComputeRuntimesFeatures(
+      "x86_64-unknown-linux-gnu",
+      {"-fsanitize=address,undefined", "-fno-sanitize=address"});
+  ASSERT_THAT(x86_no_asan, IsSuccess(_));
+  EXPECT_FALSE(x86_no_asan->asan);
+
+  auto x86_no_sanitize_all = runner.ComputeRuntimesFeatures(
+      "x86_64-unknown-linux-gnu",
+      {"-fsanitize=address,undefined", "-fno-sanitize=all"});
+  ASSERT_THAT(x86_no_sanitize_all, IsSuccess(_));
+  EXPECT_FALSE(x86_no_sanitize_all->asan);
 
   auto x86_v3 = runner.ComputeRuntimesFeatures("x86_64-unknown-linux-gnu",
                                                {"-march=x86-64-v3"});
