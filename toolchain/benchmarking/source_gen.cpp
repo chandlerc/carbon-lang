@@ -79,14 +79,23 @@ static auto WeightedFixedTypes(
 // randomly. A statement has the same size wherever it lands at its depth, so
 // the arrangement doesn't change the body's size.
 //
-// TODO: Plans only declare and update `i32` locals, read each parameter once,
-// and make no calls. Real bodies have locals of many types, read parameters and
-// fields throughout, and make calls in most statements. Add those statements
-// and expressions, fixing each one's spelling before the shuffle as the type
-// use pools do, so that sizes stay the same for every seed.
+// TODO: Plans read each parameter once, read class-typed locals only with
+// `Checksum`, and make no calls. Real bodies read parameters and fields
+// throughout, and make calls in most statements, many of them to methods of
+// their locals. Add those statements and expressions, fixing each one's
+// spelling before the shuffle as the type use pools do, so that sizes stay the
+// same for every seed.
 enum class PlanKind : uint8_t {
   // `var <local>: i32 = <expr>;`
   Local,
+  // `var <local>: <class> = <class>.Make();`, followed by
+  // `<local> = <local> + <class local>.Checksum();`, which reads it: two
+  // statements.
+  ClassLocal,
+  // A declaration that destructures a tuple into two locals, such as
+  // `let (<local>: i32, <local>: i64) = (<expr>, <expr> as i64);`, whose locals
+  // the next statement reads. `form` selects among `DestructureForms`.
+  Destructure,
   // `<local> = <expr>;`
   Update,
   // `if (<cond>) {`, a block, and `}`.
@@ -121,6 +130,12 @@ static auto NumPlanBlocks(PlanKind kind) -> int {
   }
 }
 
+// Whether a statement of `kind` declares locals, which the statement after it
+// reads.
+static auto IsDeclaration(PlanKind kind) -> bool {
+  return kind == PlanKind::Local || kind == PlanKind::Destructure;
+}
+
 // A statement in a body plan. `form` selects among the kind's spellings.
 struct PlanStmt {
   PlanKind kind;
@@ -135,13 +150,53 @@ static constexpr llvm::StringLiteral PlanExprs[] = {
 static constexpr llvm::StringLiteral PlanConds[] = {"{0} > 3", "{0} < 9",
                                                     "{0} == 2", "{0} != 5"};
 
+// A form of `Destructure` statement. `{0}` and `{1}` are operands, and `{a}`
+// and `{b}` the two locals, which `read` reads as an `i32` expression. Later
+// statements can also read the locals that are `i32`s, and update them when
+// they're `var`s.
+struct DestructureForm {
+  llvm::StringLiteral carbon_decl;
+  llvm::StringLiteral cpp_decl;
+  llvm::StringLiteral carbon_read;
+  llvm::StringLiteral cpp_read;
+  bool is_var;
+  bool a_is_i32;
+  bool b_is_i32;
+};
+static constexpr DestructureForm DestructureForms[] = {
+    {.carbon_decl = "let ({a}: i32, {b}: i32) = ({0} + 1, {1} * 2);",
+     .cpp_decl = "const auto [{a}, {b}] = std::pair{{0} + 1, {1} * 2};",
+     .carbon_read = "({a} + {b})",
+     .cpp_read = "({a} + {b})",
+     .is_var = false,
+     .a_is_i32 = true,
+     .b_is_i32 = true},
+    {.carbon_decl = "let ({a}: i32, {b}: i64) = ({0}, {1} as i64);",
+     .cpp_decl = "const auto [{a}, {b}] = "
+                 "std::pair{{0}, static_cast<std::int64_t>({1})};",
+     .carbon_read = "({a} + ({b} as i32))",
+     .cpp_read = "({a} + static_cast<int>({b}))",
+     .is_var = false,
+     .a_is_i32 = true,
+     .b_is_i32 = false},
+    {.carbon_decl = "var ({a}: bool, {b}: i32) = ({0} > 3, {1});",
+     .cpp_decl = "auto [{a}, {b}] = std::pair{{0} > 3, {1}};",
+     .carbon_read = "((if {a} then 1 else 0) + {b})",
+     .cpp_read = "(({a} ? 1 : 0) + {b})",
+     .is_var = true,
+     .a_is_i32 = false,
+     .b_is_i32 = true},
+};
+
 // The statements of a body plan at each depth. The statement that a guard
 // returns or exits with is one depth below the guard, and isn't listed.
 struct BodyPlan {
   llvm::SmallVector<llvm::SmallVector<PlanStmt>> levels;
-  // The number of lines, and of locals, in the plan's statements.
+  // The number of lines in the plan's statements, of locals that they declare,
+  // and of class-typed locals among those.
   int lines = 0;
   int locals = 0;
+  int class_locals = 0;
 };
 
 // The calibration of body plans, which approximates the bodies in a sample of
@@ -208,6 +263,14 @@ static constexpr int LoopBodyWeight = 3;
 // The shares of the statements at depth 0, and deeper, that are locals.
 static constexpr double TopLocalShare = 0.35;
 static constexpr double NestedLocalShare = 0.25;
+// The shares of declarations that destructure a tuple, and of the rest that
+// declare a local of a class type, which takes an update to read it.
+// Structured bindings are 0.2-1.9% of the declarations in the sample, and
+// Carbon's tuples suggest the high end. Class types are 29-78% of the types of
+// local variables, 49% on average, which this share gives after the depths
+// with too few updates cap it.
+static constexpr double DestructureShare = 0.02;
+static constexpr double ClassLocalShare = 0.7;
 
 // Rounds a fractional count down or up, up with a probability of its
 // fractional part.
@@ -361,8 +424,14 @@ static auto ComposeBodyPlan(int statements, int variant) -> BodyPlan {
     double local_share = depth == 0 ? TopLocalShare : NestedLocalShare;
     int locals = std::clamp(round_count(local_share * heads), 0, max_locals);
     int else_ifs = std::min(round_count(ElseIfShare * pairs), pairs);
-    add(depth, PlanKind::Local, locals);
-    add(depth, PlanKind::Update, heads - fixed - locals);
+    int updates = heads - fixed - locals;
+    int destructures = round_count(DestructureShare * locals);
+    int class_locals = std::min(
+        round_count(ClassLocalShare * (locals - destructures)), updates);
+    add(depth, PlanKind::Local, locals - destructures - class_locals);
+    add(depth, PlanKind::ClassLocal, class_locals);
+    add(depth, PlanKind::Destructure, destructures);
+    add(depth, PlanKind::Update, updates - class_locals);
     add(depth, PlanKind::If, ifs);
     add(depth, PlanKind::IfElse, pairs - else_ifs);
     add(depth, PlanKind::ElseIf, else_ifs);
@@ -373,7 +442,9 @@ static auto ComposeBodyPlan(int statements, int variant) -> BodyPlan {
     // Each statement takes a line, and so does the `}` that ends each block and
     // guard, and the line between the blocks of a pair.
     plan.lines += count + ifs + loops + 2 * pairs + guards + exits;
-    plan.locals += locals;
+    // Each destructuring declares two locals.
+    plan.locals += locals + destructures;
+    plan.class_locals += class_locals;
     guard_children = guards + exits;
     blocks = next_blocks;
     loop_blocks = loops;
@@ -499,6 +570,10 @@ class SourceGen::ClassGenState {
   // kind; see `BuildTypePool`.
   auto body_plans() -> llvm::ArrayRef<BodyPlan> { return body_plans_; }
   auto inline_body_plans_start() -> int { return inline_body_plans_start_; }
+  // The classes of the class-typed locals of out-of-line definitions.
+  auto class_local_types() -> llvm::SmallVectorImpl<llvm::StringRef>& {
+    return class_local_types_;
+  }
 
   auto getter_field_types() -> llvm::SmallVectorImpl<llvm::StringRef>& {
     return getter_field_types_;
@@ -649,6 +724,7 @@ class SourceGen::ClassGenState {
   llvm::SmallVector<int> forwarder_param_counts_;
   llvm::SmallVector<BodyPlan> body_plans_;
   int inline_body_plans_start_;
+  llvm::SmallVector<llvm::StringRef> class_local_types_;
 
   // Getters return a copy of their field, and `Make` initializes it, so getter
   // and predicate fields have fixed types with a value expression. These types
@@ -1104,6 +1180,20 @@ auto SourceGen::ClassGenState::BuildClassAndTypeNames(
   }
   std::shuffle(predicate_fields_.begin(), predicate_fields_.end(), gen.rng_);
 
+  // Each class-typed local in an out-of-line definition spells its class twice.
+  // The classes are evenly distributed, with any remainder going to a fixed
+  // prefix of the unshuffled names, so the spellings don't depend on the seed.
+  int num_class_locals = 0;
+  for (const BodyPlan& plan :
+       llvm::ArrayRef(body_plans_).take_front(inline_body_plans_start_)) {
+    num_class_locals += plan.class_locals;
+  }
+  class_local_types_.reserve(num_class_locals);
+  for (int i : llvm::seq(num_class_locals)) {
+    class_local_types_.push_back(class_names_[i % num_classes]);
+  }
+  std::shuffle(class_local_types_.begin(), class_local_types_.end(), gen.rng_);
+
   // Classes are defined from the back, so the first unshuffled name is always
   // the class defined last, which field pools leave out; see `BuildTypePool`.
   std::shuffle(class_names_.begin() + 1, class_names_.end(), gen.rng_);
@@ -1306,6 +1396,7 @@ auto SourceGen::GenApiFileDenseDecls(int target_lines,
   CARBON_CHECK(class_gen_state.inline_function_names().empty());
   CARBON_CHECK(class_gen_state.inline_param_names().empty());
   CARBON_CHECK(class_gen_state.local_names().empty());
+  CARBON_CHECK(class_gen_state.class_local_types().empty());
   CARBON_CHECK(class_gen_state.accessed_field_names().empty());
   CARBON_CHECK(class_gen_state.forwarder_names().empty());
   CARBON_CHECK(class_gen_state.forwarder_param_names().empty());
@@ -1882,8 +1973,8 @@ struct ArrangedBody {
 
 // Randomly arranges the statements of `plan`, along with a `ReadParams`
 // statement at depth 0. Each block gets at least one statement, and ends with a
-// statement that isn't a local, so that the statement after each local can read
-// it. Guard exits go in distinct loop bodies.
+// statement that isn't a declaration, so that the statement after each
+// declaration can read its locals. Guard exits go in distinct loop bodies.
 //
 // The statements beyond the first in each block go in a block chosen with
 // probability proportional to its statements so far, counting loop bodies
@@ -1905,11 +1996,8 @@ static auto ArrangeBody(const BodyPlan& plan, absl::BitGen& rng)
           case PlanKind::GuardExit:
             exits.push_back(stmt);
             break;
-          case PlanKind::Local:
-            locals.push_back(stmt);
-            break;
           default:
-            others.push_back(stmt);
+            (IsDeclaration(stmt.kind) ? locals : others).push_back(stmt);
             break;
         }
       }
@@ -1959,7 +2047,7 @@ static auto ArrangeBody(const BodyPlan& plan, absl::BitGen& rng)
       llvm::SmallVector<int>& stmts = body.blocks[block].stmts;
       std::shuffle(stmts.begin(), stmts.end(), rng);
       auto is_local = [&](int stmt) {
-        return body.stmts[stmt].plan.kind == PlanKind::Local;
+        return IsDeclaration(body.stmts[stmt].plan.kind);
       };
       if (is_local(stmts.back())) {
         llvm::SmallVector<int> non_locals;
@@ -1998,23 +2086,35 @@ static auto ArrangeBody(const BodyPlan& plan, absl::BitGen& rng)
 }
 
 // Emits the statements of `body` after its `acc` declaration, indented beyond
-// `indent`. Locals take their names from `locals` in turn, the `ReadParams`
-// statement adds `reads`, and guards return `return_value`.
+// `indent`. Locals take their names from `locals` in turn, class-typed locals
+// take their classes from `class_local_type`, which returns an empty name for
+// the enclosing class, the `ReadParams` statement adds `reads`, and guards
+// return `return_value`.
 //
-// The first operand of each statement after a local is that local, so that
-// every local is read. Every other operand, and the target of each update, is a
-// random local in scope.
-static auto EmitArrangedBody(const ArrangedBody& body,
-                             llvm::ArrayRef<llvm::StringRef> locals,
-                             llvm::StringRef reads,
-                             llvm::StringRef return_value, bool is_cpp,
-                             llvm::StringRef indent, absl::BitGen& rng,
-                             llvm::raw_ostream& os) -> void {
-  llvm::SmallVector<llvm::StringRef> scope = {"acc"};
-  llvm::StringRef pending = "acc";
+// The first operand of each statement after a declaration reads the locals
+// that it declares, so that every local is read. Every other operand is a
+// random `i32` local in scope, and the target of each update a random `var`
+// one.
+static auto EmitArrangedBody(
+    const ArrangedBody& body, llvm::ArrayRef<llvm::StringRef> locals,
+    llvm::function_ref<auto()->llvm::StringRef> class_local_type,
+    llvm::StringRef reads, llvm::StringRef return_value, bool is_cpp,
+    llvm::StringRef indent, absl::BitGen& rng, llvm::raw_ostream& os) -> void {
+  // The `i32` locals in scope that later statements can update, and the ones
+  // that they can only read.
+  llvm::SmallVector<llvm::StringRef> var_scope = {"acc"};
+  llvm::SmallVector<llvm::StringRef> let_scope;
+  // An expression reading the locals that the last statement declared.
+  std::string pending = "acc";
   int next_local = 0;
   auto pick_local = [&]() {
-    return scope[absl::Uniform<int>(rng, 0, scope.size())];
+    int index = absl::Uniform<int>(rng, 0, var_scope.size() + let_scope.size());
+    return index < static_cast<int>(var_scope.size())
+               ? var_scope[index]
+               : let_scope[index - var_scope.size()];
+  };
+  auto pick_var = [&]() {
+    return var_scope[absl::Uniform<int>(rng, 0, var_scope.size())];
   };
   auto emit_expr = [&](llvm::StringRef format) {
     while (!format.empty()) {
@@ -2036,21 +2136,28 @@ static auto EmitArrangedBody(const ArrangedBody& body,
   };
 
   // The blocks being emitted, with the index of the next statement in each,
-  // and the size of the scope outside it.
+  // and the sizes of the scopes outside it.
   struct Frame {
     int block;
     int next_stmt;
-    int outer_scope_size;
+    int outer_var_scope_size;
+    int outer_let_scope_size;
   };
-  llvm::SmallVector<Frame> stack = {
-      {.block = 0, .next_stmt = 0, .outer_scope_size = 1}};
+  auto open_block = [&](int block) -> Frame {
+    return {.block = block,
+            .next_stmt = 0,
+            .outer_var_scope_size = static_cast<int>(var_scope.size()),
+            .outer_let_scope_size = static_cast<int>(let_scope.size())};
+  };
+  llvm::SmallVector<Frame> stack = {open_block(0)};
   while (!stack.empty()) {
     Frame& frame = stack.back();
     int depth = stack.size();
     const ArrangedBlock& block = body.blocks[frame.block];
     if (frame.next_stmt == static_cast<int>(block.stmts.size())) {
       // End the block, and start the second block of an `else` or `else if`.
-      scope.truncate(frame.outer_scope_size);
+      var_scope.truncate(frame.outer_var_scope_size);
+      let_scope.truncate(frame.outer_let_scope_size);
       int ended = frame.block;
       stack.pop_back();
       if (stack.empty()) {
@@ -2072,9 +2179,7 @@ static auto EmitArrangedBody(const ArrangedBody& body,
         emit_cond(owner.plan.form + 1);
         os << ") {\n";
       }
-      stack.push_back({.block = ended + 1,
-                       .next_stmt = 0,
-                       .outer_scope_size = static_cast<int>(scope.size())});
+      stack.push_back(open_block(ended + 1));
       continue;
     }
 
@@ -2089,17 +2194,58 @@ static auto EmitArrangedBody(const ArrangedBody& body,
            << (is_cpp ? " = " : ": i32 = ");
         emit_expr(PlanExprs[planned.form % std::size(PlanExprs)]);
         os << ";\n";
-        scope.push_back(name);
+        var_scope.push_back(name);
         pending = name;
         break;
       }
+      case PlanKind::ClassLocal: {
+        llvm::StringRef name = locals[next_local++];
+        llvm::StringRef type = class_local_type();
+        if (type.empty()) {
+          os << (is_cpp ? "auto " : "var ") << name
+             << (is_cpp ? " = Make();\n" : ": Self = Make();\n");
+        } else if (is_cpp) {
+          os << type << " " << name << " = " << type << "::Make();\n";
+        } else {
+          os << "var " << name << ": " << type << " = " << type << ".Make();\n";
+        }
+        indent_to(depth);
+        os << pick_var() << " = ";
+        emit_expr("{0}");
+        os << " + " << name << ".Checksum();\n";
+        break;
+      }
+      case PlanKind::Destructure: {
+        const DestructureForm& form =
+            DestructureForms[planned.form % std::size(DestructureForms)];
+        llvm::StringRef a = locals[next_local++];
+        llvm::StringRef b = locals[next_local++];
+        auto substitute = [&](llvm::StringRef format) {
+          std::string text = format.str();
+          for (auto [placeholder, name] : {std::pair{"{a}", a}, {"{b}", b}}) {
+            text.replace(text.find(placeholder), 3, name);
+          }
+          return text;
+        };
+        emit_expr(substitute(is_cpp ? form.cpp_decl : form.carbon_decl));
+        os << "\n";
+        auto& scope = form.is_var ? var_scope : let_scope;
+        if (form.a_is_i32) {
+          scope.push_back(a);
+        }
+        if (form.b_is_i32) {
+          scope.push_back(b);
+        }
+        pending = substitute(is_cpp ? form.cpp_read : form.carbon_read);
+        break;
+      }
       case PlanKind::Update:
-        os << pick_local() << " = ";
+        os << pick_var() << " = ";
         emit_expr(PlanExprs[planned.form % std::size(PlanExprs)]);
         os << ";\n";
         break;
       case PlanKind::ReadParams:
-        os << pick_local() << " = ";
+        os << pick_var() << " = ";
         emit_expr("{0}");
         os << " + " << reads << ";\n";
         break;
@@ -2110,9 +2256,7 @@ static auto EmitArrangedBody(const ArrangedBody& body,
         os << (planned.kind == PlanKind::While ? "while (" : "if (");
         emit_cond(planned.form);
         os << ") {\n";
-        stack.push_back({.block = stmt.first_block,
-                         .next_stmt = 0,
-                         .outer_scope_size = static_cast<int>(scope.size())});
+        stack.push_back(open_block(stmt.first_block));
         break;
       case PlanKind::GuardReturn:
       case PlanKind::GuardExit:
@@ -2139,9 +2283,13 @@ static auto EmitArrangedBody(const ArrangedBody& body,
 // randomly, along with a statement at depth 0 that reads every parameter with
 // its consumer template, and `self` in a method with `Checksum`. That statement
 // is on one line however long it is, which the line estimates assume.
+//
+// An out-of-line definition follows every class, so its class-typed locals can
+// have any class. One defined inline in a class can only use the classes
+// before it, so its class-typed locals have its own class.
 auto SourceGen::GenerateBody(ClassGenState& state, const FunctionSig& sig,
-                             llvm::StringRef indent, llvm::raw_ostream& os)
-    -> void {
+                             bool is_inline, llvm::StringRef indent,
+                             llvm::raw_ostream& os) -> void {
   os << indent << (IsCpp() ? "  int acc = 0;\n" : "  var acc: i32 = 0;\n");
 
   RawStringOstream reads;
@@ -2173,8 +2321,12 @@ auto SourceGen::GenerateBody(ClassGenState& state, const FunctionSig& sig,
   RawStringOstream return_value;
   state.ProduceValue(sig.return_type, return_value);
   std::string return_value_str = return_value.TakeStr();
-  EmitArrangedBody(ArrangeBody(plan, rng_), locals, reads.TakeStr(),
-                   return_value_str, IsCpp(), indent, rng_, os);
+  EmitArrangedBody(
+      ArrangeBody(plan, rng_), locals,
+      [&]() -> llvm::StringRef {
+        return is_inline ? "" : state.class_local_types().pop_back_val();
+      },
+      reads.TakeStr(), return_value_str, IsCpp(), indent, rng_, os);
   os << indent << "  return " << return_value_str << ";\n";
 }
 
@@ -2211,7 +2363,7 @@ auto SourceGen::GenerateOutOfLineDef(ClassGenState& state,
     }
   }
   os << ") -> " << sig.return_type << " {\n";
-  GenerateBody(state, sig, /*indent=*/"", os);
+  GenerateBody(state, sig, /*is_inline=*/false, /*indent=*/"", os);
   os << "}\n";
 }
 
@@ -2246,7 +2398,7 @@ auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
   os << indent << (IsCpp() ? "static auto " : "fn ") << name << "(";
   EmitParams(/*is_method=*/false, sig.params, indent, os);
   os << ") -> " << sig.return_type << " {\n";
-  GenerateBody(state, sig, indent, os);
+  GenerateBody(state, sig, /*is_inline=*/true, indent, os);
   os << indent << "}\n";
 }
 

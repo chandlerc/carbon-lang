@@ -434,7 +434,8 @@ class SourceGen {
                             llvm::StringRef indent, llvm::raw_ostream& os,
                             FunctionSig* captured = nullptr) -> void;
   auto GenerateBody(ClassGenState& state, const FunctionSig& sig,
-                    llvm::StringRef indent, llvm::raw_ostream& os) -> void;
+                    bool is_inline, llvm::StringRef indent,
+                    llvm::raw_ostream& os) -> void;
   auto GenerateOutOfLineDef(ClassGenState& state, llvm::StringRef class_name,
                             const FunctionSig& sig, llvm::raw_ostream& os)
       -> void;

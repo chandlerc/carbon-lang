@@ -28,6 +28,7 @@ namespace {
 using ::testing::AllOf;
 using ::testing::ContainerEq;
 using ::testing::Contains;
+using ::testing::ContainsRegex;
 using ::testing::Each;
 using ::testing::Eq;
 using ::testing::Ge;
@@ -690,6 +691,35 @@ TEST(SourceGenTest, GenApiFileDenseDeclsOutOfLineDefsCompile) {
           TestCompile(language, gen.GenApiFileDenseDecls(3000, params)));
     }
   }
+}
+
+// Plans declare class-typed locals, of any class out-of-line and of their own
+// class inline, and destructure tuples.
+TEST(SourceGenTest, GenApiFileDenseDeclsPlanDeclarations) {
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.public_function_decls = 1,
+                       .public_method_decls = 2,
+                       .private_function_decls = 0,
+                       .private_method_decls = 1,
+                       .private_field_decls = 2,
+                       .inline_function_defs = 2,
+                       .inline_body_sizes = {{.statements = 40, .weight = 1}}},
+      .define_decls_out_of_line = true,
+      .out_of_line_body_sizes = {{.statements = 60, .weight = 1}}};
+
+  SourceGen carbon_gen;
+  std::string source = carbon_gen.GenApiFileDenseDecls(3000, params);
+  EXPECT_THAT(source, HasSubstr(": Self = Make();"));
+  EXPECT_THAT(source, ContainsRegex("var [A-Za-z0-9_]+: [A-Za-z0-9_]{5,} = "
+                                    "[A-Za-z0-9_]+\\.Make\\(\\);"));
+  EXPECT_THAT(source, ContainsRegex("(let|var) \\([A-Za-z0-9_]+: "));
+
+  SourceGen cpp_gen(SourceGen::Language::Cpp);
+  source = cpp_gen.GenApiFileDenseDecls(3000, params);
+  EXPECT_THAT(source, HasSubstr(" = Make();"));
+  EXPECT_THAT(source, ContainsRegex("[A-Za-z0-9_]{5,} [A-Za-z0-9_]+ = "
+                                    "[A-Za-z0-9_]+::Make\\(\\);"));
+  EXPECT_THAT(source, HasSubstr("auto ["));
 }
 
 // The line estimates have to track the emitted lines closely, or files miss
