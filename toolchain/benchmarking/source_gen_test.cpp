@@ -463,6 +463,48 @@ TEST_P(GenApiFileDenseDeclsParamsTest, OnlyFields) {
       GetParam(), SourceGen(GetParam()).GenApiFileDenseDecls(3000, params)));
 }
 
+// With bodies, fields have a pool of their own, which leaves out the class
+// defined last.
+TEST_P(GenApiFileDenseDeclsParamsTest, FieldPoolWithManyFields) {
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.public_function_decls = 0,
+                       .public_method_decls = 1,
+                       .private_function_decls = 0,
+                       .private_method_decls = 0,
+                       .private_field_decls = 30,
+                       .inline_getters = 1}};
+  EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 32));
+  EXPECT_TRUE(TestCompile(
+      GetParam(), SourceGen(GetParam()).GenApiFileDenseDecls(3000, params)));
+}
+
+TEST_P(GenApiFileDenseDeclsParamsTest, FieldPoolWithFewFields) {
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.public_function_decls = 0,
+                       .public_method_decls = 0,
+                       .private_function_decls = 0,
+                       .private_method_decls = 0,
+                       .private_field_decls = 3,
+                       .inline_function_defs = 1}};
+  EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 32));
+  EXPECT_TRUE(TestCompile(
+      GetParam(), SourceGen(GetParam()).GenApiFileDenseDecls(3000, params)));
+}
+
+// A single class with bodies, whose field pool has no class to reference.
+TEST_P(GenApiFileDenseDeclsParamsTest, OneClassWithBodies) {
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.public_function_decls = 0,
+                       .public_method_decls = 0,
+                       .private_function_decls = 0,
+                       .private_method_decls = 0,
+                       .private_field_decls = 3,
+                       .inline_getters = 1}};
+  EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(30, params, 8));
+  EXPECT_TRUE(TestCompile(
+      GetParam(), SourceGen(GetParam()).GenApiFileDenseDecls(30, params)));
+}
+
 // Bodies read class-typed parameters through `Checksum`, and return class
 // values through `Make`.
 static auto InlineBodiesParams() -> SourceGen::DenseDeclParams {

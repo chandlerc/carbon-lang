@@ -587,10 +587,9 @@ class SourceGen::ClassGenState {
   auto GetInlineParamType() -> TypeUse {
     return GetValidTypeUse(inline_param_pool_);
   }
-  // Return types of inline definitions, and field types when the file has
-  // bodies, which are produced.
-  auto GetProducedType() -> TypeUse {
-    return GetValidTypeUse(produced_type_pool_);
+  // Return types of inline definitions, which are produced.
+  auto GetInlineReturnType() -> TypeUse {
+    return GetValidTypeUse(inline_return_pool_);
   }
   // Return types of declarations with out-of-line definitions, which are
   // spelled twice and produced.
@@ -602,11 +601,11 @@ class SourceGen::ClassGenState {
   auto GetOutOfLineParamType() -> TypeUse {
     return GetValidTypeUse(out_of_line_param_pool_);
   }
-  // `Make` produces every field when the file has bodies. Without bodies,
-  // fields share the declaration pool, which can include types that have no
-  // value expression.
+  // `Make` produces every field when the file has bodies, and then fields
+  // have a pool of their own. Without bodies, fields share the declaration
+  // pool, which can include types that have no value expression.
   auto GetFieldType() -> TypeUse {
-    return GetValidTypeUse(has_bodies_ ? produced_type_pool_ : decl_type_pool_);
+    return GetValidTypeUse(has_bodies_ ? field_type_pool_ : decl_type_pool_);
   }
   // Return and parameter types of forwarders, which the declarations that they
   // call spell again.
@@ -618,7 +617,7 @@ class SourceGen::ClassGenState {
   auto define_decls_out_of_line() -> bool { return define_decls_out_of_line_; }
   auto type_pools_empty() -> bool {
     return decl_type_pool_.uses.empty() && inline_param_pool_.uses.empty() &&
-           produced_type_pool_.uses.empty() &&
+           inline_return_pool_.uses.empty() && field_type_pool_.uses.empty() &&
            forward_type_pool_.uses.empty() &&
            out_of_line_return_pool_.uses.empty() &&
            out_of_line_param_pool_.uses.empty();
@@ -638,7 +637,7 @@ class SourceGen::ClassGenState {
                               const ClassParams& class_params,
                               const TypeUseParams& type_use_params) -> void;
   auto BuildTypePool(SourceGen& gen, int num_types, int max_refs_per_class,
-                     bool producible_only, bool consumed,
+                     bool producible_only, bool consumed, bool for_fields,
                      const TypeUseParams& type_use_params) -> TypePool;
 
   llvm::SmallVector<int> public_function_param_counts_;
@@ -685,7 +684,8 @@ class SourceGen::ClassGenState {
   bool define_decls_out_of_line_;
   TypePool decl_type_pool_;
   TypePool inline_param_pool_;
-  TypePool produced_type_pool_;
+  TypePool inline_return_pool_;
+  TypePool field_type_pool_;
   TypePool forward_type_pool_;
   TypePool out_of_line_return_pool_;
   TypePool out_of_line_param_pool_;
@@ -822,7 +822,9 @@ auto SourceGen::ClassGenState::GetValidTypeUse(TypePool& pool) -> TypeUse {
 // classes with the fixed types to roughly match the weights in
 // `type_use_params`. `max_refs_per_class` caps the references to each class.
 //
-// With `producible_only`, the pool only uses fixed types that have a value
+// With `for_fields`, the uses are field types, which each class draws before it
+// becomes a valid type, and the pool leaves out the class defined last. With
+// `producible_only`, the pool only uses fixed types that have a value
 // expression. With `consumed`, each use gets one of its type's consumer
 // templates, round-robin per type before the shuffle, so that the mix of
 // templates doesn't depend on the seed. Each use also records its index before
@@ -832,7 +834,8 @@ auto SourceGen::ClassGenState::GetValidTypeUse(TypePool& pool) -> TypeUse {
 // `valid_type_names_` must already contain the fixed type spellings.
 auto SourceGen::ClassGenState::BuildTypePool(
     SourceGen& gen, int num_types, int max_refs_per_class, bool producible_only,
-    bool consumed, const TypeUseParams& type_use_params) -> TypePool {
+    bool consumed, bool for_fields, const TypeUseParams& type_use_params)
+    -> TypePool {
   TypePool pool;
   if (num_types == 0) {
     return pool;
@@ -870,27 +873,41 @@ auto SourceGen::ClassGenState::BuildTypePool(
 
   // Compute the number of declared types used. We expect to have a decent
   // number of repeated names, so we repeatedly append the entire sequence of
-  // class names until there is some remainder of names needed.
-  int num_classes = class_names_.size();
+  // class names until there is some remainder of names needed. The class
+  // defined last has the first unshuffled name; see `BuildClassAndTypeNames`.
+  llvm::ArrayRef<llvm::StringRef> classes = class_names_;
+  if (for_fields) {
+    classes = classes.drop_front();
+  }
+  int num_classes = classes.size();
   int num_declared_types =
-      num_types * type_use_params.declared_types_weight / type_weight_sum;
-  int full_copies = num_declared_types / num_classes;
-  int remainder = num_declared_types % num_classes;
+      num_classes == 0
+          ? 0
+          : num_types * type_use_params.declared_types_weight / type_weight_sum;
+  int full_copies = num_classes == 0 ? 0 : num_declared_types / num_classes;
+  int remainder = num_classes == 0 ? 0 : num_declared_types % num_classes;
 
   // Cap the references to each class so that `GetValidTypeUse` finds a valid
   // type for any shuffle. A class becomes a valid type after its field types
   // are chosen, so references to it can only go on its own function signatures,
   // or in a later class. The last class defined has only its own, and the cap
-  // is the number of uses each class draws from this pool after its fields. The
-  // fixed types below replace any references the cap removes, so the pool's
-  // spellings, and with them the byte count, don't depend on the shuffle.
+  // is the number of uses each class draws from this pool after its fields.
+  //
+  // A field pool has no references to the class defined last. While a class
+  // draws its fields, the references to later classes are at most the cap times
+  // the number of those classes, which leaves a valid use as long as the cap is
+  // at most the number of fields each class draws.
+  //
+  // The fixed types below replace any references the cap removes, so the
+  // pool's spellings, and with them the byte count, don't depend on the
+  // shuffle.
   if (full_copies >= max_refs_per_class) {
     full_copies = max_refs_per_class;
     remainder = 0;
   }
 
   for ([[maybe_unused]] auto _ : llvm::seq(full_copies)) {
-    for (llvm::StringRef name : class_names_) {
+    for (llvm::StringRef name : classes) {
       append_use(name);
     }
   }
@@ -898,8 +915,7 @@ auto SourceGen::ClassGenState::BuildTypePool(
   // names being un-shuffled is essential. We're going to have one extra
   // reference to some fraction of the class names and we want that to be a
   // stable subset.
-  for (llvm::StringRef name :
-       llvm::ArrayRef(class_names_).slice(0, remainder)) {
+  for (llvm::StringRef name : classes.slice(0, remainder)) {
     append_use(name);
   }
   num_declared_types = full_copies * num_classes + remainder;
@@ -987,56 +1003,69 @@ auto SourceGen::ClassGenState::BuildClassAndTypeNames(
   int num_inline_returns = num_classes * class_params.inline_function_defs;
   int num_inline_params = Sum(inline_function_param_counts_);
   int num_fields = num_classes * class_params.private_field_decls;
-  int num_produced_fields = has_bodies_ ? num_fields : 0;
 
   // Each class draws `inline_function_defs` return types from this pool after
   // its fields.
-  produced_type_pool_ = BuildTypePool(
-      gen, num_inline_returns + num_produced_fields,
-      class_params.inline_function_defs,
-      /*producible_only=*/true, /*consumed=*/false, type_use_params);
+  inline_return_pool_ =
+      BuildTypePool(gen, num_inline_returns, class_params.inline_function_defs,
+                    /*producible_only=*/true, /*consumed=*/false,
+                    /*for_fields=*/false, type_use_params);
+
+  // With bodies, `Make` produces every field. Each class draws its fields from
+  // this pool.
+  if (has_bodies_) {
+    field_type_pool_ =
+        BuildTypePool(gen, num_fields, class_params.private_field_decls,
+                      /*producible_only=*/true, /*consumed=*/false,
+                      /*for_fields=*/true, type_use_params);
+  }
 
   // Each inline definition has one parameter beyond its random count, so that
   // each class draws at least `inline_function_defs` parameter types from this
   // pool, and the pool can include class types.
   int num_inline_extra_params = num_inline_returns;
-  inline_param_pool_ = BuildTypePool(
-      gen, num_inline_params + num_inline_extra_params,
-      class_params.inline_function_defs,
-      /*producible_only=*/false, /*consumed=*/true, type_use_params);
+  inline_param_pool_ =
+      BuildTypePool(gen, num_inline_params + num_inline_extra_params,
+                    class_params.inline_function_defs,
+                    /*producible_only=*/false, /*consumed=*/true,
+                    /*for_fields=*/false, type_use_params);
 
   if (!define_decls_out_of_line_) {
     // Each class draws `decls_per_class` return types from this pool after its
     // fields.
     decl_type_pool_ = BuildTypePool(
         gen,
-        num_decl_returns + num_decl_params + (num_fields - num_produced_fields),
+        num_decl_returns + num_decl_params + (has_bodies_ ? 0 : num_fields),
         decls_per_class,
-        /*producible_only=*/false, /*consumed=*/false, type_use_params);
+        /*producible_only=*/false, /*consumed=*/false, /*for_fields=*/false,
+        type_use_params);
   } else {
     // Each class draws `decls_per_class` return types from this pool after its
     // fields. A body's guards also produce a value of its return type, so each
     // use's index pairs it with the body plan that has the same index.
-    out_of_line_return_pool_ = BuildTypePool(
-        gen, num_decl_returns, decls_per_class,
-        /*producible_only=*/true, /*consumed=*/false, type_use_params);
+    out_of_line_return_pool_ =
+        BuildTypePool(gen, num_decl_returns, decls_per_class,
+                      /*producible_only=*/true, /*consumed=*/false,
+                      /*for_fields=*/false, type_use_params);
     // As for inline definitions, each declaration has one parameter beyond its
     // random count, so that each class draws at least `decls_per_class`
     // parameter types from this pool.
     int num_decl_extra_params = num_decl_returns;
     out_of_line_param_pool_ = BuildTypePool(
         gen, num_decl_params + num_decl_extra_params, decls_per_class,
-        /*producible_only=*/false, /*consumed=*/true, type_use_params);
+        /*producible_only=*/false, /*consumed=*/true, /*for_fields=*/false,
+        type_use_params);
   }
 
   // Each class draws `inline_forwarders` return types from this pool after its
   // fields.
-  forward_type_pool_ = BuildTypePool(
-      gen,
-      num_classes * class_params.inline_forwarders +
-          Sum(forwarder_param_counts_),
-      class_params.inline_forwarders,
-      /*producible_only=*/false, /*consumed=*/false, type_use_params);
+  forward_type_pool_ =
+      BuildTypePool(gen,
+                    num_classes * class_params.inline_forwarders +
+                        Sum(forwarder_param_counts_),
+                    class_params.inline_forwarders,
+                    /*producible_only=*/false, /*consumed=*/false,
+                    /*for_fields=*/false, type_use_params);
 
   auto value = [&](const TypeUseParams::FixedTypeWeight& fw) {
     return gen.IsCpp() ? fw.cpp_value : fw.carbon_value;
@@ -1073,7 +1102,9 @@ auto SourceGen::ClassGenState::BuildClassAndTypeNames(
   }
   std::shuffle(predicate_fields_.begin(), predicate_fields_.end(), gen.rng_);
 
-  std::shuffle(class_names_.begin(), class_names_.end(), gen.rng_);
+  // Classes are defined from the back, so the first unshuffled name is always
+  // the class defined last, which field pools leave out; see `BuildTypePool`.
+  std::shuffle(class_names_.begin() + 1, class_names_.end(), gen.rng_);
 }
 
 // Some heuristic numbers used when formatting generated code. These heuristics
@@ -2209,7 +2240,7 @@ auto SourceGen::GenerateInlineFunctionDef(ClassGenState& state,
     params.push_back({.name = param, .type = type.name});
     consumers.push_back(type.consumer);
   }
-  llvm::StringRef return_type = state.GetProducedType().name;
+  llvm::StringRef return_type = state.GetInlineReturnType().name;
 
   os << indent << "// TODO: make better comment text\n";
   os << indent << (IsCpp() ? "static auto " : "fn ") << name << "(";
