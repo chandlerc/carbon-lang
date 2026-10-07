@@ -509,7 +509,6 @@ TEST_P(GenApiFileDenseDeclsParamsTest, OneClassWithBodies) {
 // values through `Make`.
 static auto InlineBodiesParams() -> SourceGen::DenseDeclParams {
   return {.class_params = {.inline_function_defs = 3,
-                           .max_body_locals = 4,
                            .inline_getters = 2,
                            .inline_predicates = 2,
                            .inline_forwarders = 2}};
@@ -540,7 +539,8 @@ TEST_P(GenApiFileDenseDeclsParamsTest, LargeInlineBodies) {
                        .private_method_decls = 0,
                        .private_field_decls = 4,
                        .inline_function_defs = 8,
-                       .max_body_locals = 12}};
+                       .inline_body_sizes = {{.statements = 20, .weight = 1},
+                                             {.statements = 60, .weight = 1}}}};
   EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 24));
   EXPECT_TRUE(TestCompile(
       GetParam(), SourceGen(GetParam()).GenApiFileDenseDecls(3000, params)));
@@ -555,8 +555,7 @@ TEST_P(GenApiFileDenseDeclsParamsTest, ManyFieldsToMake) {
                        .private_function_decls = 0,
                        .private_method_decls = 0,
                        .private_field_decls = 24,
-                       .inline_function_defs = 2,
-                       .max_body_locals = 3}};
+                       .inline_function_defs = 2}};
   EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 24));
   EXPECT_TRUE(TestCompile(
       GetParam(), SourceGen(GetParam()).GenApiFileDenseDecls(3000, params)));
@@ -594,7 +593,8 @@ TEST(SourceGenTest, GenApiFileDenseDeclsInlineBodiesCppCompiles) {
                        .private_method_decls = 0,
                        .private_field_decls = 4,
                        .inline_function_defs = 8,
-                       .max_body_locals = 12}};
+                       .inline_body_sizes = {{.statements = 20, .weight = 1},
+                                             {.statements = 60, .weight = 1}}}};
   for (int _ : llvm::seq(8)) {
     SourceGen gen(SourceGen::Language::Cpp);
     EXPECT_TRUE(TestCompile(SourceGen::Language::Cpp,
@@ -605,7 +605,7 @@ TEST(SourceGenTest, GenApiFileDenseDeclsInlineBodiesCppCompiles) {
 // Every declared function and method also has an out-of-line definition.
 TEST_P(GenApiFileDenseDeclsParamsTest, OutOfLineDefs) {
   SourceGen::DenseDeclParams params = {
-      .class_params = {.inline_function_defs = 2, .max_body_locals = 3},
+      .class_params = {.inline_function_defs = 2},
       .define_decls_out_of_line = true};
   EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 16));
   EXPECT_TRUE(TestCompile(
@@ -636,7 +636,8 @@ TEST_P(GenApiFileDenseDeclsParamsTest, OutOfLineDefsAndLargerBodies) {
                        .private_method_decls = 4,
                        .private_field_decls = 6,
                        .inline_function_defs = 4,
-                       .max_body_locals = 8},
+                       .inline_body_sizes = {{.statements = 13, .weight = 1},
+                                             {.statements = 23, .weight = 1}}},
       .define_decls_out_of_line = true};
   EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 24));
   EXPECT_TRUE(TestCompile(
@@ -698,12 +699,10 @@ TEST(SourceGenTest, GenApiFileDenseDeclsOutOfLineDefsCompile) {
 TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
   llvm::SmallVector<SourceGen::DenseDeclParams, 0> param_set;
   param_set.push_back({.class_params = {.inline_function_defs = 1,
-                                        .max_body_locals = 3,
                                         .inline_getters = 1,
                                         .inline_predicates = 1,
                                         .inline_forwarders = 1}});
   param_set.push_back({.class_params = {.inline_function_defs = 1,
-                                        .max_body_locals = 3,
                                         .inline_getters = 1,
                                         .inline_predicates = 1,
                                         .inline_forwarders = 1},

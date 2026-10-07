@@ -69,6 +69,14 @@ class SourceGen {
     int max_params = 4;
   };
 
+  // A body size in a histogram of body sizes, with its weight. `statements`
+  // counts the statements beyond the three that every body has: an
+  // accumulator, a statement reading the parameters, and the final `return`.
+  struct BodySizeWeight {
+    int statements;
+    int weight;
+  };
+
   // Parameters used to generate a class in a generated file.
   //
   // Currently, this uses a fixed number of each kind of declaration, with
@@ -97,9 +105,20 @@ class SourceGen {
     int inline_function_defs = 0;
     FunctionDeclParams inline_function_decl_params = {.max_params = 4};
 
-    // The maximum number of local variables in each computation. The counts are
-    // evenly distributed over `[0, max_body_locals]`.
-    int max_body_locals = 4;
+    // The histogram of sizes of those functions' bodies. A file's bodies follow
+    // it as closely as their number allows.
+    //
+    // The default weights are per mille of the function bodies with more than
+    // one statement defined in classes in the headers that a sample of the
+    // Carbon toolchain's, LLVM's, and Clang's implementation files include, in
+    // buckets of their statement counts. Each size is a bucket's median, less
+    // the three statements that every generated body has. The 68% of those
+    // bodies that have two or three statements get no more statements.
+    llvm::SmallVector<BodySizeWeight> inline_body_sizes = {
+        {.statements = 0, .weight = 678}, {.statements = 1, .weight = 231},
+        {.statements = 4, .weight = 54},  {.statements = 8, .weight = 19},
+        {.statements = 13, .weight = 9},  {.statements = 23, .weight = 9},
+    };
 
     // The number of public methods to define inline that return a field. Each
     // one returns a field of its own, in addition to `private_field_decls`.
@@ -237,14 +256,6 @@ class SourceGen {
     // shuffled references, and when there are more type references than
     // declared, include repeated references.
     int declared_types_weight = 30;
-  };
-
-  // A body size in a histogram of body sizes, with its weight. `statements`
-  // counts the statements beyond the three that every body has: an
-  // accumulator, a statement reading the parameters, and the final `return`.
-  struct BodySizeWeight {
-    int statements;
-    int weight;
   };
 
   // Parameters used to generate a file with dense declarations.
@@ -395,8 +406,7 @@ class SourceGen {
     llvm::StringRef type;
   };
 
-  // A declaration's signature, for emitting its out-of-line definition, and
-  // the index of the definition's body plan.
+  // A function's signature, and the index of its body's plan.
   struct FunctionSig {
     llvm::StringRef name;
     bool is_method;
@@ -423,13 +433,14 @@ class SourceGen {
                             bool is_private, bool is_method, int param_count,
                             llvm::StringRef indent, llvm::raw_ostream& os,
                             FunctionSig* captured = nullptr) -> void;
+  auto GenerateBody(ClassGenState& state, const FunctionSig& sig,
+                    llvm::StringRef indent, llvm::raw_ostream& os) -> void;
   auto GenerateOutOfLineDef(ClassGenState& state, llvm::StringRef class_name,
                             const FunctionSig& sig, llvm::raw_ostream& os)
       -> void;
   auto GenerateInlineFunctionDef(ClassGenState& state, llvm::StringRef name,
-                                 int param_count, int local_count,
-                                 llvm::StringRef indent, llvm::raw_ostream& os)
-      -> void;
+                                 int param_count, llvm::StringRef indent,
+                                 llvm::raw_ostream& os) -> void;
   auto GenerateGetter(llvm::StringRef name, TypedName field,
                       llvm::raw_ostream& os) -> void;
   auto GeneratePredicate(llvm::StringRef name, TypedName field,
