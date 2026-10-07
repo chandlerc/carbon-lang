@@ -286,6 +286,26 @@ static auto ImplFileParams() -> SourceGen::DenseDeclParams {
   return params;
 }
 
+// Parameters for the realistic header pattern, which models a typical API file.
+// Its classes define about two thirds of their member functions inline, and
+// the mix of inline definitions approximates the inline definitions in the
+// Carbon toolchain's, LLVM's, and Clang's headers.
+static auto RealisticHeaderParams() -> SourceGen::DenseDeclParams {
+  SourceGen::DenseDeclParams params;
+  params.class_params = {.public_function_decls = 0,
+                         .public_method_decls = 2,
+                         .private_function_decls = 0,
+                         .private_method_decls = 0,
+                         .private_field_decls = 3,
+                         .inline_function_defs = 2,
+                         .inline_function_decl_params = {.max_params = 2},
+                         .inline_getters = 2,
+                         .inline_predicates = 1,
+                         .inline_forwarders = 2};
+  params.free_function_decls_per_class = 1;
+  return params;
+}
+
 // Benchmark on multiple files of the same size but with different source code
 // in order to avoid branch prediction perfectly learning a particular file's
 // structure and shape, and to get closer to a cache-cold benchmark number which
@@ -409,6 +429,11 @@ static auto BM_CompileImplFile(benchmark::State& state) -> void {
   RunApiFileBenchmark<L, P, M>(state, ImplFileParams());
 }
 
+template <Lang L, Phase P, Mode M = Mode::InProcess>
+static auto BM_CompileApiFileRealisticHeader(benchmark::State& state) -> void {
+  RunApiFileBenchmark<L, P, M>(state, RealisticHeaderParams());
+}
+
 // A thin wrapper for the subprocess benchmarks: they reuse the shared
 // implementation above, but register under their own (terser) name rather than
 // spelling out `Mode::Subprocess` at each registration.
@@ -417,8 +442,8 @@ static auto BM_CompileExecApiFileDenseDecls(benchmark::State& state) -> void {
   BM_CompileApiFileDenseDecls<L, P, Mode::Subprocess>(state);
 }
 
-// Applies the range configuration of the dense declarations benchmarks:
-// 256-line test cases through 256k-line test cases.
+// Applies the range configuration of the dense declarations and realistic
+// header benchmarks: 256-line test cases through 256k-line test cases.
 static auto ConfigureCompileBenchmark(benchmark::Benchmark* b) -> void {
   b->RangeMultiplier(4)->Range(256, static_cast<int64_t>(256 * 1024));
 }
@@ -474,6 +499,19 @@ BENCHMARK(BM_CompileImplFile<Lang::Cpp, Phase::Lex>)
     ->Apply(ConfigureImplFileBenchmark);
 BENCHMARK(BM_CompileImplFile<Lang::Cpp, Phase::Check>)
     ->Apply(ConfigureImplFileBenchmark);
+
+// In-process benchmarks of the realistic header pattern.
+BENCHMARK(BM_CompileApiFileRealisticHeader<Lang::Carbon, Phase::Lex>)
+    ->Apply(ConfigureCompileBenchmark);
+BENCHMARK(BM_CompileApiFileRealisticHeader<Lang::Carbon, Phase::Parse>)
+    ->Apply(ConfigureCompileBenchmark);
+BENCHMARK(BM_CompileApiFileRealisticHeader<Lang::Carbon, Phase::Check>)
+    ->Apply(ConfigureCompileBenchmark);
+
+BENCHMARK(BM_CompileApiFileRealisticHeader<Lang::Cpp, Phase::Lex>)
+    ->Apply(ConfigureCompileBenchmark);
+BENCHMARK(BM_CompileApiFileRealisticHeader<Lang::Cpp, Phase::Check>)
+    ->Apply(ConfigureCompileBenchmark);
 
 }  // namespace
 }  // namespace Carbon::Testing

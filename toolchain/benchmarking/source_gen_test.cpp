@@ -583,6 +583,25 @@ TEST_P(GenApiFileDenseDeclsParamsTest, ManyForwarders) {
       GetParam(), SourceGen(GetParam()).GenApiFileDenseDecls(3000, params)));
 }
 
+// The realistic header shape.
+TEST_P(GenApiFileDenseDeclsParamsTest, RealisticHeaderShape) {
+  SourceGen::DenseDeclParams params = {
+      .class_params = {.public_function_decls = 0,
+                       .public_method_decls = 2,
+                       .private_function_decls = 0,
+                       .private_method_decls = 0,
+                       .private_field_decls = 3,
+                       .inline_function_defs = 2,
+                       .inline_function_decl_params = {.max_params = 2},
+                       .inline_getters = 2,
+                       .inline_predicates = 1,
+                       .inline_forwarders = 2},
+      .free_function_decls_per_class = 1};
+  EXPECT_THAT(GetParam(), GeneratesSeedIndependentSize(3000, params, 24));
+  EXPECT_TRUE(TestCompile(
+      GetParam(), SourceGen(GetParam()).GenApiFileDenseDecls(3000, params)));
+}
+
 // Locals and parameters draw from the same identifiers of each length, and C++
 // rejects a local that redeclares a parameter. Whether a local could do so
 // depends on the shuffle, so compile many seeds.
@@ -775,6 +794,19 @@ TEST(SourceGenTest, GenApiFileDenseDeclsLineTargetAccuracy) {
                         .private_field_decls = 4},
        .define_decls_out_of_line = true,
        .free_function_decls_per_class = 2});
+  // The realistic header shape.
+  param_set.push_back(
+      {.class_params = {.public_function_decls = 0,
+                        .public_method_decls = 2,
+                        .private_function_decls = 0,
+                        .private_method_decls = 0,
+                        .private_field_decls = 3,
+                        .inline_function_defs = 2,
+                        .inline_function_decl_params = {.max_params = 2},
+                        .inline_getters = 2,
+                        .inline_predicates = 1,
+                        .inline_forwarders = 2},
+       .free_function_decls_per_class = 1});
 
   constexpr int TargetLines = 20000;
   for (const SourceGen::DenseDeclParams& params : param_set) {
