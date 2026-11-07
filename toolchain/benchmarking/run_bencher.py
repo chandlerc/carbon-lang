@@ -29,6 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(_REPO_ROOT))
 from toolchain.benchmarking.bencher_suites import (  # noqa: E402
     MEASURE_UNITS,
+    PR_THRESHOLDS,
     SUITES,
     TRUNK_THRESHOLDS,
     SuiteSpec,
@@ -39,8 +40,19 @@ from toolchain.benchmarking.bencher_suites import (  # noqa: E402
 # Safety bound per report to stay well below Bencher Cloud's 65,535/day limit.
 MAX_METRICS_PER_REPORT = 500
 MAX_BENCHMARK_NAME_LEN = 256
+MAX_BMF_FILE_BYTES = 1024 * 1024
 # Maximum page size accepted by `bencher measure list --per-page`.
 _MEASURE_PAGE_SIZE = 255
+
+# Bazel targets whose changes affect the benchmarking harness itself and
+# therefore select all configured suites on pull requests.
+_RUN_ALL_TARGETS = frozenset(
+    {
+        "//...",
+        "//toolchain/benchmarking:run_bencher",
+        "//toolchain/benchmarking:run_bencher_test",
+    }
+)
 
 # Restrict unprefixed Google Benchmark names to `BM_...` identifiers, optional
 # `<Enum::Value, N>` template arguments, and `/arg` segments.
@@ -59,6 +71,24 @@ _BENCHER_IGNORE_SUFFIXES = (
 
 class BmfValidationError(ValueError):
     """Raised when a BMF JSON payload fails structural or allowlist checks."""
+
+
+def select_suites(
+    suites: Iterable[SuiteSpec],
+    targets_file: Optional[Path] = None,
+) -> list[SuiteSpec]:
+    """Filters `suites` to those matching labels in `targets_file`."""
+    selected = list(suites)
+    if targets_file is None:
+        return selected
+    targets = {
+        line.strip().lstrip("@")
+        for line in targets_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    if targets & _RUN_ALL_TARGETS:
+        return selected
+    return [s for s in selected if s.label in targets]
 
 
 def build_bench_runner_cmd(
@@ -205,9 +235,15 @@ def _write_github_output(
 
 
 def _run_suites(parsed_args: argparse.Namespace) -> int:
-    """Builds and runs configured suites and writes merged BMF JSON."""
+    """Builds and runs matched suites and writes merged BMF JSON."""
     tier = Tier(parsed_args.tier)
-    labels = [s.label for s in SUITES]
+    matched = select_suites(SUITES, targets_file=parsed_args.targets_file)
+    if not matched:
+        print("No configured benchmark suites matched.", file=sys.stderr)
+        _write_github_output(parsed_args.github_output, has_benchmarks=False)
+        return 0
+
+    labels = [s.label for s in matched]
     build_cmd = [str(_REPO_ROOT / "scripts" / "run_bazel.py")]
     if parsed_args.ci:
         build_cmd.extend(["--attempts=5", "--jobs-on-last-attempt=4"])
@@ -218,7 +254,7 @@ def _run_suites(parsed_args: argparse.Namespace) -> int:
     subprocess.run(build_cmd, cwd=_REPO_ROOT, check=True)
 
     payloads: list[dict[str, Any]] = []
-    for suite in SUITES:
+    for suite in matched:
         cmd = build_bench_runner_cmd(_REPO_ROOT, suite, tier)
         proc = subprocess.run(
             cmd,
@@ -232,7 +268,7 @@ def _run_suites(parsed_args: argparse.Namespace) -> int:
             {f"{suite.benchmark_prefix}{k}": v for k, v in raw_bmf.items()}
         )
 
-    merged, metric_count = merge_bmf_payloads(payloads, suites=SUITES)
+    merged, metric_count = merge_bmf_payloads(payloads, suites=matched)
     parsed_args.output.parent.mkdir(parents=True, exist_ok=True)
     parsed_args.output.write_text(
         json.dumps(merged, indent=2, allow_nan=False) + "\n",
@@ -244,6 +280,49 @@ def _run_suites(parsed_args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     _write_github_output(parsed_args.github_output, has_benchmarks=True)
+    return 0
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Rejects JSON objects containing duplicate keys."""
+    obj: dict[str, Any] = {}
+    for k, v in pairs:
+        if k in obj:
+            raise BmfValidationError(f"Duplicate JSON key: {k!r}")
+        obj[k] = v
+    return obj
+
+
+def _validate_file(path: Path) -> int:
+    """Validates an existing BMF JSON file."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise BmfValidationError(f"Not a regular file: {path}")
+        with path.open("rb") as f:
+            raw_bytes = f.read(MAX_BMF_FILE_BYTES + 1)
+        if len(raw_bytes) > MAX_BMF_FILE_BYTES:
+            raise BmfValidationError(
+                f"BMF file exceeds {MAX_BMF_FILE_BYTES} bytes."
+            )
+        data = json.loads(
+            raw_bytes.decode("utf-8"),
+            object_pairs_hook=_no_duplicate_keys,
+        )
+        metric_count = validate_bmf(data)
+    except (
+        OSError,
+        UnicodeDecodeError,
+        RecursionError,
+        json.JSONDecodeError,
+        BmfValidationError,
+    ) as exc:
+        print(f"BMF validation failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(
+        f"Validated {len(data)} benchmarks ({metric_count} metrics) in {path}.",
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -332,6 +411,11 @@ def parse_args(args: Optional[list[str]] = None) -> argparse.Namespace:
         help="Output path for merged BMF JSON.",
     )
     run_p.add_argument(
+        "--targets-file",
+        type=Path,
+        help="Optional file of impacted Bazel target labels to intersect.",
+    )
+    run_p.add_argument(
         "--ci",
         action="store_true",
         help="Enable CI retry flags when building with `run_bazel.py`.",
@@ -342,9 +426,22 @@ def parse_args(args: Optional[list[str]] = None) -> argparse.Namespace:
         help="Optional `$GITHUB_OUTPUT` file for `has_benchmarks`.",
     )
 
-    subparsers.add_parser(
+    val_p = subparsers.add_parser(
+        "validate", help="Validate an existing BMF JSON file."
+    )
+    val_p.add_argument(
+        "file", type=Path, help="Path to the BMF JSON file to validate."
+    )
+
+    thresh_p = subparsers.add_parser(
         "threshold-args",
         help="Print `bencher run` threshold CLI arguments (one per line).",
+    )
+    thresh_p.add_argument(
+        "--mode",
+        choices=["pr", "trunk"],
+        default="trunk",
+        help="Threshold profile to emit.",
     )
 
     sync_p = subparsers.add_parser(
@@ -364,8 +461,11 @@ def main(args: Optional[list[str]] = None) -> int:
     parsed_args = parse_args(args=args)
     if parsed_args.subcommand == "run":
         return _run_suites(parsed_args)
+    if parsed_args.subcommand == "validate":
+        return _validate_file(parsed_args.file)
     if parsed_args.subcommand == "threshold-args":
-        for arg in format_threshold_args(TRUNK_THRESHOLDS):
+        specs = PR_THRESHOLDS if parsed_args.mode == "pr" else TRUNK_THRESHOLDS
+        for arg in format_threshold_args(specs):
             print(arg)
         return 0
     if parsed_args.subcommand == "sync-measures":

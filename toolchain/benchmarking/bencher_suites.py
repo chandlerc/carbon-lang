@@ -142,9 +142,9 @@ SUITES: tuple[SuiteSpec, ...] = (
 )
 
 # TODO: Adding new features to the `Core` prelude or SemIR representations can
-# inherently increase `Mem*` usage without being an unintended regression.
-# Monitor whether 1% `Mem*` alerts are too noisy in routine prelude development
-# and adjust these boundaries if needed.
+# inherently increase `Mem*` usage without being an unintended regression. PR
+# alerts are non-blocking, so monitor whether 1% `Mem*` PR comments are too
+# noisy in routine prelude development and adjust these boundaries if needed.
 _MEM_THRESHOLDS: tuple[ThresholdSpec, ...] = tuple(
     ThresholdSpec(
         measure=metric,
@@ -154,6 +154,19 @@ _MEM_THRESHOLDS: tuple[ThresholdSpec, ...] = tuple(
         upper_boundary=0.01,
     )
     for metric in PRELUDE_MEM_METRICS
+)
+
+# Pull request thresholds flag clear (>15%) timing regressions and (>1%)
+# deterministic memory increases early while avoiding shared-runner noise.
+PR_THRESHOLDS: tuple[ThresholdSpec, ...] = (
+    ThresholdSpec(
+        measure="latency",
+        test="percentage",
+        min_sample_size=5,
+        max_sample_size=32,
+        upper_boundary=0.15,
+    ),
+    *_MEM_THRESHOLDS,
 )
 
 # `trunk` and `nightly` thresholds use a rolling t-test window to track smaller

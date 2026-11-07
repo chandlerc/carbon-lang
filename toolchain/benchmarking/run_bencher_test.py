@@ -115,6 +115,51 @@ class BencherSuitesTest(unittest.TestCase):
 
 
 class RunBencherTest(unittest.TestCase):
+    def test_suite_selection_and_empty_targets_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            targets_path = Path(tmp) / "targets"
+            out_path = Path(tmp) / "bmf.json"
+            gh_out = Path(tmp) / "github_output"
+
+            # Unrelated targets match nothing and skip invoking Bazel.
+            targets_path.write_text("//common:map_test\n//scripts:no_op_test\n")
+            with mock.patch("subprocess.run") as mock_run:
+                rc = run_bencher.main(
+                    [
+                        "run",
+                        "--targets-file",
+                        str(targets_path),
+                        "--output",
+                        str(out_path),
+                        "--github-output",
+                        str(gh_out),
+                    ]
+                )
+                self.assertEqual(rc, 0)
+                mock_run.assert_not_called()
+            self.assertFalse(out_path.exists())
+            self.assertEqual(
+                gh_out.read_text(encoding="utf-8"), "has_benchmarks=false\n"
+            )
+
+            # Exact target (including `@@//` canonical labels) matches 1 suite.
+            targets_path.write_text(
+                "@@//toolchain/benchmarking:prelude_benchmark\n"
+            )
+            matched = run_bencher.select_suites(
+                SUITES, targets_file=targets_path
+            )
+            self.assertEqual(
+                [s.target_name for s in matched], ["prelude_benchmark"]
+            )
+
+            # Harness changes (`:run_bencher`) select all configured suites.
+            targets_path.write_text("//toolchain/benchmarking:run_bencher\n")
+            self.assertEqual(
+                run_bencher.select_suites(SUITES, targets_file=targets_path),
+                list(SUITES),
+            )
+
     def test_build_bench_runner_cmd_allowlist_flags(self) -> None:
         by_name = {s.target_name: s for s in SUITES}
         repo = Path("/repo")
@@ -269,7 +314,42 @@ class RunBencherTest(unittest.TestCase):
                 gh_out.read_text(encoding="utf-8"), "has_benchmarks=true\n"
             )
 
-    def test_trunk_threshold_args(self) -> None:
+    def test_validate_cli_rejects_malformed_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            for idx, bad_text in enumerate(
+                (
+                    '{"compile_benchmark::BM_Foo": '
+                    '{"latency": {"value": NaN}}}',
+                    '{"compile_benchmark::BM_Foo": '
+                    '{"latency": {"value": Infinity}}}',
+                    '{"compile_benchmark::BM_Foo": {"latency": {"value": 1}}, '
+                    '"compile_benchmark::BM_Foo": {"latency": {"value": 2}}}',
+                )
+            ):
+                bad = tmp_dir / f"bad_{idx}.json"
+                bad.write_text(bad_text, encoding="utf-8")
+                self.assertEqual(
+                    run_bencher.main(["validate", str(bad)]), 1, bad_text
+                )
+
+            good = tmp_dir / "good.json"
+            good.write_text(
+                json.dumps(
+                    {"compile_benchmark::BM_Foo": {"latency": {"value": 42.0}}}
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(run_bencher.main(["validate", str(good)]), 0)
+
+            link = tmp_dir / "symlink.json"
+            link.symlink_to(good)
+            self.assertEqual(run_bencher.main(["validate", str(link)]), 1)
+
+    def test_threshold_args_profiles(self) -> None:
+        pr_args = run_bencher.format_threshold_args(
+            bencher_suites.PR_THRESHOLDS
+        )
         trunk_args = run_bencher.format_threshold_args(
             bencher_suites.TRUNK_THRESHOLDS
         )
@@ -281,12 +361,23 @@ class RunBencherTest(unittest.TestCase):
             "--threshold-max-sample-size",
             "--threshold-upper-boundary",
         ):
+            self.assertEqual(pr_args.count(flag), expected_count)
             self.assertEqual(trunk_args.count(flag), expected_count)
+        self.assertEqual(
+            pr_args[:4],
+            [
+                "--threshold-measure",
+                "latency",
+                "--threshold-test",
+                "percentage",
+            ],
+        )
         self.assertEqual(
             trunk_args[:4],
             ["--threshold-measure", "latency", "--threshold-test", "t_test"],
         )
         for mem_metric in PRELUDE_MEM_METRICS:
+            self.assertIn(mem_metric, pr_args)
             self.assertIn(mem_metric, trunk_args)
 
     def test_sync_measure_units(self) -> None:

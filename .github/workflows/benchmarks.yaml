@@ -7,6 +7,8 @@ name: Benchmarks
 on:
   push:
     branches: [trunk]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
   # Chain nightly benchmarks directly after `Nightly Release` finishes so there
   # is only a single nightly cron schedule, no runner contention with the
   # release build, and benchmarks run on the exact release tag commit.
@@ -28,23 +30,27 @@ on:
 
 permissions:
   contents: read # For actions/checkout.
+  pull-requests: read # For dorny/paths-filter to read pull requests.
 
 jobs:
   benchmark:
     name: Benchmark (${{ matrix.tier }}, ${{ matrix.runner }})
     if: |
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_repository.full_name == github.repository &&
-       github.event.workflow_run.head_branch == 'trunk' &&
-       github.event.workflow_run.event != 'pull_request')
-    # Coalesce rapid pushes on `trunk` per runner without canceling an
-    # in-progress benchmark measurement.
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.head_branch == 'trunk' &&
+        github.event.workflow_run.event != 'pull_request')) &&
+      (github.event_name != 'pull_request' ||
+       github.event.action != 'labeled' ||
+       github.event.label.name == 'benchmark')
+    # Cancel superseded runs on a PR (`refs/pull/<N>/merge`), while coalescing
+    # rapid pushes on `trunk` without canceling an in-progress measurement.
     concurrency:
       group:
         ${{ github.workflow }}-${{ github.event_name }}-${{ matrix.runner }}-${{
         github.ref }}
-      cancel-in-progress: false
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -60,6 +66,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       BMF_FILE: ${{ runner.temp }}/bmf-${{ matrix.runner }}.json
+      TARGETS_FILE: ${{ runner.temp }}/targets
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -109,18 +116,25 @@ jobs:
           persist-credentials: false
 
       - id: filter
-        if: github.event_name == 'push'
+        if: |
+          github.event_name == 'push' ||
+          (github.event_name == 'pull_request' &&
+           !contains(github.event.pull_request.labels.*.name, 'benchmark'))
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             has_code:
               - '!{**/*.md,LICENSE,CODEOWNERS,.git*}'
+            bench_workflows:
+              - '.github/workflows/benchmarks*.yaml'
 
       - name: Set up remote cache access
         id: cache-setup
         if: steps.filter.outputs.has_code != 'false'
         env:
-          REMOTE_CACHE_KEY: ${{ secrets.CARBON_BUILDS_GITHUB }}
+          REMOTE_CACHE_KEY:
+            ${{ (github.event_name != 'pull_request' &&
+            secrets.CARBON_BUILDS_GITHUB) || '' }}
         run: |
           if [[ -n "$REMOTE_CACHE_KEY" ]]; then
             echo "$REMOTE_CACHE_KEY" | base64 -d > "$HOME/remote_cache_key.json"
@@ -138,6 +152,18 @@ jobs:
           remote_cache_upload:
             ${{ steps.cache-setup.outputs.remote_cache_upload }}
 
+      - name: Compute impacted pull request targets
+        if: |
+          github.event_name == 'pull_request' &&
+          steps.filter.outputs.has_code == 'true' &&
+          steps.filter.outputs.bench_workflows != 'true' &&
+          !contains(github.event.pull_request.labels.*.name, 'benchmark')
+        env:
+          GIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 origin "$GIT_BASE_SHA"
+          ./scripts/target_determinator.py "$GIT_BASE_SHA" > "$TARGETS_FILE"
+
       - name: Run benchmarks
         id: run-bencher
         if: steps.filter.outputs.has_code != 'false'
@@ -147,18 +173,39 @@ jobs:
           BAZEL_USE_CPP_ONLY_TOOLCHAIN: 1
           BENCH_TIER: ${{ matrix.tier }}
         run: |
+          target_args=()
+          if [[ -f "$TARGETS_FILE" ]]; then
+            target_args+=("--targets-file=$TARGETS_FILE")
+          fi
           ./toolchain/benchmarking/run_bencher.py run \
             --ci \
             --tier="$BENCH_TIER" \
             --output="$BMF_FILE" \
-            --github-output="$GITHUB_OUTPUT"
+            --github-output="$GITHUB_OUTPUT" \
+            "${target_args[@]}"
+
+      # Pull requests run without secrets; upload BMF JSON as a workflow
+      # artifact for `benchmarks_report.yaml` to validate and report to Bencher.
+      - name: Upload BMF artifact for pull request report
+        if:
+          github.event_name == 'pull_request' &&
+          steps.run-bencher.outputs.has_benchmarks == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bencher-bmf-${{ matrix.runner }}
+          path: ${{ env.BMF_FILE }}
+          retention-days: 5
 
       - name: Install Bencher CLI
-        if: steps.run-bencher.outputs.has_benchmarks == 'true'
+        if:
+          github.event_name != 'pull_request' &&
+          steps.run-bencher.outputs.has_benchmarks == 'true'
         uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
 
       - name: Upload results to Bencher
-        if: steps.run-bencher.outputs.has_benchmarks == 'true'
+        if:
+          github.event_name != 'pull_request' &&
+          steps.run-bencher.outputs.has_benchmarks == 'true'
         env:
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
           BENCH_TIER: ${{ matrix.tier }}
